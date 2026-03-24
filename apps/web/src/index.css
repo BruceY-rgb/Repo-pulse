@@ -1,0 +1,170 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* GitHub-inspired Dark Theme with X-style accents */
+    --background: 220 13% 8%;
+    --foreground: 210 20% 96%;
+    --card: 220 13% 10%;
+    --card-foreground: 210 20% 96%;
+    --popover: 220 13% 10%;
+    --popover-foreground: 210 20% 96%;
+    --primary: 16 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 13% 16%;
+    --secondary-foreground: 210 20% 96%;
+    --muted: 220 13% 16%;
+    --muted-foreground: 215 14% 60%;
+    --accent: 16 100% 50%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 20%;
+    --input: 220 13% 16%;
+    --ring: 16 100% 50%;
+    --radius: 0.75rem;
+    
+    /* Custom colors */
+    --github-bg: #0d1117;
+    --github-surface: #161b22;
+    --github-border: #30363d;
+    --github-text: #c9d1d9;
+    --github-text-secondary: #8b949e;
+    --github-accent: #ff4d00;
+    --github-accent-hover: #e04400;
+    --github-success: #238636;
+    --github-warning: #f0883e;
+    --github-danger: #da3633;
+    --github-info: #58a6ff;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  html {
+    scroll-behavior: smooth;
+  }
+  
+  body {
+    @apply bg-[var(--github-bg)] text-[var(--github-text)] font-sans antialiased;
+    font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  }
+}
+
+@layer utilities {
+  /* GitHub-style scrollbar */
+  .scrollbar-github::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  .scrollbar-github::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .scrollbar-github::-webkit-scrollbar-thumb {
+    background: var(--github-border);
+    border-radius: 4px;
+  }
+  
+  .scrollbar-github::-webkit-scrollbar-thumb:hover {
+    background: #484f58;
+  }
+  
+  /* X-style hover effects */
+  .hover-x {
+    @apply transition-all duration-200 ease-out;
+  }
+  
+  .hover-x:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+  
+  /* GitHub card style */
+  .card-github {
+    @apply bg-[var(--github-surface)] border border-[var(--github-border)] rounded-xl;
+  }
+  
+  /* X-style button */
+  .btn-x {
+    @apply rounded-full font-semibold transition-all duration-200;
+  }
+  
+  .btn-x-primary {
+    @apply btn-x bg-[var(--github-accent)] text-white hover:bg-[var(--github-accent-hover)];
+  }
+  
+  .btn-x-secondary {
+    @apply btn-x bg-transparent border border-[var(--github-border)] text-[var(--github-text)] hover:bg-white/5;
+  }
+  
+  /* Code block style */
+  .code-block {
+    @apply bg-[#161b22] rounded-lg p-4 font-mono text-sm overflow-x-auto;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+  }
+  
+  /* Status badges */
+  .badge-success {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#23863633] text-[#3fb950];
+  }
+  
+  .badge-warning {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#f0883e33] text-[#f0883e];
+  }
+  
+  .badge-danger {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#da363333] text-[#f85149];
+  }
+  
+  .badge-info {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#58a6ff33] text-[#58a6ff];
+  }
+  
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-gradient-to-r from-[#ff4d00] to-[#ff8c00] bg-clip-text text-transparent;
+  }
+  
+  /* Glow effect */
+  .glow-orange {
+    box-shadow: 0 0 20px rgba(255, 77, 0, 0.3);
+  }
+  
+  /* Animation utilities */
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+  
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+  }
+  
+  /* Glassmorphism */
+  .glass {
+    @apply bg-white/5 backdrop-blur-md border border-white/10;
+  }
+}
+
+/* Custom selection color */
+::selection {
+  background: rgba(255, 77, 0, 0.3);
+}
+
+/* Focus styles */
+*:focus-visible {
+  outline: 2px solid var(--github-accent);
+  outline-offset: 2px;
+}

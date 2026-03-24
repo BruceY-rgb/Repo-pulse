@@ -1,0 +1,27 @@
+{
+  "name": "repo-pulse",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:web": "turbo run dev --filter=@repo-pulse/web",
+    "dev:api": "turbo run dev --filter=@repo-pulse/api",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:migrate": "turbo run db:migrate --filter=@repo-pulse/database",
+    "db:generate": "turbo run db:generate --filter=@repo-pulse/database",
+    "db:studio": "turbo run db:studio --filter=@repo-pulse/database"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3",
+    "typescript": "~5.9.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.4"
+}

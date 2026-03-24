@@ -1,0 +1,18 @@
+// 确保TypeScript编译器遵循项目规则，尤其是路径映射部分，这样编辑器才能正确解析@/导入
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./tsconfig.app.json" // 引用应用代码的TS配置，react组件，能操作DOM
+    },
+    {
+      "path": "./tsconfig.node.json" // 引用Node端代码的TS配置，vite配置文件，运行在node.js
+    }
+  ],
+  "compilerOptions": {
+    "baseUrl": ".", // 基础路径：以当前tsconfig.json所在目录为根
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}
