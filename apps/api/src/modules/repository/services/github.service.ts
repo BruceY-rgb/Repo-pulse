@@ -2,16 +2,39 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
 
-interface GithubRepoResponse {
+export interface GithubRepoResponse {
   id: number;
   name: string;
   full_name: string;
   html_url: string;
   default_branch: string;
+  description: string | null;
+  stargazers_count: number;
+  language: string | null;
   owner: {
     login: string;
     avatar_url: string;
   };
+}
+
+export interface GithubSearchResult {
+  id: number;
+  name: string;
+  full_name: string;
+  html_url: string;
+  description: string | null;
+  stargazers_count: number;
+  language: string | null;
+  owner: {
+    login: string;
+    avatar_url: string;
+  };
+}
+
+interface GithubSearchResponse {
+  total_count: number;
+  incomplete_results: boolean;
+  items: GithubSearchResult[];
 }
 
 interface GithubWebhookConfig {
@@ -138,5 +161,97 @@ export class GithubService {
       this.logger.error(`Failed to fetch issues for ${owner}/${repo}`, error);
       return [];
     }
+  }
+
+  /**
+   * 搜索公开仓库
+   */
+  async searchRepositories(query: string, page = 1, perPage = 20): Promise<GithubSearchResult[]> {
+    try {
+      const response = await this.client.get<GithubSearchResponse>('/search/repositories', {
+        params: {
+          q: query,
+          page,
+          per_page: perPage,
+          sort: 'stars',
+          order: 'desc',
+        },
+      });
+      return response.data.items;
+    } catch (error) {
+      this.logger.error(`Failed to search repositories: ${query}`, error);
+      return [];
+    }
+  }
+
+  /**
+   * 获取用户作为 contributor 的仓库
+   * 需要用户的 GitHub OAuth token
+   */
+  async getUserRepositories(userToken: string): Promise<GithubRepoResponse[]> {
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const userClient = axios.create({
+          baseURL: this.apiUrl,
+          headers: {
+            Accept: 'application/vnd.github.v3+json',
+            Authorization: `Bearer ${userToken}`,
+          },
+        });
+        const response = await userClient.get<GithubRepoResponse[]>('/user/repos', {
+          params: {
+            sort: 'updated',
+            per_page: 100,
+            // 获取用户拥有、合作、组织成员的仓库
+            affiliation: 'owner,collaborator,organization_member',
+          },
+        });
+        return response.data;
+      } catch (error) {
+        this.logger.warn(`Attempt ${attempt}/${maxRetries} failed: Failed to fetch user repositories`);
+        if (attempt === maxRetries) {
+          this.logger.error('Failed to fetch user repositories', error);
+          return [];
+        }
+        // 等待后重试
+        await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+      }
+    }
+    return [];
+  }
+
+  /**
+   * 获取用户 star 过的仓库
+   * 需要用户的 GitHub OAuth token
+   */
+  async getStarredRepos(userToken: string): Promise<GithubRepoResponse[]> {
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const userClient = axios.create({
+          baseURL: this.apiUrl,
+          headers: {
+            Accept: 'application/vnd.github.v3+json',
+            Authorization: `Bearer ${userToken}`,
+          },
+        });
+        const response = await userClient.get<GithubRepoResponse[]>('/user/starred', {
+          params: {
+            per_page: 100,
+          },
+        });
+        return response.data;
+      } catch (error) {
+        this.logger.warn(`Attempt ${attempt}/${maxRetries} failed: Failed to fetch starred repositories`);
+        if (attempt === maxRetries) {
+          this.logger.error('Failed to fetch starred repositories', error);
+          return [];
+        }
+        // 等待后重试
+        await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+      }
+    }
+    return [];
   }
 }

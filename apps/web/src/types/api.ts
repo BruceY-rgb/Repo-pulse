@@ -72,3 +72,21 @@ export interface Event {
   rawPayload: Record<string, unknown> | null;
   createdAt: string;
 }
+
+/**
+ * 搜索结果仓库（用于添加仓库时的搜索选择）
+ */
+export interface SearchResult {
+  id: number;
+  name: string;
+  fullName: string;
+  description: string | null;
+  htmlUrl: string;
+  stargazersCount: number;
+  language: string | null;
+  owner: {
+    login: string;
+    avatarUrl: string;
+  };
+  platform: Platform;
+}

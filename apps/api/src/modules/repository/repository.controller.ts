@@ -26,7 +26,7 @@ export class RepositoryController {
   @Post()
   @ApiOperation({ summary: '添加仓库' })
   async create(@Req() req: Request, @Body() dto: CreateRepositoryDto) {
-    const userId = (req.user as { id: string }).id;
+    const userId = (req.user as { sub: string }).sub;
     const repository = await this.repositoryService.create(userId, dto);
     return repository;
   }
@@ -34,11 +34,37 @@ export class RepositoryController {
   @Get()
   @ApiOperation({ summary: '获取仓库列表' })
   async findAll(@Req() req: Request, @Query() query: RepositoryQueryDto) {
-    const userId = (req.user as { id: string }).id;
+    const userId = (req.user as { sub: string }).sub;
     const repositories = await this.repositoryService.findAll(userId, {
       isActive: query.isActive,
     });
     return repositories;
+  }
+
+  @Get('search')
+  @ApiOperation({ summary: '搜索公开仓库' })
+  async search(@Query('q') query: string, @Query('page') page?: number) {
+    if (!query) {
+      return [];
+    }
+    const results = await this.repositoryService.searchRepositories(query, page);
+    return results;
+  }
+
+  @Get('my-repos')
+  @ApiOperation({ summary: '获取用户作为 contributor 的仓库' })
+  async getMyRepos(@Req() req: Request) {
+    const userId = (req.user as { sub: string }).sub;
+    const results = await this.repositoryService.searchUserRepositories(userId);
+    return results;
+  }
+
+  @Get('starred')
+  @ApiOperation({ summary: '获取用户 star 的仓库' })
+  async getStarred(@Req() req: Request) {
+    const userId = (req.user as { sub: string }).sub;
+    const results = await this.repositoryService.searchStarredRepositories(userId);
+    return results;
   }
 
   @Get(':id')

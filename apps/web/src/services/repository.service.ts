@@ -1,5 +1,5 @@
 import { apiClient } from './api-client';
-import type { ApiResponse, Repository, CreateRepositoryDto, PaginatedResponse, Event } from '@/types/api';
+import type { ApiResponse, Repository, CreateRepositoryDto, PaginatedResponse, Event, SearchResult } from '@/types/api';
 
 export const repositoryService = {
   async getAll(isActive?: boolean): Promise<Repository[]> {
@@ -46,6 +46,32 @@ export const repositoryService = {
         ...options,
       },
     });
+    return data.data;
+  },
+
+  /**
+   * 搜索公开仓库
+   */
+  async search(query: string): Promise<SearchResult[]> {
+    const { data } = await apiClient.get<ApiResponse<SearchResult[]>>('/repositories/search', {
+      params: { q: query },
+    });
+    return data.data;
+  },
+
+  /**
+   * 获取用户作为 contributor 的仓库
+   */
+  async getMyRepos(): Promise<SearchResult[]> {
+    const { data } = await apiClient.get<ApiResponse<SearchResult[]>>('/repositories/my-repos');
+    return data.data;
+  },
+
+  /**
+   * 获取用户 star 的仓库
+   */
+  async getStarred(): Promise<SearchResult[]> {
+    const { data } = await apiClient.get<ApiResponse<SearchResult[]>>('/repositories/starred');
     return data.data;
   },
 };

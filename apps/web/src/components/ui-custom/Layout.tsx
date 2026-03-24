@@ -1,17 +1,16 @@
 import { Outlet, useLocation, Link } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  GitBranch, 
-  Brain, 
-  Bell, 
-  FileText, 
+import {
+  LayoutDashboard,
+  GitBranch,
+  Brain,
+  Bell,
+  FileText,
   Settings,
   Search,
   Plus,
   Menu,
   X,
   Github,
-  Zap
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

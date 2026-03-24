@@ -210,6 +210,83 @@ export class RepositoryService {
     });
   }
 
+  /**
+   * 搜索公开仓库
+   */
+  async searchRepositories(query: string, page = 1) {
+    const results = await this.githubService.searchRepositories(query, page);
+    return results.map((repo) => ({
+      id: repo.id,
+      name: repo.name,
+      fullName: repo.full_name,
+      description: repo.description,
+      htmlUrl: repo.html_url,
+      stargazersCount: repo.stargazers_count,
+      language: repo.language,
+      owner: {
+        login: repo.owner.login,
+        avatarUrl: repo.owner.avatar_url,
+      },
+      platform: 'GITHUB' as const,
+    }));
+  }
+
+  /**
+   * 获取用户作为 contributor 的仓库（从 GitHub API）
+   * 使用配置中的 GITHUB_TOKEN 来获取当前登录用户的仓库
+   */
+  async searchUserRepositories(userId: string) {
+    const githubToken = this.configService.get<string>('GITHUB_TOKEN');
+    if (!githubToken) {
+      this.logger.warn('GITHUB_TOKEN 未配置，无法获取用户仓库');
+      return [];
+    }
+
+    const repos = await this.githubService.getUserRepositories(githubToken);
+    return repos.map((repo) => ({
+      id: repo.id,
+      name: repo.name,
+      fullName: repo.full_name,
+      description: repo.description,
+      htmlUrl: repo.html_url,
+      stargazersCount: repo.stargazers_count,
+      language: repo.language,
+      owner: {
+        login: repo.owner.login,
+        avatarUrl: repo.owner.avatar_url,
+      },
+      platform: 'GITHUB' as const,
+    }));
+  }
+
+  /**
+   * 获取用户 star 的仓库（从 GitHub API）
+   * 使用配置中的 GITHUB_TOKEN 来获取当前登录用户 starred 的仓库
+   */
+  async searchStarredRepositories(userId: string) {
+    const githubToken = this.configService.get<string>('GITHUB_TOKEN');
+    if (!githubToken) {
+      this.logger.warn('GITHUB_TOKEN 未配置，无法获取 starred 仓库');
+      return [];
+    }
+
+    const repos = await this.githubService.getStarredRepos(githubToken);
+    return repos.map((repo) => ({
+      id: repo.id,
+      name: repo.name,
+      fullName: repo.full_name,
+      description: repo.description,
+      htmlUrl: repo.html_url,
+      stargazersCount: repo.stargazers_count,
+      language: repo.language,
+      owner: {
+        login: repo.owner.login,
+        avatarUrl: repo.owner.avatar_url,
+      },
+      platform: 'GITHUB' as const,
+    }));
+  }
+
   private generateWebhookSecret(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let secret = '';
