@@ -404,7 +404,7 @@ export function Repositories() {
               onClick={() => setActiveFilter(filter.value)}
               className={`whitespace-nowrap text-xs ${
                 activeFilter === filter.value
-                  ? 'bg-[var(--github-accent)] text-white hover:bg-[var(--github-accent-hover)]'
+                  ? 'bg-orange-500 text-white hover:bg-orange-600'
                   : 'border-[var(--github-border)] text-[var(--github-text-secondary)] hover:text-white hover:bg-white/5'
               }`}
             >
@@ -419,20 +419,20 @@ export function Repositories() {
         <TabsList className="bg-[var(--github-surface)] border border-[var(--github-border)]">
           <TabsTrigger
             value="monitored"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+            className="data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:border-orange-500"
           >
             已监控 ({repositories.length})
           </TabsTrigger>
           <TabsTrigger
             value="myrepos"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+            className="data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:border-orange-500"
             onClick={loadMyRepos}
           >
             我的仓库
           </TabsTrigger>
           <TabsTrigger
             value="starred"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+            className="data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:border-orange-500"
             onClick={loadStarredRepos}
           >
             Starred

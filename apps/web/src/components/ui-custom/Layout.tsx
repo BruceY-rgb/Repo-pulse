@@ -62,8 +62,8 @@ export function Layout() {
                   key={item.path}
                   to={item.path}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-                    isActive 
-                      ? 'bg-[var(--github-accent)]/10 text-[var(--github-accent)] border border-[var(--github-accent)]/20' 
+                    isActive
+                      ? 'bg-orange-500/10 text-orange-500 border border-orange-500/20'
                       : 'text-[var(--github-text-secondary)] hover:bg-white/5 hover:text-[var(--github-text)]'
                   }`}
                 >
