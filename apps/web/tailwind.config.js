@@ -54,6 +54,11 @@ module.exports = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // 警告色调
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
+        },
         // 侧边栏专用色调(后台、仪表盘项目)
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",

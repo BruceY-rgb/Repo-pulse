@@ -116,6 +116,8 @@ export class AuthController {
       email: string;
       displayName: string;
       avatar: string;
+      githubAccessToken: string;
+      githubRefreshToken: string;
     };
 
     const tokens = await this.authService.handleGithubAuth(profile);

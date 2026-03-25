@@ -76,6 +76,8 @@ export class AuthService {
     email: string | undefined;
     displayName: string;
     avatar: string;
+    githubAccessToken: string;
+    githubRefreshToken: string;
   }) {
     // 如果 email 为空，抛出错误
     if (!profile.email) {
@@ -91,8 +93,16 @@ export class AuthService {
         name: profile.displayName || 'GitHub User',
         avatar: profile.avatar,
         githubId: profile.id,
+        githubAccessToken: profile.githubAccessToken,
+        githubRefreshToken: profile.githubRefreshToken,
       });
       this.logger.log(`New user created via GitHub OAuth: ${profile.email}`);
+    } else {
+      // 更新已存在用户的 token
+      user = await this.userService.update(user.id, {
+        githubAccessToken: profile.githubAccessToken,
+        githubRefreshToken: profile.githubRefreshToken,
+      });
     }
 
     return this.generateTokens({

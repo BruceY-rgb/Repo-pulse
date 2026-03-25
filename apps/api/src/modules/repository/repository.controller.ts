@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { RepositoryService } from './repository.service';
+import { UserService } from '../user/user.service';
 import { CreateRepositoryDto, UpdateRepositoryDto, RepositoryQueryDto } from './dto/repository.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Request } from 'express';
@@ -21,7 +22,10 @@ import { Request } from 'express';
 @UseGuards(AuthGuard('jwt'))
 @Controller('repositories')
 export class RepositoryController {
-  constructor(private readonly repositoryService: RepositoryService) {}
+  constructor(
+    private readonly repositoryService: RepositoryService,
+    private readonly userService: UserService,
+  ) {}
 
   @Post()
   @ApiOperation({ summary: '添加仓库' })
@@ -55,7 +59,14 @@ export class RepositoryController {
   @ApiOperation({ summary: '获取用户作为 contributor 的仓库' })
   async getMyRepos(@Req() req: Request) {
     const userId = (req.user as { sub: string }).sub;
-    const results = await this.repositoryService.searchUserRepositories(userId);
+    const user = await this.userService.findById(userId);
+    if (!user?.githubAccessToken) {
+      return { error: '未绑定 GitHub 账号，请重新登录' };
+    }
+    const results = await this.repositoryService.searchUserRepositories(
+      user.githubAccessToken,
+      user.githubRefreshToken,
+    );
     return results;
   }
 
@@ -63,7 +74,14 @@ export class RepositoryController {
   @ApiOperation({ summary: '获取用户 star 的仓库' })
   async getStarred(@Req() req: Request) {
     const userId = (req.user as { sub: string }).sub;
-    const results = await this.repositoryService.searchStarredRepositories(userId);
+    const user = await this.userService.findById(userId);
+    if (!user?.githubAccessToken) {
+      return { error: '未绑定 GitHub 账号，请重新登录' };
+    }
+    const results = await this.repositoryService.searchStarredRepositories(
+      user.githubAccessToken,
+      user.githubRefreshToken,
+    );
     return results;
   }
 

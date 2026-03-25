@@ -239,13 +239,19 @@ export class RepositoryService {
   /**
    * 获取用户自己的 GitHub 仓库列表（使用用户 OAuth Token）
    */
-  async searchUserRepositories(userOAuthToken: string) {
+  async searchUserRepositories(
+    userOAuthToken: string,
+    userRefreshToken?: string,
+  ) {
     if (!userOAuthToken) {
       this.logger.warn('未提供用户 OAuth Token，无法获取用户仓库');
       return [];
     }
 
-    const repos = await this.githubService.getUserRepositories(userOAuthToken);
+    const repos = await this.githubService.getUserRepositories(
+      userOAuthToken,
+      userRefreshToken,
+    );
     return repos.map((repo) => ({
       id: repo.id,
       name: repo.name,
@@ -265,13 +271,19 @@ export class RepositoryService {
   /**
    * 获取用户 Star 的仓库（使用用户 OAuth Token）
    */
-  async searchStarredRepositories(userOAuthToken: string) {
+  async searchStarredRepositories(
+    userOAuthToken: string,
+    userRefreshToken?: string,
+  ) {
     if (!userOAuthToken) {
       this.logger.warn('未提供用户 OAuth Token，无法获取 starred 仓库');
       return [];
     }
 
-    const repos = await this.githubService.getStarredRepos(userOAuthToken);
+    const repos = await this.githubService.getStarredRepos(
+      userOAuthToken,
+      userRefreshToken,
+    );
     return repos.map((repo) => ({
       id: repo.id,
       name: repo.name,

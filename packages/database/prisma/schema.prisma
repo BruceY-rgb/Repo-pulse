@@ -98,17 +98,19 @@ enum ReportStatus {
 // ===== Models =====
 
 model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
-  name          String
-  avatar        String?
-  passwordHash  String?
-  githubId      String?  @unique
-  gitlabId      String?  @unique
-  role          Role     @default(MEMBER)
-  preferences   Json     @default("{}")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  email              String   @unique
+  name               String
+  avatar             String?
+  passwordHash       String?
+  githubId           String?  @unique
+  githubAccessToken  String?
+  githubRefreshToken String?
+  gitlabId           String?  @unique
+  role               Role     @default(MEMBER)
+  preferences        Json     @default("{}")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   repositories  UserRepository[]
   approvals     Approval[]

@@ -25,6 +25,8 @@ export class UserService {
     name: string;
     avatar?: string;
     githubId?: string;
+    githubAccessToken?: string;
+    githubRefreshToken?: string;
     password?: string;
   }): Promise<User> {
     const createData: any = {
@@ -32,6 +34,8 @@ export class UserService {
       name: data.name,
       avatar: data.avatar,
       githubId: data.githubId,
+      githubAccessToken: data.githubAccessToken,
+      githubRefreshToken: data.githubRefreshToken,
     };
 
     if (data.password) {
@@ -39,6 +43,35 @@ export class UserService {
     }
 
     return prisma.user.create({ data: createData });
+  }
+
+  async update(
+    id: string,
+    data: {
+      githubAccessToken?: string;
+      githubRefreshToken?: string;
+      name?: string;
+      avatar?: string;
+    },
+  ): Promise<User> {
+    const updateData: any = {};
+    if (data.githubAccessToken !== undefined) {
+      updateData.githubAccessToken = data.githubAccessToken;
+    }
+    if (data.githubRefreshToken !== undefined) {
+      updateData.githubRefreshToken = data.githubRefreshToken;
+    }
+    if (data.name !== undefined) {
+      updateData.name = data.name;
+    }
+    if (data.avatar !== undefined) {
+      updateData.avatar = data.avatar;
+    }
+
+    return prisma.user.update({
+      where: { id },
+      data: updateData,
+    });
   }
 
   async updatePreferences(userId: string, preferences: Record<string, unknown>): Promise<User> {

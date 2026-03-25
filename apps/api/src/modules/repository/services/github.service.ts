@@ -236,7 +236,10 @@ export class GithubService {
     }
   }
 
-  async getUserRepositories(userToken: string): Promise<GithubRepoResponse[]> {
+  async getUserRepositories(
+    userToken: string,
+    refreshToken?: string,
+  ): Promise<GithubRepoResponse[]> {
     const maxRetries = 3;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -249,7 +252,19 @@ export class GithubService {
           },
         });
         return response.data;
-      } catch (error) {
+      } catch (error: any) {
+        // 如果是 401 错误且有 refreshToken，尝试刷新
+        if (error.response?.status === 401 && refreshToken && attempt === 1) {
+          try {
+            const newTokens = await this.refreshGithubToken(refreshToken);
+            userToken = newTokens.accessToken;
+            refreshToken = newTokens.refreshToken;
+            this.logger.log('GitHub token 刷新成功，重试请求');
+            continue;
+          } catch (refreshError) {
+            this.logger.error('GitHub token 刷新失败，用户需要重新授权');
+          }
+        }
         this.logger.warn(`Attempt ${attempt}/${maxRetries} failed: getUserRepositories`);
         if (attempt === maxRetries) {
           this.logger.error('Failed to fetch user repositories after max retries', error);
@@ -261,7 +276,10 @@ export class GithubService {
     return [];
   }
 
-  async getStarredRepos(userToken: string): Promise<GithubRepoResponse[]> {
+  async getStarredRepos(
+    userToken: string,
+    refreshToken?: string,
+  ): Promise<GithubRepoResponse[]> {
     const maxRetries = 3;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -270,7 +288,19 @@ export class GithubService {
           params: { per_page: 100 },
         });
         return response.data;
-      } catch (error) {
+      } catch (error: any) {
+        // 如果是 401 错误且有 refreshToken，尝试刷新
+        if (error.response?.status === 401 && refreshToken && attempt === 1) {
+          try {
+            const newTokens = await this.refreshGithubToken(refreshToken);
+            userToken = newTokens.accessToken;
+            refreshToken = newTokens.refreshToken;
+            this.logger.log('GitHub token 刷新成功，重试请求');
+            continue;
+          } catch (refreshError) {
+            this.logger.error('GitHub token 刷新失败，用户需要重新授权');
+          }
+        }
         this.logger.warn(`Attempt ${attempt}/${maxRetries} failed: getStarredRepos`);
         if (attempt === maxRetries) {
           this.logger.error('Failed to fetch starred repositories after max retries', error);
@@ -280,5 +310,19 @@ export class GithubService {
       }
     }
     return [];
+  }
+
+  /**
+   * 刷新 GitHub OAuth Token
+   * 注意：GitHub OAuth 不支持 refresh_token 刷新，需要用户重新授权
+   * 此方法保留用于将来支持其他 OAuth 提供商
+   */
+  async refreshGithubToken(
+    refreshToken: string,
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    // GitHub OAuth App 不支持 refresh token 刷新
+    // 需要用户重新进行 OAuth 授权
+    this.logger.warn('GitHub OAuth 不支持 token 刷新，请引导用户重新授权');
+    throw new Error('GitHub OAuth 不支持 token 刷新，请重新登录授权');
   }
 }
