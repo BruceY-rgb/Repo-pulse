@@ -1,97 +1,59 @@
-# Repo-Pulse - Claude Code 项目指导
+# Repo-Pulse - Claude Code 执行契约与项目指导
 
-## 项目概述
-Repo-Pulse 是一个 AI 驱动的代码仓库监控与管理平台。
-- 前端: React 19 + TypeScript 5.9 + Vite 7.2 + shadcn/ui + Tailwind CSS 3.4
-- 后端: NestJS + TypeScript + Prisma + PostgreSQL + Redis
-- 桌面端: Electron
-- AI: 多模型抽象层 (OpenAI/Claude/Ollama)
-- Monorepo: pnpm workspaces + Turborepo
+> **警告**：本文档是 Claude Code 在本仓库执行任务的最高优先级契约。每次启动新会话或接受新指令时，**必须**首先阅读本文档。
 
-## 项目结构
-- `apps/web/` - React 前端应用
-- `apps/api/` - NestJS 后端 API
-- `apps/desktop/` - Electron 桌面端（待搭建）
-- `packages/shared/` - 前后端共享类型和工具
-- `packages/database/` - Prisma 数据库包
-- `packages/ai-sdk/` - AI 多模型抽象层
-- `docs/` - 项目文档
+## 1. 项目架构与上下文
+Repo-Pulse 是一个 AI 驱动的代码仓库监控与管理平台，采用 Monorepo 架构。
+- **前端** (`apps/web`): React 19 + TypeScript 5.9 + Vite 7.2 + shadcn/ui + Tailwind CSS 3.4
+- **后端** (`apps/api`): NestJS + TypeScript + Prisma + PostgreSQL + Redis
+- **共享包**: `@repo-pulse/shared` (类型/常量), `@repo-pulse/database` (Prisma schema), `@repo-pulse/ai-sdk` (AI 模型适配层)
+- **包管理器**: pnpm workspaces + Turborepo
 
-## 关键约束
+## 2. 渐进式开发步长与执行约束
+为了防止 AI 产生幻觉、偏离目标或引入难以追踪的 Bug，你必须遵循以下“微步长”执行原则：
 
-### 前端开发
-- **必须遵守** `/docs/frontend-style-guide.md` 中的所有规则
-- 颜色仅使用 CSS 变量（--background, --primary, --github-* 等），禁止硬编码
-- 组件优先使用 shadcn/ui (New York 风格)，图标统一使用 lucide-react
-- 样式只用 Tailwind CSS 类，禁止内联 style 和 !important
-- 动画微交互用 Tailwind transition (duration-200 ease-out)，复杂动画用 GSAP
-- 所有文案走 i18n 系统，中文优先
-- 状态管理: 服务端状态用 TanStack Query，客户端状态用 Zustand
-- 暗黑主题为唯一主题，不需要亮色模式切换
+### 2.1 执行步长定义
+每次接受用户的宏观任务时，你必须将其拆解为以下微步长，并在每一步完成后向用户汇报或独立提交：
+1. **分析阶段**：读取相关代码文件，明确依赖关系。
+2. **计划阶段**：列出具体要修改的文件和预期的变更内容。
+3. **执行阶段**：修改代码。**每次只修改一个逻辑相关的功能点（如：只改一个接口，或只改一个组件）**。
+4. **验证阶段**：运行对应的类型检查、Lint 或测试。
+5. **提交阶段**：使用明确的 Conventional Commits 规范进行 git commit。
 
-### 后端开发
-- NestJS 模块化架构，每个功能领域一个模块
-- Prisma 作为唯一 ORM，Schema 定义在 packages/database/
-- 异步任务通过 BullMQ 队列处理
-- API 统一响应格式: `{ code: number, data: T, message: string, timestamp: string }`
-- 全局守卫: JwtAuthGuard, RolesGuard, ThrottlerGuard
-- 全局管道: ValidationPipe (基于 class-validator + class-transformer)
-- 日志: NestJS Logger + Winston
+### 2.2 验证要求
+在修改任何代码后，**严禁**直接进入下一个开发任务。你必须通过 `shell` 运行以下命令验证你的修改：
+- 如果修改了前端：运行 `pnpm --filter web typecheck` 和 `pnpm --filter web lint`
+- 如果修改了后端：运行 `pnpm --filter api typecheck` 和 `pnpm --filter api lint`
+- 如果修改了共享包：必须运行 `pnpm build` 确保依赖该包的应用能够正常编译。
 
-### 数据库
-- PostgreSQL 为主数据库，Redis 用于缓存和消息队列
-- 所有模型 id 使用 cuid()
-- 时间字段统一 createdAt/updatedAt
-- 关联使用 Prisma 关系定义，禁止原生 SQL 拼接
+## 3. 严格的工程规范
 
-### AI 服务
-- 通过 packages/ai-sdk 统一接口调用
-- 支持 OpenAI (GPT-4o)、Anthropic (Claude Sonnet)、Ollama (本地模型)
-- 支持模型切换和 fallback 链
-- 流式输出通过 SSE (Server-Sent Events)
-- 分析结果结构化存储到 AIAnalysis 表
+### 3.1 前端约束
+- **样式红线**：**绝对禁止**在 Tailwind 中使用硬编码的十六进制颜色（如 `bg-[#0d1117]`）或未在规范中定义的任意值。**只能使用** `frontend-style-guide.md` 中定义的 CSS 变量（如 `bg-background`, `text-primary`）。
+- **组件复用**：优先使用 `apps/web/src/components/ui/` 下已有的 shadcn 组件。如果需要新组件，先确认是否可以通过组合现有组件实现。
+- **状态管理**：服务端数据获取**必须**使用 TanStack Query (`useQuery`, `useMutation`)，严禁在业务组件中使用 `useEffect` 配合 `useState` 拉取数据。全局 UI 状态使用 Zustand。
+- **类型安全**：前后端交互的 Payload 和 Response 接口**必须**从 `@repo-pulse/shared` 中导入，禁止在前端重新定义后端已有类型，严禁使用 `any`。
 
-### 实时通信
-- WebSocket 使用 Socket.io，通过 NestJS Gateway
-- 事件类型: event:new, analysis:progress, analysis:complete, approval:new, notification:new, dashboard:update
-- SSE 用于 AI 流式输出: GET /ai/stream/:taskId
+### 3.2 后端约束
+- **配置分离**：明确区分 `FRONTEND_URL` 和 `API_URL`。处理 OAuth 回调或生成发给前端的链接时，必须使用 `FRONTEND_URL`。
+- **安全优先**：处理认证时，优先使用 HttpOnly Cookie 存储敏感 Token。处理 Webhook 时，必须基于原始请求体（Raw Body）进行签名验证，并按仓库粒度获取 Secret。
+- **数据库操作**：所有数据库交互必须通过 Prisma Client。更新 Schema (`packages/database/prisma/schema.prisma`) 后，**必须**运行 `pnpm db:generate` 和 `pnpm db:migrate`。
 
-### 代码规范
-- TypeScript strict mode，禁止 any
-- 中文优先的 i18n
-- 函数式组件 + hooks，禁止 class 组件
-- 文件命名: kebab-case 文件名，PascalCase 组件/类名，camelCase 函数/变量名
-- 导入路径使用 @ 别名 (如 @/components, @/lib/utils)
+## 4. Agent 调用时机与分工
 
-## 常用命令
-- `pnpm dev` - 启动所有开发服务
-- `pnpm dev:web` - 仅启动前端 (Vite dev server)
-- `pnpm dev:api` - 仅启动后端 (NestJS)
-- `pnpm build` - 构建所有包
-- `pnpm db:migrate` - 运行数据库迁移
-- `pnpm db:generate` - 生成 Prisma Client
-- `pnpm db:studio` - 打开 Prisma Studio
-- `pnpm lint` - ESLint 代码检查
-- `pnpm test` - 运行测试 (Vitest 前端, Jest 后端)
-- `pnpm typecheck` - TypeScript 类型检查
+项目中配置了多种专用 Agent（位于 `.claude/agents/`），在处理复杂任务时，你应该明确自己的角色边界，并在需要时建议用户切换 Agent：
 
-## Agent 使用指南
-项目配置了 18 个专用 agent（位于 .claude/agents/），适用场景：
-- 前端开发 → frontend-developer, ui-designer
-- 后端开发 → backend-developer, api-designer
-- 数据库 → sql-pro
-- 全栈 → fullstack-developer, typescript-pro
-- WebSocket → websocket-engineer
-- 桌面端 → electron-pro
-- AI 工程 → ai-engineer, llm-architect, prompt-engineer
-- 调试 → debugger, error-detective
-- 测试 → test-automator
-- 代码审查 → code-reviewer
-- 性能优化 → performance-engineer
-- 安全审计 → security-auditor
+| Agent 名称 | 触发时机 / 适用场景 |
+| :--- | :--- |
+| `frontend-developer` | 处理 React 组件、Tailwind 样式、TanStack Query 数据流。 |
+| `backend-developer` | 处理 NestJS 控制器、服务逻辑、BullMQ 队列消费者。 |
+| `sql-pro` | 涉及复杂的 Prisma Schema 设计、数据库迁移或慢查询优化。 |
+| `websocket-engineer` | 处理 Socket.io Gateway 搭建、事件广播机制、前端实时订阅。 |
+| `ai-engineer` | 开发或优化 `ai-sdk`、调整 Prompt 模板、处理 SSE 流式输出。 |
+| `security-auditor` | 修复 Webhook 验签漏洞、XSS/CSRF 防护、认证流程重构。 |
+| `code-reviewer` | 在完成一个 Phase 的开发后，进行整体代码质量和规范审查。 |
 
-## 文档参考
-- `/docs/frontend-style-guide.md` - 前端样式约束（必读）
-- `/docs/project-plan.md` - 原始项目搭建计划
-- `/docs/project-plan-v2.md` - **最新迭代执行计划 (v2.0)**，包含针对现有架构问题的修复和渐进式开发步骤，**必须优先参考**
-
+## 5. 核心参考文档
+在进行任何实际开发前，你**必须**阅读以下文档以获取具体的业务目标和规范：
+1. `/docs/project-plan-v2.md` - **当前最高优先级的迭代计划**。包含了详细的阶段划分、当前架构缺陷的修复方案以及具体的验收标准。**你必须严格按照该文档的 Phase 顺序执行，不可跳跃。**
+2. `/docs/frontend-style-guide.md` - 前端样式红线和交互规范。

@@ -1,9 +1,8 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD, APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { BullModule } from '@nestjs/bullmq';
-import * as Joi from 'joi';
 import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 import { RepositoryModule } from './modules/repository/repository.module';
@@ -13,25 +12,15 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { HttpExceptionFilter } from './common/filters';
 import { TransformInterceptor, TimeoutInterceptor } from './common/interceptors';
+import { envValidationSchema } from './config/env.validation';
 
 @Module({
   imports: [
-    // Global configuration
+    // Global configuration — 使用统一的 envValidationSchema，避免多处 schema 分裂
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '../../.env',
-      validationSchema: Joi.object({
-        DATABASE_URL: Joi.string().required(),
-        REDIS_URL: Joi.string().default('redis://localhost:6379'),
-        JWT_SECRET: Joi.string().required(),
-        JWT_EXPIRATION: Joi.string().default('7d'),
-        APP_PORT: Joi.number().default(3001),
-        CORS_ORIGIN: Joi.string().default('http://localhost:5173'),
-        GITHUB_TOKEN: Joi.string().allow('').optional(),
-        GITLAB_TOKEN: Joi.string().allow('').optional(),
-        WEBHOOK_SECRET: Joi.string().allow('').optional(),
-        APP_URL: Joi.string().default('http://localhost:3001'),
-      }),
+      validationSchema: envValidationSchema,
     }),
 
     // Rate limiting
@@ -42,11 +31,19 @@ import { TransformInterceptor, TimeoutInterceptor } from './common/interceptors'
       },
     ]),
 
-    // BullMQ
-    BullModule.forRoot({
-      connection: {
-        host: 'localhost',
-        port: 6379,
+    // BullMQ — 从 ConfigService 读取 Redis 连接，避免硬编码
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        const redisUrl = configService.get<string>('REDIS_URL') || 'redis://localhost:6379';
+        const url = new URL(redisUrl);
+        return {
+          connection: {
+            host: url.hostname,
+            port: parseInt(url.port || '6379', 10),
+            password: url.password || undefined,
+          },
+        };
       },
     }),
 
@@ -57,7 +54,7 @@ import { TransformInterceptor, TimeoutInterceptor } from './common/interceptors'
     WebhookModule,
     EventModule,
 
-    // Future modules:
+    // Future modules (uncomment as implemented):
     // AIModule,
     // FilterModule,
     // ApprovalModule,

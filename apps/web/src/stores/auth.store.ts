@@ -9,23 +9,22 @@ interface AuthState {
 
   login: (email: string, password: string) => Promise<void>;
   loginWithGithub: () => void;
-  handleOAuthCallback: (accessToken: string, refreshToken: string) => Promise<void>;
+  handleOAuthCallback: () => Promise<void>;
   fetchUser: () => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  isAuthenticated: !!localStorage.getItem('accessToken'),
+  // 初始状态：不依赖 localStorage，通过 fetchUser 验证 Cookie 是否有效
+  isAuthenticated: false,
   isLoading: false,
 
   login: async (email: string, password: string) => {
     set({ isLoading: true });
     try {
-      const tokens = await authService.login(email, password);
-      localStorage.setItem('accessToken', tokens.accessToken);
-      localStorage.setItem('refreshToken', tokens.refreshToken);
-
+      // 登录后 Token 已写入 HttpOnly Cookie，只需获取用户信息
+      await authService.login(email, password);
       const user = await authService.getMe();
       set({ user, isAuthenticated: true, isLoading: false });
     } catch (error) {
@@ -38,14 +37,25 @@ export const useAuthStore = create<AuthState>((set) => ({
     window.location.href = authService.getGithubAuthUrl();
   },
 
-  handleOAuthCallback: async (accessToken: string, refreshToken: string) => {
-    localStorage.setItem('accessToken', accessToken);
-    localStorage.setItem('refreshToken', refreshToken);
-
-    const user = await authService.getMe();
-    set({ user, isAuthenticated: true });
+  /**
+   * OAuth 回调处理
+   * 后端已将 Token 写入 Cookie 并重定向到 /auth/callback
+   * 前端只需调用 getMe 获取用户信息即可
+   */
+  handleOAuthCallback: async () => {
+    set({ isLoading: true });
+    try {
+      const user = await authService.getMe();
+      set({ user, isAuthenticated: true, isLoading: false });
+    } catch {
+      set({ user: null, isAuthenticated: false, isLoading: false });
+    }
   },
 
+  /**
+   * 验证当前 Cookie 是否有效，并获取用户信息
+   * 在应用初始化时调用，替代原来检查 localStorage 的方式
+   */
   fetchUser: async () => {
     set({ isLoading: true });
     try {
@@ -53,12 +63,11 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ user, isAuthenticated: true, isLoading: false });
     } catch {
       set({ user: null, isAuthenticated: false, isLoading: false });
-      authService.logout();
     }
   },
 
-  logout: () => {
-    authService.logout();
+  logout: async () => {
+    await authService.logout();
     set({ user: null, isAuthenticated: false });
   },
 }));

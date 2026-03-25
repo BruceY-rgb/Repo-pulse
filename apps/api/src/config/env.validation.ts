@@ -9,7 +9,7 @@ export const envValidationSchema = Joi.object({
 
   // JWT
   JWT_SECRET: Joi.string().min(16).required(),
-  JWT_EXPIRATION: Joi.string().default('7d'),
+  JWT_EXPIRATION: Joi.string().default('15m'),
   JWT_REFRESH_EXPIRATION: Joi.string().default('30d'),
 
   // GitHub OAuth
@@ -34,9 +34,10 @@ export const envValidationSchema = Joi.object({
 
   // App
   APP_PORT: Joi.number().default(3001),
-  APP_URL: Joi.string().default('http://localhost:5173'),
-  CORS_ORIGIN: Joi.string().default('http://localhost:5173'),
-  WEBHOOK_SECRET: Joi.string().allow(''),
+  // FRONTEND_URL: 前端应用的访问地址，用于 OAuth 回调重定向和 CORS
+  FRONTEND_URL: Joi.string().uri().default('http://localhost:5173'),
+  // API_URL: 后端 API 的公开访问地址，用于生成 Webhook 回调 URL
+  API_URL: Joi.string().uri().default('http://localhost:3001'),
 
   // Rate Limiting
   THROTTLE_TTL: Joi.number().default(60),

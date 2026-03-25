@@ -8,74 +8,148 @@ import {
   Res,
   HttpCode,
   HttpStatus,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiCookieAuth } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
+import { UserService } from '../user/user.service';
+
+// Cookie 配置常量
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax' as const,
+  path: '/',
+};
+
+const ACCESS_TOKEN_MAX_AGE = 15 * 60 * 1000;        // 15 分钟
+const REFRESH_TOKEN_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 天
 
 @ApiTags('认证')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly userService: UserService,
+  ) {}
 
+  /**
+   * 邮箱密码登录 — Token 写入 HttpOnly Cookie
+   */
   @Post('login')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '邮箱密码登录' })
-  async login(@Body() dto: LoginDto) {
+  async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     const user = await this.authService.validateUser(dto.email, dto.password);
-    return this.authService.generateTokens({
+    const tokens = await this.authService.generateTokens({
       sub: user.id,
       email: user.email,
       role: user.role,
     });
+
+    this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
+
+    // 返回用户基本信息（不含 Token，Token 已在 Cookie 中）
+    return { userId: user.id, email: user.email, name: user.name };
   }
 
+  /**
+   * 刷新 Token — 从 Cookie 读取 Refresh Token，写入新 Token
+   */
   @Post('refresh')
+  @Public()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '刷新 Token' })
-  async refresh(@Body() dto: RefreshTokenDto) {
-    return this.authService.refreshTokens(dto.refreshToken);
+  @ApiOperation({ summary: '刷新 Token（从 Cookie 读取）' })
+  async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const refreshToken = req.cookies?.refresh_token as string | undefined;
+    if (!refreshToken) {
+      throw new UnauthorizedException('未找到 Refresh Token，请重新登录');
+    }
+
+    const tokens = await this.authService.refreshTokens(refreshToken);
+    this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
+
+    return { message: 'Token 已刷新' };
   }
 
+  /**
+   * 登出 — 清除 Cookie
+   */
+  @Post('logout')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '登出，清除 Cookie' })
+  async logout(@Res({ passthrough: true }) res: Response) {
+    res.clearCookie('access_token', { path: '/' });
+    res.clearCookie('refresh_token', { path: '/' });
+    return { message: '已成功登出' };
+  }
+
+  /**
+   * GitHub OAuth 入口
+   */
   @Get('github')
   @Public()
   @UseGuards(AuthGuard('github'))
   @ApiOperation({ summary: 'GitHub OAuth 跳转' })
   githubAuth() {
-    // Passport 会自动重定向到 GitHub
+    // Passport 会自动重定向到 GitHub，无需实现
   }
 
+  /**
+   * GitHub OAuth 回调 — 将 Token 写入 Cookie 后重定向到前端
+   */
   @Get('github/callback')
   @Public()
   @UseGuards(AuthGuard('github'))
   @ApiOperation({ summary: 'GitHub OAuth 回调' })
   async githubCallback(@Req() req: Request, @Res() res: Response) {
-    const user = req.user as {
+    const profile = req.user as {
       id: string;
       email: string;
       displayName: string;
       avatar: string;
     };
-    const tokens = await this.authService.handleGithubAuth(user);
 
-    // 将 token 通过 URL 参数传递给前端
-    const frontendUrl = process.env.APP_URL || 'http://localhost:5173';
-    res.redirect(
-      `${frontendUrl}/auth/callback?accessToken=${tokens.accessToken}&refreshToken=${tokens.refreshToken}`,
-    );
+    const tokens = await this.authService.handleGithubAuth(profile);
+
+    // 将 Token 写入 HttpOnly Cookie
+    this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
+
+    // 重定向到前端，不在 URL 中暴露 Token
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    res.redirect(`${frontendUrl}/auth/callback`);
   }
 
+  /**
+   * 获取当前登录用户信息
+   */
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
+  @ApiCookieAuth('access_token')
   @ApiOperation({ summary: '获取当前用户信息' })
   async me(@CurrentUser() user: { sub: string }) {
-    return this.authService['userService'].findById(user.sub);
+    return this.userService.findById(user.sub);
+  }
+
+  // ─── 私有方法 ────────────────────────────────────────────────────────────────
+
+  private setTokenCookies(res: Response, accessToken: string, refreshToken: string) {
+    res.cookie('access_token', accessToken, {
+      ...COOKIE_OPTIONS,
+      maxAge: ACCESS_TOKEN_MAX_AGE,
+    });
+    res.cookie('refresh_token', refreshToken, {
+      ...COOKIE_OPTIONS,
+      maxAge: REFRESH_TOKEN_MAX_AGE,
+    });
   }
 }

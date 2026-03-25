@@ -1,118 +1,74 @@
-# Repo-Pulse 迭代执行计划 (v2.0)
+# Repo-Pulse 全新迭代执行计划 (v2.0)
 
-> **文档说明**：本计划基于 Repo-Pulse 当前实现状态（Phase 2 部分完成）重新制定。主要针对现有架构的不足、登录体验、Webhook 机制、消息传输和前端交互体验等核心问题提供具体的重构指导和后续渐进式开发步骤。Claude Code 在执行任务时请严格参照本计划和 `CLAUDE.md` 的约束。
+> **文档说明**：本计划是对原有项目的全面梳理与重新规划。基于当前项目的实现现状（Phase 2 尚未闭环），我们发现了诸多架构缺陷与工程规范执行不到位的问题。本计划将提供**粒度极低、约束严格、目标明确**的重构与渐进式开发指南，确保 AI Agent (Claude Code) 能够稳步推进。
 
-## 一、 当前架构问题与重构策略
+## 1. 核心架构问题诊断
 
-基于对当前代码库的分析，项目目前处于 MVP 阶段的基础设施搭建和初期功能实现中，但存在一些阻碍后续扩展的关键架构问题。
+通过对现有代码库的深度审查，我们发现以下四个维度的核心问题，这些问题必须在进入新功能开发前得到彻底解决。
 
-### 1.1 认证与登录体验重构
+### 1.1 认证与安全机制薄弱
+目前前端的认证体系存在严重的安全隐患和体验断层。`api-client.ts` 直接将 Access Token 和 Refresh Token 存储在 `localStorage` 中，极易受到 XSS 攻击。同时，刷新 Token 的逻辑与 Axios 拦截器强耦合，且未处理并发刷新问题。此外，环境变量 `APP_URL` 语义分裂，在后端配置 `env.validation.ts` 中既被用作 API 地址，又被当成前端回调地址，导致 GitHub OAuth 回调重定向混乱。
 
-**当前问题**：
-前端采用传统的 Token + `localStorage` 存储模式，存在 XSS 安全风险；GitHub OAuth 回调重定向地址依赖含糊的环境变量 `APP_URL`；后端通过私有属性获取用户服务，代码不够健壮；缺乏 Token 自动续期机制。
+### 1.2 Webhook 链路未闭环
+`WebhookService` 当前的实现无法支撑多仓库的独立验签。代码中全局使用 `WEBHOOK_SECRET`，而未从请求上下文中提取特定仓库的专属 Secret。更严重的是，签名验证直接使用了 `JSON.stringify(payload)`，由于 NestJS 默认的 `body-parser` 已经解析并可能改变了原始 JSON 格式，这种验签方式在真实环境中必定失败。此外，处理完 Webhook 事件后，后端缺乏向前端推送实时消息的 WebSocket Gateway 机制。
 
-**重构策略**：
-- **安全存储**：将 Access Token 和 Refresh Token 迁移至 `HttpOnly` Cookie 中存储，前端仅在内存中保留用户基本信息状态。
-- **OAuth 流程优化**：前后端分离架构下，明确区分 `FRONTEND_URL` 和 `API_URL` 环境变量。OAuth 登录成功后，后端通过重定向到前端特定的回调路由，并通过 URL 参数或短效授权码交换机制将状态同步给前端。
-- **状态同步**：实现静默刷新机制，利用 Axios 拦截器在 Access Token 过期前自动通过 Refresh Token 续期，提升用户无感体验。
+### 1.3 前端规范执行不到位
+尽管项目中存在 `frontend-style-guide.md`，但实际代码（如 `index.css`）大量违背了规范。全局样式中引入了未授权的 `Montserrat` 字体，且充斥着大量硬编码的十六进制颜色（如 `--github-bg: #0d1117`）和自定义类名（如 `.card-github`, `.btn-x`）。同时，核心页面（如 `Repositories.tsx`）仍然使用原始的 `useState` 和 `useEffect` 进行数据请求，完全没有利用已安装的 `@tanstack/react-query`。
 
-### 1.2 Webhook 与消息传输机制修复
-
-**当前问题**：
-Webhook 验证使用全局 `WEBHOOK_SECRET`，未实现按仓库维度的独立验证；注册 Webhook 时依赖全局 `GITHUB_TOKEN`，未利用用户自身的 OAuth Token；GitHub 签名验证直接使用 `JSON.stringify(payload)`，未保留原始请求体导致验签失败；BullMQ 消费者逻辑不完整；WebSocket 网关缺失。
-
-**重构策略**：
-- **精准验签**：配置 NestJS 中间件以捕获 Webhook 路由的 Raw Body，确保 GitHub HMAC 签名验证的准确性。
-- **仓库隔离**：重构 `WebhookService`，根据请求路径或 Payload 提取仓库标识，使用数据库中存储的该仓库专属 `webhookSecret` 进行验签。
-- **权限修复**：在仓库绑定和 Webhook 注册环节，提取当前用户的 GitHub OAuth Token，以用户身份调用 GitHub API，确保权限范围正确。
-- **实时传输**：引入 `@nestjs/websockets` 和 `socket.io`，建立 `EventGateway`，在 `EventProcessor` 成功处理事件后，向特定频道（如 `repo:{id}`）广播消息。
-
-### 1.3 仓库管理界面体验升级
-
-**当前问题**：
-前端数据获取依赖基础的 `useState` / `useEffect`，缺乏缓存和自动重试；大量硬编码中文文案，违背 i18n 规范；颜色使用未完全遵循语义化 CSS 变量；交互层次单一，缺乏细粒度的反馈状态。
-
-**重构策略**：
-- **状态管理升级**：全面接入 TanStack Query (`@tanstack/react-query`) 处理服务端状态，实现数据的自动缓存、后台刷新和乐观更新。
-- **规范对齐**：彻底清理硬编码文本，接入 `react-i18next`；严格审查 Tailwind 类名，确保仅使用 `frontend-style-guide.md` 中定义的 `--primary`、`--github-*` 等语义化变量。
-- **交互丰富化**：为仓库列表增加骨架屏加载状态；细化同步操作的反馈；引入空状态插画；增加仓库事件流的侧边栏或详情页视图，提升信息获取效率。
+### 1.4 服务层职责边界模糊
+前端的 `repository.service.ts` 和 `event.service.ts` 存在职责重叠，事件获取逻辑被分散在两处。后端的模块间依赖也不够清晰，未能充分利用 Monorepo 架构下 `packages/shared` 的类型共享优势。
 
 ---
 
-## 二、 渐进式开发阶段划分
+## 2. 渐进式执行阶段划分
 
-为确保 Claude Code 能够有序执行，将后续开发任务划分为以下粒度明确的阶段。每个阶段必须独立测试并提交，不可跨阶段混合开发。
+为了确保交付质量，后续开发必须严格按照以下阶段和节点推进。**Agent 在执行时，必须完成当前阶段的所有子任务并通过测试，方可进入下一阶段。**
 
-### Phase 2.1: 基础设施加固与安全修复（当前最高优先级）
+### 阶段一：基础设施加固与重构（预计耗时：3天）
+本阶段的核心目标是清理技术债，修复阻塞核心业务流的底层问题。
 
-本阶段致力于解决阻碍核心链路跑通的底层问题。
+| 任务编号 | 任务名称 | 详细执行要求 | 验收标准 |
+| :--- | :--- | :--- | :--- |
+| **1.1** | 环境变量语义分离 | 在 `.env` 和 `env.validation.ts` 中，废弃 `APP_URL`，明确拆分为 `FRONTEND_URL` 和 `API_URL`。更新 `main.ts` 中的 CORS 配置。 | 配置验证通过，服务正常启动。 |
+| **1.2** | HttpOnly Cookie 改造 | 修改 `AuthController`，在登录和 OAuth 回调时，将 Token 写入 `HttpOnly` Cookie。移除前端 `api-client.ts` 中读取 `localStorage` 的逻辑，开启 `withCredentials: true`。 | 登录后浏览器 Application 面板可见 HttpOnly Cookie，刷新页面保持登录状态。 |
+| **1.3** | Webhook 精准验签 | 在 NestJS 中配置 Raw Body 中间件（如使用 `express.json({ verify: ... })`）。修改 `WebhookService`，根据 Payload 提取仓库外部 ID，查询数据库获取对应的 `webhookSecret` 进行 HMAC SHA256 验签。 | 构造模拟 Webhook 请求，签名验证成功。 |
+| **1.4** | 样式基座清理 | 彻底重写 `index.css`。移除 `Montserrat` 字体，严格使用系统默认字体或 Inter。清理所有非标准的 `--github-*` 变量，仅保留 `frontend-style-guide.md` 中定义的语义化 HSL 变量。 | 界面无样式报错，颜色符合规范。 |
 
-- **任务 1：Raw Body 中间件配置**
-  - 在 `main.ts` 或专属中间件中配置 `express.json({ verify: ... })`，为 `/webhooks/*` 路由保留原始请求体缓冲。
-- **任务 2：Webhook 验签逻辑重构**
-  - 修改 `WebhookService.verifyGithubSignature`，使用 Raw Body 缓冲进行 HMAC SHA256 计算。
-  - 修改 `WebhookService` 逻辑，从请求中提取仓库 ID，查询数据库获取对应的 `webhookSecret` 进行验签。
-- **任务 3：认证流程重构**
-  - 修改 `AuthModule`，在登录和 OAuth 回调中将 Token 写入 `HttpOnly` Cookie。
-  - 增加 `/auth/refresh` 接口的 Cookie 支持。
-  - 梳理 `.env`，明确 `FRONTEND_URL` 和 `API_URL`。
+### 阶段二：实时数据流闭环（预计耗时：4天）
+本阶段的目标是打通从 GitHub/GitLab 事件产生到前端界面实时更新的完整链路。
 
-### Phase 2.2: 实时通信与事件流闭环
+| 任务编号 | 任务名称 | 详细执行要求 | 验收标准 |
+| :--- | :--- | :--- | :--- |
+| **2.1** | WebSocket Gateway 搭建 | 在 `apps/api` 中创建 `EventGateway`，配置 Socket.io。实现基于 JWT 的连接认证，并支持按 `repositoryId` 加入专属 Room。 | 前端可通过 Socket.io 成功连接并订阅特定仓库频道。 |
+| **2.2** | 消息队列联动 | 完善 `EventProcessor`，在成功处理并落库 Webhook 事件后，调用 `EventGateway` 向对应的仓库 Room 广播 `event:new` 消息。 | 触发 Webhook 后，后端日志显示广播成功。 |
+| **2.3** | React Query 迁移 | 重构前端数据层。使用 `useQuery` 替换 `Repositories.tsx` 中的 `useEffect`，实现数据缓存。封装 `useWebSocket` Hook，在收到新事件时调用 `queryClient.invalidateQueries` 刷新列表。 | 界面能自动响应 Webhook 事件并更新列表，无需手动刷新。 |
 
-本阶段目标是让用户能实时看到仓库发生的变更。
+### 阶段三：AI 核心引擎接入（预计耗时：5天）
+本阶段将实现产品的核心差异化价值：对代码变更的智能分析。
 
-- **任务 1：WebSocket 网关搭建**
-  - 创建 `EventGateway`，配置 Socket.io，实现客户端连接认证和频道订阅（基于仓库 ID 或工作空间）。
-- **任务 2：消息队列闭环**
-  - 完善 `EventProcessor`，在成功标准化并存储事件后，调用 `EventGateway` 广播事件更新。
-- **任务 3：前端实时订阅**
-  - 在前端建立 WebSocket 连接管理 Hook (`useWebSocket`)。
-  - 在 Dashboard 和 Repositories 页面监听事件推送，结合 TanStack Query 的 `queryClient.setQueryData` 或 `invalidateQueries` 更新 UI。
+| 任务编号 | 任务名称 | 详细执行要求 | 验收标准 |
+| :--- | :--- | :--- | :--- |
+| **3.1** | AI 抽象层完善 | 在 `packages/ai-sdk` 中实现 OpenAI 和 Anthropic 的标准适配器。定义统一的 Prompt 模板，要求模型输出结构化的风险评估和摘要。 | 单元测试通过，能成功调用大模型 API。 |
+| **3.2** | 异步分析工作流 | 创建 `ai-analysis` BullMQ 队列。当 `EventProcessor` 接收到 `PR_OPENED` 或 `PUSH` 事件时，触发 AI 分析任务。将结果存入 `AIAnalysis` 表。 | PR 事件发生后，数据库中成功生成分析记录。 |
+| **3.3** | 前端流式呈现 | 在后端实现基于 SSE (Server-Sent Events) 的流式输出接口。前端开发 AI Insight 卡片，实现打字机效果展示分析过程。 | 前端可实时看到 AI 生成的摘要和风险提示。 |
 
-### Phase 2.3: 前端交互与体验重塑
+### 阶段四：团队协同与通知（预计耗时：4天）
+本阶段侧重于产品的商业化功能延伸。
 
-本阶段专注于解决用户感知最强的界面问题。
-
-- **任务 1：TanStack Query 迁移**
-  - 重构 `Repositories.tsx`，移除 `useState` / `useEffect`，使用 `useQuery` 和 `useMutation` 管理仓库列表和同步操作。
-- **任务 2：i18n 与样式规范化**
-  - 提取 `Repositories.tsx` 中的所有中文文案至 i18n 资源文件。
-  - 替换所有非语义化的 Tailwind 颜色类，严格遵守 `frontend-style-guide.md`。
-- **任务 3：视图扩展**
-  - 新增仓库详情视图（或抽屉式面板），展示该仓库最近的 Event 列表和同步状态。
-
-### Phase 3: AI 分析引擎（核心业务）
-
-本阶段开始实现产品的核心差异化价值。
-
-- **任务 1：AI SDK 抽象层**
-  - 在 `packages/ai-sdk` 中实现统一接口，支持 OpenAI/Claude API 调用。
-  - 实现基于 Prompt 模板的变更摘要和风险评估逻辑。
-- **任务 2：AI 分析工作流**
-  - 创建 `ai-analysis` BullMQ 队列。
-  - 当 `EventProcessor` 识别到高价值事件（如 PR_OPENED, PUSH）时，触发 AI 分析任务。
-  - 将分析结果结构化存储至 `AIAnalysis` 表。
-- **任务 3：流式输出与前端呈现**
-  - 实现 SSE (Server-Sent Events) 接口，允许前端实时获取 AI 分析的打字机效果。
-  - 在前端开发 AI 洞察卡片组件，展示风险等级、摘要和修复建议。
-
-### Phase 4: 团队协同与高级功能
-
-- **任务 1：过滤与订阅引擎**
-  - 实现 `FilterModule`，允许用户根据关键词、事件类型配置订阅规则。
-- **任务 2：审批工作流**
-  - 实现基于高风险 AI 分析结果的审批拦截机制。
-- **任务 3：多渠道通知**
-  - 接入邮件服务（Nodemailer）和钉钉/飞书 Webhook 机器人，根据用户偏好推送摘要。
+| 任务编号 | 任务名称 | 详细执行要求 | 验收标准 |
+| :--- | :--- | :--- | :--- |
+| **4.1** | 规则引擎实现 | 实现 `FilterModule`，允许用户基于正则表达式、事件类型或 AI 风险等级配置拦截和通知规则。 | 可通过 API 成功创建和触发过滤规则。 |
+| **4.2** | 审批流与拦截 | 针对高风险事件，实现人工审批流程。在界面上提供“通过/拒绝”操作，并记录审批日志。 | 高风险事件被正确标记为“待审批”状态。 |
+| **4.3** | 多渠道通知 | 接入 Nodemailer（邮件）和企业微信/钉钉 Webhook。根据用户偏好，将 AI 摘要和审批请求推送到指定渠道。 | 成功接收到格式化的测试通知。 |
 
 ---
 
-## 三、 给 Claude Code 的执行指导
+## 3. 对 Claude Code 的严格执行约束
 
-当 Claude Code 执行上述任务时，请遵循以下原则：
+为了保证代码质量和架构一致性，Agent 在执行任务时**必须**遵守以下准则：
 
-1. **查阅规范**：在编写任何前端组件前，必须先读取 `/docs/frontend-style-guide.md`，确保颜色、排版和组件使用符合规范。
-2. **渐进式提交**：每个细分任务（如 Phase 2.1 的任务 1）完成后，应进行独立的 Git 提交，并附带清晰的 Commit Message。
-3. **类型安全**：前后端交互必须依赖 `packages/shared` 或约定的类型定义，严禁使用 `any`。
-4. **测试验证**：修改 Webhook 和认证逻辑等核心链路时，应编写或更新对应的单元测试，确保边界条件得到处理。
-5. **日志记录**：在关键的业务节点（如队列消费、AI 调用、Webhook 接收）保留充足的 `Logger` 输出，以便于调试。
+1. **单步提交原则**：每个阶段的每个子任务（如任务 1.1）完成后，必须进行独立的 Git 提交。禁止将多个不相关的修改混在一个 Commit 中。
+2. **测试先行**：在修改核心链路（如 Auth、Webhook 验签）时，必须先编写或更新对应的单元测试（Jest），确保测试覆盖率不下降。
+3. **类型绝对安全**：前后端交互的数据结构必须在 `packages/shared/src/types` 中定义。严禁在代码中使用 `any` 类型。
+4. **禁止过度设计**：严格按照当前阶段的任务描述执行，不要提前实现下一阶段的功能，也不要引入计划外的新依赖库。
+5. **日志与可观测性**：在所有异步任务（BullMQ）、外部 API 调用（GitHub/AI）和异常捕获处，必须使用 NestJS 的 `Logger` 记录详尽的上下文信息。
