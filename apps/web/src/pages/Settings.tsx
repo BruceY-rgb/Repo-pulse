@@ -1,8 +1,8 @@
-import { useState } from 'react';
-import { 
-  User, 
-  Bell, 
-  Shield, 
+import { useState, useEffect } from 'react';
+import {
+  User,
+  Bell,
+  Shield,
   Code,
   Github,
   Key,
@@ -11,9 +11,11 @@ import {
   Slack,
   Save,
   CheckCircle,
-  AlertTriangle
+  AlertTriangle,
+  Brain,
+  Loader2,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,6 +24,9 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { settingsService } from '@/services/settings.service';
+import type { AIProvider, AIConfig } from '@/services/settings.service';
 
 const connectedAccounts = [
   { provider: 'GitHub', username: 'johndoe', connected: true, icon: Github },
@@ -36,6 +41,41 @@ const apiKeys = [
 
 export function Settings() {
   const [saved, setSaved] = useState(false);
+
+  // AI 配置状态
+  const [aiConfig, setAiConfig] = useState<AIConfig>({});
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiSaved, setAiSaved] = useState(false);
+
+  // 加载 AI 配置
+  useEffect(() => {
+    const loadAIConfig = async () => {
+      setAiLoading(true);
+      try {
+        const config = await settingsService.getAIConfig();
+        setAiConfig(config);
+      } catch (error) {
+        console.error('Failed to load AI config:', error);
+      } finally {
+        setAiLoading(false);
+      }
+    };
+    loadAIConfig();
+  }, []);
+
+  const handleSaveAI = async () => {
+    setAiSaving(true);
+    try {
+      await settingsService.updateAIConfig(aiConfig);
+      setAiSaved(true);
+      setTimeout(() => setAiSaved(false), 3000);
+    } catch (error) {
+      console.error('Failed to save AI config:', error);
+    } finally {
+      setAiSaving(false);
+    }
+  };
 
   const handleSave = () => {
     setSaved(true);
@@ -84,12 +124,19 @@ export function Settings() {
             <Code className="w-4 h-4 mr-2" />
             Integrations
           </TabsTrigger>
-          <TabsTrigger 
+          <TabsTrigger
             value="security"
             className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
           >
             <Shield className="w-4 h-4 mr-2" />
             Security
+          </TabsTrigger>
+          <TabsTrigger
+            value="ai"
+            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+          >
+            <Brain className="w-4 h-4 mr-2" />
+            AI
           </TabsTrigger>
         </TabsList>
 
@@ -366,7 +413,157 @@ export function Settings() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* AI Tab */}
+        <TabsContent value="ai" className="mt-4 space-y-4">
+          <Card className="card-github">
+            <CardHeader>
+              <CardTitle className="text-base font-semibold text-white flex items-center gap-2">
+                <Brain className="w-5 h-5" />
+                AI Provider Configuration
+              </CardTitle>
+              <CardDescription className="text-[var(--github-text-secondary)]">
+                Configure your AI provider for code analysis
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {aiLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-[var(--github-accent)]" />
+                </div>
+              ) : (
+                <>
+                  {/* Provider Selection */}
+                  <div className="space-y-2">
+                    <Label htmlFor="aiProvider" className="text-sm text-white">AI Provider</Label>
+                    <Select
+                      value={aiConfig.aiProvider || ''}
+                      onValueChange={(value: AIProvider) => setAiConfig({ ...aiConfig, aiProvider: value })}
+                    >
+                      <SelectTrigger className="bg-[var(--github-surface)] border-[var(--github-border)]">
+                        <SelectValue placeholder="Select an AI provider" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="openai">
+                          <div className="flex items-center gap-2">
+                            <span>OpenAI (GPT-4)</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="anthropic">
+                          <div className="flex items-center gap-2">
+                            <span>Anthropic (Claude)</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="ollama">
+                          <div className="flex items-center gap-2">
+                            <span>Ollama (Local)</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="custom">
+                          <div className="flex items-center gap-2">
+                            <span>Custom Endpoint</span>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* API Key - only show for openai and anthropic */}
+                  {(aiConfig.aiProvider === 'openai' || aiConfig.aiProvider === 'anthropic') && (
+                    <div className="space-y-2">
+                      <Label htmlFor="aiApiKey" className="text-sm text-white">API Key</Label>
+                      <Input
+                        id="aiApiKey"
+                        type="password"
+                        placeholder={aiConfig.aiApiKey ? '***' : 'Enter your API key'}
+                        value={aiConfig.aiApiKey || ''}
+                        onChange={(e) => setAiConfig({ ...aiConfig, aiApiKey: e.target.value })}
+                        className="bg-[var(--github-surface)] border-[var(--github-border)]"
+                      />
+                      <p className="text-xs text-[var(--github-text-secondary)]">
+                        Leave empty to keep the existing API key
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Base URL - show for ollama and custom */}
+                  {(aiConfig.aiProvider === 'ollama' || aiConfig.aiProvider === 'custom') && (
+                    <div className="space-y-2">
+                      <Label htmlFor="aiBaseUrl" className="text-sm text-white">
+                        {aiConfig.aiProvider === 'ollama' ? 'Ollama URL' : 'Base URL'}
+                      </Label>
+                      <Input
+                        id="aiBaseUrl"
+                        type="url"
+                        placeholder={aiConfig.aiProvider === 'ollama' ? 'http://localhost:11434' : 'https://api.example.com/v1'}
+                        value={aiConfig.aiBaseUrl || ''}
+                        onChange={(e) => setAiConfig({ ...aiConfig, aiBaseUrl: e.target.value })}
+                        className="bg-[var(--github-surface)] border-[var(--github-border)]"
+                      />
+                    </div>
+                  )}
+
+                  {/* Model */}
+                  <div className="space-y-2">
+                    <Label htmlFor="aiModel" className="text-sm text-white">Model</Label>
+                    <Input
+                      id="aiModel"
+                      placeholder={getDefaultModel(aiConfig.aiProvider)}
+                      value={aiConfig.aiModel || ''}
+                      onChange={(e) => setAiConfig({ ...aiConfig, aiModel: e.target.value })}
+                      className="bg-[var(--github-surface)] border-[var(--github-border)]"
+                    />
+                    <p className="text-xs text-[var(--github-text-secondary)]">
+                      {getModelHint(aiConfig.aiProvider)}
+                    </p>
+                  </div>
+
+                  <Button
+                    onClick={handleSaveAI}
+                    disabled={aiSaving || !aiConfig.aiProvider}
+                    className="btn-x-primary gap-2"
+                  >
+                    {aiSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {aiSaved ? <CheckCircle className="w-4 h-4" /> : null}
+                    {aiSaving ? 'Saving...' : aiSaved ? 'Saved!' : 'Save AI Config'}
+                  </Button>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
     </div>
   );
+}
+
+// Helper functions
+function getDefaultModel(provider?: string): string {
+  switch (provider) {
+    case 'openai':
+      return 'gpt-4';
+    case 'anthropic':
+      return 'claude-sonnet-4-20250514';
+    case 'ollama':
+      return 'llama3';
+    case 'custom':
+      return 'gpt-4';
+    default:
+      return '';
+  }
+}
+
+function getModelHint(provider?: string): string {
+  switch (provider) {
+    case 'openai':
+      return 'e.g., gpt-4, gpt-4-turbo, gpt-3.5-turbo';
+    case 'anthropic':
+      return 'e.g., claude-sonnet-4-20250514, claude-opus-4-20250514, claude-3-5-sonnet-20241022';
+    case 'ollama':
+      return 'e.g., llama3, mistral, codellama';
+    case 'custom':
+      return 'Enter the model name supported by your custom endpoint';
+    default:
+      return 'Select a provider first';
+  }
 }

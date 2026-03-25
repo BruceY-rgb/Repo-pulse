@@ -8,6 +8,7 @@ import { UserModule } from './modules/user/user.module';
 import { RepositoryModule } from './modules/repository/repository.module';
 import { WebhookModule } from './modules/webhook/webhook.module';
 import { EventModule } from './modules/event/event.module';
+import { SettingsModule } from './modules/settings/settings.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { HttpExceptionFilter } from './common/filters';
@@ -53,6 +54,7 @@ import { envValidationSchema } from './config/env.validation';
     RepositoryModule,
     WebhookModule,
     EventModule,
+    SettingsModule,
 
     // Future modules (uncomment as implemented):
     // AIModule,
