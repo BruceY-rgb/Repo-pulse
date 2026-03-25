@@ -13,6 +13,7 @@
     "test": "turbo run test",
     "db:migrate": "turbo run db:migrate --filter=@repo-pulse/database",
     "db:generate": "turbo run db:generate --filter=@repo-pulse/database",
+    "db:push": "turbo run db:push --filter=@repo-pulse/database",
     "db:studio": "turbo run db:studio --filter=@repo-pulse/database"
   },
   "devDependencies": {

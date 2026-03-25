@@ -109,6 +109,13 @@ model User {
   gitlabId           String?  @unique
   role               Role     @default(MEMBER)
   preferences        Json     @default("{}")
+
+  // AI 配置
+  aiProvider   String?  // 'openai' | 'anthropic' | 'ollama' | 'custom'
+  aiApiKey    String?  // 加密存储
+  aiBaseUrl   String?  // 自定义端点
+  aiModel     String?  // 模型名称
+
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
