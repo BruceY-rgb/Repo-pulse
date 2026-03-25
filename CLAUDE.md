@@ -92,5 +92,6 @@ Repo-Pulse 是一个 AI 驱动的代码仓库监控与管理平台。
 
 ## 文档参考
 - `/docs/frontend-style-guide.md` - 前端样式约束（必读）
-- `/docs/project-plan.md` - 完整项目搭建计划
+- `/docs/project-plan.md` - 原始项目搭建计划
+- `/docs/project-plan-v2.md` - **最新迭代执行计划 (v2.0)**，包含针对现有架构问题的修复和渐进式开发步骤，**必须优先参考**
 
