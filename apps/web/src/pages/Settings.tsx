@@ -26,9 +26,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { settingsService } from '@/services/settings.service';
-import { notificationService } from '@/services/notification.service';
-import type { AIProvider, AIConfig, NotificationPreferences } from '@/services/notification.service';
+import { useAIConfig, useUpdateAIConfig } from '@/hooks/use-settings';
+import { useNotificationPreferences, useUpdateNotificationPreferences } from '@/hooks/use-notifications';
+import type { AIProvider } from '@/services/settings.service';
 
 const connectedAccounts = [
   { provider: 'GitHub', username: 'johndoe', connected: true, icon: Github },
@@ -44,14 +44,12 @@ const apiKeys = [
 export function Settings() {
   const [saved, setSaved] = useState(false);
 
-  // AI 配置状态
-  const [aiConfig, setAiConfig] = useState<AIConfig>({});
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiSaving, setAiSaving] = useState(false);
-  const [aiSaved, setAiSaved] = useState(false);
+  // React Query Hooks
+  const { data: aiConfig = {}, isLoading: aiLoading } = useAIConfig();
+  const { data: notifPrefs, isLoading: notifLoading, isError: notifError } = useNotificationPreferences();
 
-  // 通知配置状态
-  const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>({
+  // Default values for notification preferences
+  const defaultNotifPrefs = {
     channels: ['inApp'],
     events: {
       highRisk: true,
@@ -59,66 +57,52 @@ export function Settings() {
       analysisComplete: true,
       weeklyReport: false,
     },
-  });
-  const [notifLoading, setNotifLoading] = useState(false);
-  const [notifSaving, setNotifSaving] = useState(false);
-  const [notifSaved, setNotifSaved] = useState(false);
+  };
 
-  // 加载 AI 配置
-  useEffect(() => {
-    const loadAIConfig = async () => {
-      setAiLoading(true);
-      try {
-        const config = await settingsService.getAIConfig();
-        setAiConfig(config);
-      } catch (error) {
-        console.error('Failed to load AI config:', error);
-      } finally {
-        setAiLoading(false);
-      }
-    };
-    loadAIConfig();
-  }, []);
+  // Local state for form inputs - 使用默认值初始化
+  const [localAiConfig, setLocalAiConfig] = useState<{
+    aiProvider?: AIProvider;
+    aiApiKey?: string;
+    aiBaseUrl?: string;
+    aiModel?: string;
+  }>({});
+  const [localNotifPrefs, setLocalNotifPrefs] = useState(defaultNotifPrefs);
 
-  // 加载通知配置
+  // Update local state only when data is loaded (not loading and not error)
   useEffect(() => {
-    const loadNotifPrefs = async () => {
-      setNotifLoading(true);
-      try {
-        const prefs = await notificationService.getPreferences();
-        setNotifPrefs(prefs);
-      } catch (error) {
-        console.error('Failed to load notification preferences:', error);
-      } finally {
-        setNotifLoading(false);
-      }
-    };
-    loadNotifPrefs();
-  }, []);
+    if (!aiLoading && aiConfig && Object.keys(aiConfig).length > 0) {
+      setLocalAiConfig(aiConfig);
+    }
+  }, [aiConfig, aiLoading]);
+
+  useEffect(() => {
+    // When data loads successfully, update local state
+    if (!notifLoading && !notifError && notifPrefs) {
+      setLocalNotifPrefs({ ...defaultNotifPrefs, ...notifPrefs });
+    }
+  }, [notifPrefs, notifLoading, notifError]);
+
+  // Mutations
+  const updateAIConfig = useUpdateAIConfig();
+  const updateNotifPrefs = useUpdateNotificationPreferences();
 
   const handleSaveAI = async () => {
-    setAiSaving(true);
     try {
-      await settingsService.updateAIConfig(aiConfig);
-      setAiSaved(true);
-      setTimeout(() => setAiSaved(false), 3000);
+      await updateAIConfig.mutateAsync(localAiConfig);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
     } catch (error) {
       console.error('Failed to save AI config:', error);
-    } finally {
-      setAiSaving(false);
     }
   };
 
   const handleSaveNotifications = async () => {
-    setNotifSaving(true);
     try {
-      await notificationService.updatePreferences(notifPrefs);
-      setNotifSaved(true);
-      setTimeout(() => setNotifSaved(false), 3000);
+      await updateNotifPrefs.mutateAsync(localNotifPrefs);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
     } catch (error) {
       console.error('Failed to save notification preferences:', error);
-    } finally {
-      setNotifSaving(false);
     }
   };
 
@@ -128,10 +112,11 @@ export function Settings() {
   };
 
   const toggleChannel = (channel: string) => {
-    const channels = notifPrefs.channels.includes(channel as any)
-      ? notifPrefs.channels.filter((c) => c !== channel)
-      : [...notifPrefs.channels, channel as any];
-    setNotifPrefs({ ...notifPrefs, channels });
+    if (!localNotifPrefs) return;
+    const channels = localNotifPrefs.channels.includes(channel as any)
+      ? localNotifPrefs.channels.filter((c) => c !== channel)
+      : [...localNotifPrefs.channels, channel as any];
+    setLocalNotifPrefs({ ...localNotifPrefs, channels });
   };
 
   return (
@@ -291,16 +276,16 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('email')}
+                        checked={localNotifPrefs.channels.includes('email')}
                         onCheckedChange={() => toggleChannel('email')}
                       />
                     </div>
-                    {notifPrefs.channels.includes('email') && (
+                    {localNotifPrefs.channels.includes('email') && (
                       <div className="ml-12 space-y-2">
                         <Input
                           placeholder="your@email.com"
-                          value={notifPrefs.email || ''}
-                          onChange={(e) => setNotifPrefs({ ...notifPrefs, email: e.target.value })}
+                          value={localNotifPrefs.email || ''}
+                          onChange={(e) => setLocalNotifPrefs({ ...localNotifPrefs, email: e.target.value })}
                           className="bg-[var(--github-surface)] border-[var(--github-border)]"
                         />
                       </div>
@@ -315,7 +300,7 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('dingtalk')}
+                        checked={localNotifPrefs.channels.includes('dingtalk')}
                         onCheckedChange={() => toggleChannel('dingtalk')}
                       />
                     </div>
@@ -329,7 +314,7 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('feishu')}
+                        checked={localNotifPrefs.channels.includes('feishu')}
                         onCheckedChange={() => toggleChannel('feishu')}
                       />
                     </div>
@@ -343,23 +328,23 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('inApp')}
+                        checked={localNotifPrefs.channels.includes('inApp')}
                         onCheckedChange={() => toggleChannel('inApp')}
                       />
                     </div>
                   </div>
 
-                  {(notifPrefs.channels.includes('dingtalk') ||
-                    notifPrefs.channels.includes('feishu') ||
-                    notifPrefs.channels.includes('webhook')) && (
+                  {(localNotifPrefs.channels.includes('dingtalk') ||
+                    localNotifPrefs.channels.includes('feishu') ||
+                    localNotifPrefs.channels.includes('webhook')) && (
                     <>
                       <Separator className="bg-[var(--github-border)]" />
                       <div className="space-y-2">
                         <Label className="text-sm text-white">Webhook URL</Label>
                         <Input
                           placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx"
-                          value={notifPrefs.webhookUrl || ''}
-                          onChange={(e) => setNotifPrefs({ ...notifPrefs, webhookUrl: e.target.value })}
+                          value={localNotifPrefs.webhookUrl || ''}
+                          onChange={(e) => setLocalNotifPrefs({ ...localNotifPrefs, webhookUrl: e.target.value })}
                           className="bg-[var(--github-surface)] border-[var(--github-border)]"
                         />
                       </div>
@@ -379,9 +364,9 @@ export function Settings() {
                       <p className="text-xs text-[var(--github-text-secondary)]">Critical security and performance issues</p>
                     </div>
                     <Switch
-                      checked={notifPrefs.events.highRisk}
+                      checked={localNotifPrefs.events.highRisk}
                       onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, highRisk: checked } })
+                        setLocalNotifPrefs({ ...localNotifPrefs, events: { ...localNotifPrefs.events, highRisk: checked } })
                       }
                     />
                   </div>
@@ -391,9 +376,9 @@ export function Settings() {
                       <p className="text-xs text-[var(--github-text-secondary)]">Pull request created, updated, or merged</p>
                     </div>
                     <Switch
-                      checked={notifPrefs.events.prUpdates}
+                      checked={localNotifPrefs.events.prUpdates}
                       onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, prUpdates: checked } })
+                        setLocalNotifPrefs({ ...localNotifPrefs, events: { ...localNotifPrefs.events, prUpdates: checked } })
                       }
                     />
                   </div>
@@ -403,9 +388,9 @@ export function Settings() {
                       <p className="text-xs text-[var(--github-text-secondary)]">AI analysis finished for a PR</p>
                     </div>
                     <Switch
-                      checked={notifPrefs.events.analysisComplete}
+                      checked={localNotifPrefs.events.analysisComplete}
                       onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, analysisComplete: checked } })
+                        setLocalNotifPrefs({ ...localNotifPrefs, events: { ...localNotifPrefs.events, analysisComplete: checked } })
                       }
                     />
                   </div>
@@ -415,9 +400,9 @@ export function Settings() {
                       <p className="text-xs text-[var(--github-text-secondary)]">Weekly code quality summary</p>
                     </div>
                     <Switch
-                      checked={notifPrefs.events.weeklyReport}
+                      checked={localNotifPrefs.events.weeklyReport}
                       onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, weeklyReport: checked } })
+                        setLocalNotifPrefs({ ...localNotifPrefs, events: { ...localNotifPrefs.events, weeklyReport: checked } })
                       }
                     />
                   </div>
@@ -426,12 +411,12 @@ export function Settings() {
 
               <Button
                 onClick={handleSaveNotifications}
-                disabled={notifSaving}
+                disabled={updateNotifPrefs.isPending}
                 className="btn-x-primary gap-2"
               >
-                {notifSaving && <Loader2 className="w-4 h-4 animate-spin" />}
-                {notifSaved ? <CheckCircle className="w-4 h-4" /> : null}
-                {notifSaving ? 'Saving...' : notifSaved ? 'Saved!' : 'Save Notification Settings'}
+                {updateNotifPrefs.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                {saved ? <CheckCircle className="w-4 h-4" /> : null}
+                {updateNotifPrefs.isPending ? 'Saving...' : saved ? 'Saved!' : 'Save Notification Settings'}
               </Button>
             </>
           )}
@@ -588,8 +573,8 @@ export function Settings() {
                   <div className="space-y-2">
                     <Label htmlFor="aiProvider" className="text-sm text-white">AI Provider</Label>
                     <Select
-                      value={aiConfig.aiProvider || ''}
-                      onValueChange={(value: AIProvider) => setAiConfig({ ...aiConfig, aiProvider: value })}
+                      value={localAiConfig.aiProvider || ''}
+                      onValueChange={(value: AIProvider) => setLocalAiConfig({ ...localAiConfig, aiProvider: value })}
                     >
                       <SelectTrigger className="bg-[var(--github-surface)] border-[var(--github-border)]">
                         <SelectValue placeholder="Select an AI provider" />
@@ -620,15 +605,15 @@ export function Settings() {
                   </div>
 
                   {/* API Key - only show for openai and anthropic */}
-                  {(aiConfig.aiProvider === 'openai' || aiConfig.aiProvider === 'anthropic') && (
+                  {(localAiConfig.aiProvider === 'openai' || localAiConfig.aiProvider === 'anthropic') && (
                     <div className="space-y-2">
                       <Label htmlFor="aiApiKey" className="text-sm text-white">API Key</Label>
                       <Input
                         id="aiApiKey"
                         type="password"
                         placeholder={aiConfig.aiApiKey ? '***' : 'Enter your API key'}
-                        value={aiConfig.aiApiKey || ''}
-                        onChange={(e) => setAiConfig({ ...aiConfig, aiApiKey: e.target.value })}
+                        value={localAiConfig.aiApiKey || ''}
+                        onChange={(e) => setLocalAiConfig({ ...localAiConfig, aiApiKey: e.target.value })}
                         className="bg-[var(--github-surface)] border-[var(--github-border)]"
                       />
                       <p className="text-xs text-[var(--github-text-secondary)]">
@@ -638,17 +623,17 @@ export function Settings() {
                   )}
 
                   {/* Base URL - show for ollama and custom */}
-                  {(aiConfig.aiProvider === 'ollama' || aiConfig.aiProvider === 'custom') && (
+                  {(localAiConfig.aiProvider === 'ollama' || localAiConfig.aiProvider === 'custom') && (
                     <div className="space-y-2">
                       <Label htmlFor="aiBaseUrl" className="text-sm text-white">
-                        {aiConfig.aiProvider === 'ollama' ? 'Ollama URL' : 'Base URL'}
+                        {localAiConfig.aiProvider === 'ollama' ? 'Ollama URL' : 'Base URL'}
                       </Label>
                       <Input
                         id="aiBaseUrl"
                         type="url"
-                        placeholder={aiConfig.aiProvider === 'ollama' ? 'http://localhost:11434' : 'https://api.example.com/v1'}
-                        value={aiConfig.aiBaseUrl || ''}
-                        onChange={(e) => setAiConfig({ ...aiConfig, aiBaseUrl: e.target.value })}
+                        placeholder={localAiConfig.aiProvider === 'ollama' ? 'http://localhost:11434' : 'https://api.example.com/v1'}
+                        value={localAiConfig.aiBaseUrl || ''}
+                        onChange={(e) => setLocalAiConfig({ ...localAiConfig, aiBaseUrl: e.target.value })}
                         className="bg-[var(--github-surface)] border-[var(--github-border)]"
                       />
                     </div>
@@ -659,24 +644,24 @@ export function Settings() {
                     <Label htmlFor="aiModel" className="text-sm text-white">Model</Label>
                     <Input
                       id="aiModel"
-                      placeholder={getDefaultModel(aiConfig.aiProvider)}
-                      value={aiConfig.aiModel || ''}
-                      onChange={(e) => setAiConfig({ ...aiConfig, aiModel: e.target.value })}
+                      placeholder={getDefaultModel(localAiConfig.aiProvider)}
+                      value={localAiConfig.aiModel || ''}
+                      onChange={(e) => setLocalAiConfig({ ...localAiConfig, aiModel: e.target.value })}
                       className="bg-[var(--github-surface)] border-[var(--github-border)]"
                     />
                     <p className="text-xs text-[var(--github-text-secondary)]">
-                      {getModelHint(aiConfig.aiProvider)}
+                      {getModelHint(localAiConfig.aiProvider)}
                     </p>
                   </div>
 
                   <Button
                     onClick={handleSaveAI}
-                    disabled={aiSaving || !aiConfig.aiProvider}
+                    disabled={updateAIConfig.isPending || !localAiConfig.aiProvider}
                     className="btn-x-primary gap-2"
                   >
-                    {aiSaving && <Loader2 className="w-4 h-4 animate-spin" />}
-                    {aiSaved ? <CheckCircle className="w-4 h-4" /> : null}
-                    {aiSaving ? 'Saving...' : aiSaved ? 'Saved!' : 'Save AI Config'}
+                    {updateAIConfig.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {saved ? <CheckCircle className="w-4 h-4" /> : null}
+                    {updateAIConfig.isPending ? 'Saving...' : saved ? 'Saved!' : 'Save AI Config'}
                   </Button>
                 </>
               )}
@@ -689,7 +674,7 @@ export function Settings() {
 }
 
 // Helper functions
-function getDefaultModel(provider?: string): string {
+function getDefaultModel(provider?: AIProvider): string {
   switch (provider) {
     case 'openai':
       return 'gpt-4';
@@ -704,7 +689,7 @@ function getDefaultModel(provider?: string): string {
   }
 }
 
-function getModelHint(provider?: string): string {
+function getModelHint(provider?: AIProvider): string {
   switch (provider) {
     case 'openai':
       return 'e.g., gpt-4, gpt-4-turbo, gpt-3.5-turbo';

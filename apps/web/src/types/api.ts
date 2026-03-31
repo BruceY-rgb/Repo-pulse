@@ -19,6 +19,8 @@ export interface User {
   preferences: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  // TODO: 生产环境移除 - 用于 WebSocket 测试
+  accessToken?: string;
 }
 
 export interface PaginatedResponse<T> {

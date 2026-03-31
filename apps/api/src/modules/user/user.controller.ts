@@ -1,9 +1,10 @@
-import { Controller, Get, Patch, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Body, UseGuards, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UserService } from './user.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UpdatePreferencesDto } from './dto/update-preferences.dto';
+import type { Request } from 'express';
 
 @ApiTags('用户')
 @Controller('users')
@@ -14,8 +15,11 @@ export class UserController {
 
   @Get('me')
   @ApiOperation({ summary: '获取当前用户信息' })
-  async getMe(@CurrentUser() user: { sub: string }) {
-    return this.userService.findById(user.sub);
+  async getMe(@CurrentUser() user: { sub: string }, @Req() req: Request) {
+    const userData = await this.userService.findById(user.sub);
+    // TODO: 生产环境移除 - 用于 WebSocket 测试
+    const accessToken = req.cookies?.access_token;
+    return { ...userData, accessToken };
   }
 
   @Patch('preferences')

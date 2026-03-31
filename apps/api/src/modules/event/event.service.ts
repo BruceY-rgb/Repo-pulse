@@ -1,13 +1,17 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaClient, EventType, Prisma, Event } from '@repo-pulse/database';
 import { PaginationQueryDto } from './dto/event.dto';
+import { EventGateway } from './event.gateway';
 
 @Injectable()
 export class EventService {
   private readonly logger = new Logger(EventService.name);
   private prisma: PrismaClient;
 
-  constructor() {
+  constructor(
+    @Inject(forwardRef(() => EventGateway))
+    private readonly eventGateway: EventGateway,
+  ) {
     this.prisma = new PrismaClient();
   }
 
@@ -41,7 +45,33 @@ export class EventService {
     });
 
     this.logger.log(`Event ${event.id} created for repository ${data.repositoryId}`);
+
+    // 广播新事件到订阅者
+    this.broadcastEvent(data.repositoryId, event);
+
     return event;
+  }
+
+  /**
+   * 广播新事件到 WebSocket 房间
+   */
+  broadcastEvent(repositoryId: string, event: Event) {
+    try {
+      this.eventGateway.broadcastNewEvent(repositoryId, {
+        id: event.id,
+        type: event.type,
+        action: event.action,
+        title: event.title,
+        body: event.body,
+        author: event.author,
+        authorAvatar: event.authorAvatar,
+        externalUrl: event.externalUrl,
+        createdAt: event.createdAt,
+      });
+    } catch (error) {
+      // 广播失败不影响事件创建
+      this.logger.warn(`Failed to broadcast event ${event.id}: ${error}`);
+    }
   }
 
   async findAll(repositoryId: string, query: PaginationQueryDto): Promise<any> {

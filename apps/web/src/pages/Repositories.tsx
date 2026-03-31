@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
   GitBranch,
   AlertCircle,
@@ -33,8 +33,16 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { repositoryService } from '@/services/repository.service';
-import type { Repository, SearchResult } from '@/types/api';
+import {
+  useRepositories,
+  useMyRepositories,
+  useStarredRepositories,
+  useSearchRepositories,
+  useSyncRepository,
+  useDeleteRepository,
+  useCreateRepository,
+} from '@/hooks/use-repositories';
+import type { SearchResult, Repository } from '@/types/api';
 
 const filters = [
   { value: 'all', label: '全部' },
@@ -43,12 +51,6 @@ const filters = [
 ];
 
 export function Repositories() {
-  const [repositories, setRepositories] = useState<Repository[]>([]);
-  const [myRepos, setMyRepos] = useState<SearchResult[]>([]);
-  const [starredRepos, setStarredRepos] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [myReposLoading, setMyReposLoading] = useState(false);
-  const [starredLoading, setStarredLoading] = useState(false);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -57,91 +59,25 @@ export function Repositories() {
   // 搜索相关状态
   const [searchInput, setSearchInput] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
 
-  useEffect(() => {
-    loadRepositories();
-  }, []);
+  // React Query Hooks
+  const { data: repositories = [], isLoading: loading } = useRepositories();
+  const { data: myRepos = [], isLoading: myReposLoading } = useMyRepositories();
+  const { data: starredRepos = [], isLoading: starredLoading } = useStarredRepositories();
+  const { data: searchData, isLoading: isSearching } = useSearchRepositories(searchInput);
 
-  const loadRepositories = async () => {
-    try {
-      setLoading(true);
-      const data = await repositoryService.getAll();
-      setRepositories(data);
-    } catch (error) {
-      console.error('Failed to load repositories:', error);
-      toast.error('加载仓库失败');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadMyRepos = async () => {
-    if (myRepos.length > 0) return; // 已有数据不重复加载
-    try {
-      setMyReposLoading(true);
-      const data = await repositoryService.getMyRepos();
-      setMyRepos(data);
-      if (data.length === 0) {
-        toast.info('暂无作为 contributor 的仓库');
-      }
-    } catch (error) {
-      console.error('Failed to load my repos:', error);
-      toast.error('加载我的仓库失败');
-    } finally {
-      setMyReposLoading(false);
-    }
-  };
-
-  const loadStarredRepos = async () => {
-    if (starredRepos.length > 0) return; // 已有数据不重复加载
-    try {
-      setStarredLoading(true);
-      const data = await repositoryService.getStarred();
-      setStarredRepos(data);
-      if (data.length === 0) {
-        toast.info('暂无 star 过的仓库');
-      }
-    } catch (error) {
-      console.error('Failed to load starred repos:', error);
-      toast.error('加载 starred 仓库失败');
-    } finally {
-      setStarredLoading(false);
-    }
-  };
-
-  // 搜索仓库
-  const handleSearch = useCallback(async (query: string) => {
-    if (!query.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    try {
-      setIsSearching(true);
-      const results = await repositoryService.search(query);
-      setSearchResults(results);
-    } catch (error) {
-      console.error('Failed to search repositories:', error);
-    } finally {
-      setIsSearching(false);
-    }
-  }, []);
-
-  // 防抖搜索
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      handleSearch(searchInput);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchInput, handleSearch]);
+  // Mutations
+  const createRepository = useCreateRepository();
+  const syncRepository = useSyncRepository();
+  const deleteRepository = useDeleteRepository();
 
   // 添加仓库（通过搜索结果）
   const handleAddFromSearch = async (repo: SearchResult) => {
     const [owner, name] = repo.fullName.split('/');
     try {
       setIsAdding(true);
-      await repositoryService.create({
+      await createRepository.mutateAsync({
         platform: repo.platform,
         owner,
         repo: name,
@@ -150,7 +86,6 @@ export function Repositories() {
       setIsAddDialogOpen(false);
       setSearchInput('');
       setSearchResults([]);
-      loadRepositories();
     } catch (error) {
       console.error('Failed to add repository:', error);
       toast.error('添加仓库失败');
@@ -162,9 +97,8 @@ export function Repositories() {
   const handleSync = async (id: string) => {
     try {
       setSyncingId(id);
-      await repositoryService.sync(id);
+      await syncRepository.mutateAsync(id);
       toast.success('同步完成');
-      loadRepositories();
     } catch (error) {
       console.error('Failed to sync repository:', error);
       toast.error('同步失败');
@@ -175,14 +109,23 @@ export function Repositories() {
 
   const handleDelete = async (id: string) => {
     try {
-      await repositoryService.delete(id);
+      await deleteRepository.mutateAsync(id);
       toast.success('仓库已移除');
-      loadRepositories();
     } catch (error) {
       console.error('Failed to delete repository:', error);
       toast.error('移除仓库失败');
     }
   };
+
+  // 防抖搜索 - useSearchRepositories 已内置 debounce
+  useEffect(() => {
+    if (searchData) {
+      setSearchResults(searchData);
+    }
+  }, [searchData]);
+
+  // 删除旧的加载函数
+  // loadMyRepos, loadStarredRepos 已由 useMyRepositories/useStarredRepositories 替代
 
   const filteredRepos = repositories.filter((repo) => {
     const matchesSearch =
@@ -426,14 +369,12 @@ export function Repositories() {
           <TabsTrigger
             value="myrepos"
             className="data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:border-orange-500"
-            onClick={loadMyRepos}
           >
             我的仓库
           </TabsTrigger>
           <TabsTrigger
             value="starred"
             className="data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:border-orange-500"
-            onClick={loadStarredRepos}
           >
             Starred
           </TabsTrigger>

@@ -211,6 +211,58 @@ export class RepositoryService {
     return repository;
   }
 
+  /**
+   * 重新注册 Webhook
+   */
+  async registerWebhook(id: string) {
+    const repository = await this.findById(id);
+
+    // 获取用户的 OAuth Token
+    const userRepo = await this.prisma.userRepository.findFirst({
+      where: { repositoryId: id },
+      include: { user: true },
+    });
+
+    if (!userRepo) {
+      throw new Error('仓库未关联用户');
+    }
+
+    const userOAuthToken = userRepo.user.githubAccessToken;
+    if (!userOAuthToken) {
+      throw new Error('用户未绑定 GitHub 账号');
+    }
+
+    // 解析 fullName
+    const [owner, repo] = repository.fullName.split('/');
+
+    // 生成新的 webhook secret
+    const webhookSecret = this.generateWebhookSecret();
+
+    const apiUrl = this.configService.get<string>('API_URL', 'http://localhost:3001');
+    const webhookUrl = `${apiUrl}/webhooks/github`;
+
+    // 创建 Webhook
+    const webhookId = await this.githubService.createWebhook(
+      owner,
+      repo,
+      webhookUrl,
+      webhookSecret,
+      userOAuthToken,
+    );
+
+    // 更新仓库记录
+    await this.prisma.repository.update({
+      where: { id },
+      data: {
+        webhookId: webhookId ? String(webhookId) : null,
+        webhookSecret,
+      },
+    });
+
+    this.logger.log(`Webhook re-registered for ${repository.fullName}`);
+    return { success: true, webhookId };
+  }
+
   async getUserRepositories(userId: string) {
     return this.prisma.userRepository.findMany({
       where: { userId },

@@ -64,3 +64,59 @@ Repo-Pulse 是一个 AI 驱动的代码仓库监控与管理平台，采用 Mono
 在进行任何实际开发前，你**必须**阅读以下文档以获取具体的业务目标和规范：
 1. `/docs/project-plan-v2.md` - **当前最高优先级的迭代计划**。包含了详细的阶段划分、当前架构缺陷的修复方案以及具体的验收标准。**你必须严格按照该文档的 Phase 顺序执行，不可跳跃。**
 2. `/docs/frontend-style-guide.md` - 前端样式红线和交互规范。
+
+## 6. GitFlow 工作流规范
+
+本项目采用 GitFlow 工作流进行代码管理。每次代码任务必须遵循以下流程：
+
+### 6.1 分支模型
+
+| 分支类型 | 分支命名 | 说明 |
+|---------|---------|------|
+| **main** | main | 生产分支，只接受合并，不直接修改 |
+| **develop** | develop | 主开发分支，包含下个发布的所有代码 |
+| **feature** | feature/xxx | 功能分支，基于 develop 开发新功能 |
+| **release** | release/x.y | 发布分支，基于 develop 准备发布 |
+| **hotfix** | hotfix/x.y.z | 热修复分支，基于 main 紧急修复 |
+
+### 6.2 工作流程
+
+#### 开始新功能
+```bash
+# 基于 develop 创建功能分支
+git checkout -b feature/xxx develop
+```
+
+#### 开发过程中
+```bash
+# 编写代码...
+# 验证代码（typecheck + lint）
+# 向用户展示成果，等待验收
+```
+
+#### 功能完成（用户验收通过后）
+```bash
+# 切换到 develop
+git checkout develop
+# 合并功能分支（使用 --no-ff 保留分支历史）
+git merge --no-ff feature/xxx
+# 推送 develop
+git push origin develop
+# 删除功能分支
+git branch -d feature/xxx
+```
+
+### 6.3 任务执行约束
+
+1. **创建分支**：基于当前任务需求，从 develop 创建对应的 feature/release/hotfix 分支
+2. **开发与验证**：在分支上进行代码开发和自测验证
+3. **用户验收**：完成后向用户展示，等待用户验收确认
+4. **合并与清理**：用户验收通过后，执行 merge 到 develop，删除分支
+5. **提交由用户执行**：用户验收通过后，**由用户自行执行 git commit 和 push**，你只需负责创建分支、切换分支、合并分支等操作
+
+### 6.4 重要提醒
+
+- **严禁未经验证就合并**：必须在用户验收通过后才能合并分支
+- **保持分支整洁**：功能开发完成后及时删除本地分支
+- **使用 --no-ff 合并**：合并时使用 `--no-ff` 参数保留分支历史
+- **先拉取再合并**：合并前先 `git pull origin develop` 确保 develop 是最新的

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   GitPullRequest,
   CheckCircle,
@@ -15,80 +15,72 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { approvalService, type Approval, type ApprovalStatus } from '@/services/approval.service';
+import { useApprovals, useApproveApproval, useRejectApproval, useEditAndApproveApproval } from '@/hooks/use-approvals';
+import type { ApprovalStatus } from '@/services/approval.service';
 
 export function Approvals() {
   const [activeTab, setActiveTab] = useState('pending');
-  const [approvals, setApprovals] = useState<Approval[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedApproval, setSelectedApproval] = useState<Approval | null>(null);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [selectedApproval, setSelectedApproval] = useState<{
+    id: string;
+    originalContent?: string;
+  } | null>(null);
   const [comment, setComment] = useState('');
   const [editedContent, setEditedContent] = useState('');
 
-  // 加载审批列表
-  useEffect(() => {
-    const loadApprovals = async () => {
-      setLoading(true);
-      try {
-        const status = activeTab === 'pending' ? 'PENDING' :
-          activeTab === 'approved' ? 'APPROVED' :
-            activeTab === 'rejected' ? 'REJECTED' : undefined;
-        const response = await approvalService.getApprovals({ status });
-        setApprovals(response?.approvals ?? []);
-      } catch (error) {
-        console.error('Failed to load approvals:', error);
-        setApprovals([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadApprovals();
-  }, [activeTab]);
+  // Map tab to status
+  const statusMap = {
+    pending: 'PENDING' as const,
+    approved: 'APPROVED' as const,
+    rejected: 'REJECTED' as const,
+  };
+
+  // React Query Hooks
+  const { data: approvalsData, isLoading: loading } = useApprovals({
+    status: activeTab !== 'all' ? statusMap[activeTab as keyof typeof statusMap] : undefined,
+  });
+
+  const approvals = approvalsData?.approvals ?? [];
+
+  // Mutations
+  const approveMutation = useApproveApproval();
+  const rejectMutation = useRejectApproval();
+  const editAndApproveMutation = useEditAndApproveApproval();
 
   const handleApprove = async () => {
     if (!selectedApproval) return;
-    setActionLoading(true);
     try {
-      await approvalService.approve(selectedApproval.id, comment);
-      setApprovals(approvals.filter((a) => a.id !== selectedApproval.id));
+      await approveMutation.mutateAsync({ approvalId: selectedApproval.id, comment });
       setSelectedApproval(null);
       setComment('');
     } catch (error) {
       console.error('Failed to approve:', error);
-    } finally {
-      setActionLoading(false);
     }
   };
 
   const handleReject = async () => {
     if (!selectedApproval) return;
-    setActionLoading(true);
     try {
-      await approvalService.reject(selectedApproval.id, comment);
-      setApprovals(approvals.filter((a) => a.id !== selectedApproval.id));
+      await rejectMutation.mutateAsync({ approvalId: selectedApproval.id, comment });
       setSelectedApproval(null);
       setComment('');
     } catch (error) {
       console.error('Failed to reject:', error);
-    } finally {
-      setActionLoading(false);
     }
   };
 
   const handleEditAndApprove = async () => {
     if (!selectedApproval || !editedContent) return;
-    setActionLoading(true);
     try {
-      await approvalService.editAndApprove(selectedApproval.id, editedContent, comment);
-      setApprovals(approvals.filter((a) => a.id !== selectedApproval.id));
+      await editAndApproveMutation.mutateAsync({
+        approvalId: selectedApproval.id,
+        editedContent,
+        comment,
+      });
       setSelectedApproval(null);
       setComment('');
       setEditedContent('');
     } catch (error) {
       console.error('Failed to edit and approve:', error);
-    } finally {
-      setActionLoading(false);
     }
   };
 
@@ -248,10 +240,10 @@ export function Approvals() {
                         <div className="flex gap-3">
                           <Button
                             onClick={handleApprove}
-                            disabled={actionLoading}
+                            disabled={approveMutation.isPending}
                             className="flex-1 gap-2 bg-green-600 hover:bg-green-700"
                           >
-                            {actionLoading ? (
+                            {approveMutation.isPending ? (
                               <Loader2 className="w-4 h-4 animate-spin" />
                             ) : (
                               <CheckCircle className="w-4 h-4" />
@@ -260,11 +252,11 @@ export function Approvals() {
                           </Button>
                           <Button
                             onClick={handleReject}
-                            disabled={actionLoading}
+                            disabled={rejectMutation.isPending}
                             variant="outline"
                             className="flex-1 gap-2 border-red-400 text-red-400 hover:bg-red-400/10"
                           >
-                            {actionLoading ? (
+                            {rejectMutation.isPending ? (
                               <Loader2 className="w-4 h-4 animate-spin" />
                             ) : (
                               <XCircle className="w-4 h-4" />
@@ -276,11 +268,11 @@ export function Approvals() {
                         {editedContent && editedContent !== selectedApproval.originalContent && (
                           <Button
                             onClick={handleEditAndApprove}
-                            disabled={actionLoading || !editedContent}
+                            disabled={editAndApproveMutation.isPending || !editedContent}
                             variant="outline"
                             className="w-full gap-2"
                           >
-                            {actionLoading ? (
+                            {approveMutation.isPending ? (
                               <Loader2 className="w-4 h-4 animate-spin" />
                             ) : (
                               <MessageSquare className="w-4 h-4" />
