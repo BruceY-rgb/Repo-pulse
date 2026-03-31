@@ -11,6 +11,7 @@ import {
   Menu,
   X,
   Github,
+  CheckSquare,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +23,7 @@ const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/repositories', label: 'Repositories', icon: GitBranch },
   { path: '/analysis', label: 'AI Analysis', icon: Brain },
+  { path: '/approvals', label: 'Approvals', icon: CheckSquare },
   { path: '/notifications', label: 'Notifications', icon: Bell, badge: 3 },
   { path: '/reports', label: 'Reports', icon: FileText },
   { path: '/settings', label: 'Settings', icon: Settings },
@@ -129,13 +131,6 @@ export function Layout() {
               
               <Button variant="ghost" size="icon" className="text-[var(--github-text-secondary)] hover:text-white hover:bg-white/5">
                 <Github className="w-5 h-5" />
-              </Button>
-
-              <div className="h-6 w-px bg-[var(--github-border)] mx-1" />
-
-              <Button className="btn-x-primary gap-2 text-sm">
-                <Plus className="w-4 h-4" />
-                Connect Repo
               </Button>
             </div>
           </div>

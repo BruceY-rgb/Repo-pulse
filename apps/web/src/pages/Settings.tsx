@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   Brain,
   Loader2,
+  Link,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,7 +27,8 @@ import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { settingsService } from '@/services/settings.service';
-import type { AIProvider, AIConfig } from '@/services/settings.service';
+import { notificationService } from '@/services/notification.service';
+import type { AIProvider, AIConfig, NotificationPreferences } from '@/services/notification.service';
 
 const connectedAccounts = [
   { provider: 'GitHub', username: 'johndoe', connected: true, icon: Github },
@@ -48,6 +50,20 @@ export function Settings() {
   const [aiSaving, setAiSaving] = useState(false);
   const [aiSaved, setAiSaved] = useState(false);
 
+  // 通知配置状态
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>({
+    channels: ['inApp'],
+    events: {
+      highRisk: true,
+      prUpdates: true,
+      analysisComplete: true,
+      weeklyReport: false,
+    },
+  });
+  const [notifLoading, setNotifLoading] = useState(false);
+  const [notifSaving, setNotifSaving] = useState(false);
+  const [notifSaved, setNotifSaved] = useState(false);
+
   // 加载 AI 配置
   useEffect(() => {
     const loadAIConfig = async () => {
@@ -64,6 +80,22 @@ export function Settings() {
     loadAIConfig();
   }, []);
 
+  // 加载通知配置
+  useEffect(() => {
+    const loadNotifPrefs = async () => {
+      setNotifLoading(true);
+      try {
+        const prefs = await notificationService.getPreferences();
+        setNotifPrefs(prefs);
+      } catch (error) {
+        console.error('Failed to load notification preferences:', error);
+      } finally {
+        setNotifLoading(false);
+      }
+    };
+    loadNotifPrefs();
+  }, []);
+
   const handleSaveAI = async () => {
     setAiSaving(true);
     try {
@@ -77,9 +109,29 @@ export function Settings() {
     }
   };
 
+  const handleSaveNotifications = async () => {
+    setNotifSaving(true);
+    try {
+      await notificationService.updatePreferences(notifPrefs);
+      setNotifSaved(true);
+      setTimeout(() => setNotifSaved(false), 3000);
+    } catch (error) {
+      console.error('Failed to save notification preferences:', error);
+    } finally {
+      setNotifSaving(false);
+    }
+  };
+
   const handleSave = () => {
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
+  };
+
+  const toggleChannel = (channel: string) => {
+    const channels = notifPrefs.channels.includes(channel as any)
+      ? notifPrefs.channels.filter((c) => c !== channel)
+      : [...notifPrefs.channels, channel as any];
+    setNotifPrefs({ ...notifPrefs, channels });
   };
 
   return (
@@ -92,7 +144,7 @@ export function Settings() {
             Manage your account and preferences
           </p>
         </div>
-        <Button 
+        <Button
           className="btn-x-primary gap-2"
           onClick={handleSave}
         >
@@ -103,21 +155,21 @@ export function Settings() {
 
       <Tabs defaultValue="profile" className="w-full">
         <TabsList className="bg-[var(--github-surface)] border border-[var(--github-border)]">
-          <TabsTrigger 
+          <TabsTrigger
             value="profile"
             className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
           >
             <User className="w-4 h-4 mr-2" />
             Profile
           </TabsTrigger>
-          <TabsTrigger 
+          <TabsTrigger
             value="notifications"
             className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
           >
             <Bell className="w-4 h-4 mr-2" />
             Notifications
           </TabsTrigger>
-          <TabsTrigger 
+          <TabsTrigger
             value="integrations"
             className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
           >
@@ -167,24 +219,24 @@ export function Settings() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="name" className="text-sm text-white">Full Name</Label>
-                  <Input 
-                    id="name" 
+                  <Input
+                    id="name"
                     defaultValue="John Doe"
                     className="bg-[var(--github-surface)] border-[var(--github-border)]"
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="username" className="text-sm text-white">Username</Label>
-                  <Input 
-                    id="username" 
+                  <Input
+                    id="username"
                     defaultValue="johndoe"
                     className="bg-[var(--github-surface)] border-[var(--github-border)]"
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="email" className="text-sm text-white">Email</Label>
-                  <Input 
-                    id="email" 
+                  <Input
+                    id="email"
                     type="email"
                     defaultValue="john@example.com"
                     className="bg-[var(--github-surface)] border-[var(--github-border)]"
@@ -192,8 +244,8 @@ export function Settings() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="company" className="text-sm text-white">Company</Label>
-                  <Input 
-                    id="company" 
+                  <Input
+                    id="company"
                     defaultValue="Acme Corp"
                     className="bg-[var(--github-surface)] border-[var(--github-border)]"
                   />
@@ -202,8 +254,8 @@ export function Settings() {
 
               <div className="space-y-2">
                 <Label htmlFor="bio" className="text-sm text-white">Bio</Label>
-                <textarea 
-                  id="bio" 
+                <textarea
+                  id="bio"
                   rows={3}
                   defaultValue="Full-stack developer passionate about clean code and AI."
                   className="w-full px-3 py-2 rounded-md bg-[var(--github-surface)] border border-[var(--github-border)] text-white text-sm resize-none focus:outline-none focus:border-[var(--github-accent)]"
@@ -215,75 +267,174 @@ export function Settings() {
 
         {/* Notifications Tab */}
         <TabsContent value="notifications" className="mt-4 space-y-4">
-          <Card className="card-github">
-            <CardHeader>
-              <CardTitle className="text-base font-semibold text-white">Notification Preferences</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <h4 className="text-sm font-medium text-[var(--github-text-secondary)] uppercase tracking-wider">
-                  Channels
-                </h4>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
-                    <div className="flex items-center gap-3">
-                      <Mail className="w-5 h-5 text-[var(--github-text-secondary)]" />
-                      <div>
-                        <p className="text-sm text-white">Email Notifications</p>
-                        <p className="text-xs text-[var(--github-text-secondary)]">Receive updates via email</p>
+          {notifLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-[var(--github-accent)]" />
+            </div>
+          ) : (
+            <>
+              <Card className="card-github">
+                <CardHeader>
+                  <CardTitle className="text-base font-semibold text-white">Notification Channels</CardTitle>
+                  <CardDescription className="text-[var(--github-text-secondary)]">
+                    Configure how you want to receive notifications
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
+                      <div className="flex items-center gap-3">
+                        <Mail className="w-5 h-5 text-[var(--github-text-secondary)]" />
+                        <div>
+                          <p className="text-sm text-white">Email</p>
+                          <p className="text-xs text-[var(--github-text-secondary)]">Receive updates via email</p>
+                        </div>
                       </div>
+                      <Switch
+                        checked={notifPrefs.channels.includes('email')}
+                        onCheckedChange={() => toggleChannel('email')}
+                      />
                     </div>
-                    <Switch defaultChecked />
-                  </div>
-                  <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
-                    <div className="flex items-center gap-3">
-                      <Smartphone className="w-5 h-5 text-[var(--github-text-secondary)]" />
-                      <div>
-                        <p className="text-sm text-white">Push Notifications</p>
-                        <p className="text-xs text-[var(--github-text-secondary)]">Receive push notifications</p>
+                    {notifPrefs.channels.includes('email') && (
+                      <div className="ml-12 space-y-2">
+                        <Input
+                          placeholder="your@email.com"
+                          value={notifPrefs.email || ''}
+                          onChange={(e) => setNotifPrefs({ ...notifPrefs, email: e.target.value })}
+                          className="bg-[var(--github-surface)] border-[var(--github-border)]"
+                        />
                       </div>
-                    </div>
-                    <Switch defaultChecked />
-                  </div>
-                  <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
-                    <div className="flex items-center gap-3">
-                      <Slack className="w-5 h-5 text-[var(--github-text-secondary)]" />
-                      <div>
-                        <p className="text-sm text-white">Slack Integration</p>
-                        <p className="text-xs text-[var(--github-text-secondary)]">Send notifications to Slack</p>
-                      </div>
-                    </div>
-                    <Switch defaultChecked />
-                  </div>
-                </div>
-              </div>
+                    )}
 
-              <Separator className="bg-[var(--github-border)]" />
-
-              <div className="space-y-4">
-                <h4 className="text-sm font-medium text-[var(--github-text-secondary)] uppercase tracking-wider">
-                  Event Types
-                </h4>
-                <div className="space-y-4">
-                  {[
-                    { label: 'High Risk Alerts', desc: 'Critical security and performance issues', default: true },
-                    { label: 'PR Updates', desc: 'Pull request created, updated, or merged', default: true },
-                    { label: 'Analysis Complete', desc: 'AI analysis finished for a PR', default: true },
-                    { label: 'Weekly Reports', desc: 'Weekly code quality summary', default: false },
-                    { label: 'Team Activity', desc: 'Team member actions and updates', default: false },
-                  ].map((item) => (
-                    <div key={item.label} className="flex items-center justify-between p-4 rounded-lg bg-white/5">
-                      <div>
-                        <p className="text-sm text-white">{item.label}</p>
-                        <p className="text-xs text-[var(--github-text-secondary)]">{item.desc}</p>
+                    <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
+                      <div className="flex items-center gap-3">
+                        <Link className="w-5 h-5 text-[var(--github-text-secondary)]" />
+                        <div>
+                          <p className="text-sm text-white">DingTalk</p>
+                          <p className="text-xs text-[var(--github-text-secondary)]">Send to DingTalk webhook</p>
+                        </div>
                       </div>
-                      <Switch defaultChecked={item.default} />
+                      <Switch
+                        checked={notifPrefs.channels.includes('dingtalk')}
+                        onCheckedChange={() => toggleChannel('dingtalk')}
+                      />
                     </div>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+
+                    <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
+                      <div className="flex items-center gap-3">
+                        <Link className="w-5 h-5 text-[var(--github-text-secondary)]" />
+                        <div>
+                          <p className="text-sm text-white">Feishu</p>
+                          <p className="text-xs text-[var(--github-text-secondary)]">Send to Feishu webhook</p>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={notifPrefs.channels.includes('feishu')}
+                        onCheckedChange={() => toggleChannel('feishu')}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
+                      <div className="flex items-center gap-3">
+                        <Bell className="w-5 h-5 text-[var(--github-text-secondary)]" />
+                        <div>
+                          <p className="text-sm text-white">In-App</p>
+                          <p className="text-xs text-[var(--github-text-secondary)]">Receive in-app notifications</p>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={notifPrefs.channels.includes('inApp')}
+                        onCheckedChange={() => toggleChannel('inApp')}
+                      />
+                    </div>
+                  </div>
+
+                  {(notifPrefs.channels.includes('dingtalk') ||
+                    notifPrefs.channels.includes('feishu') ||
+                    notifPrefs.channels.includes('webhook')) && (
+                    <>
+                      <Separator className="bg-[var(--github-border)]" />
+                      <div className="space-y-2">
+                        <Label className="text-sm text-white">Webhook URL</Label>
+                        <Input
+                          placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx"
+                          value={notifPrefs.webhookUrl || ''}
+                          onChange={(e) => setNotifPrefs({ ...notifPrefs, webhookUrl: e.target.value })}
+                          className="bg-[var(--github-surface)] border-[var(--github-border)]"
+                        />
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="card-github">
+                <CardHeader>
+                  <CardTitle className="text-base font-semibold text-white">Event Types</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
+                    <div>
+                      <p className="text-sm text-white">High Risk Alerts</p>
+                      <p className="text-xs text-[var(--github-text-secondary)]">Critical security and performance issues</p>
+                    </div>
+                    <Switch
+                      checked={notifPrefs.events.highRisk}
+                      onCheckedChange={(checked) =>
+                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, highRisk: checked } })
+                      }
+                    />
+                  </div>
+                  <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
+                    <div>
+                      <p className="text-sm text-white">PR Updates</p>
+                      <p className="text-xs text-[var(--github-text-secondary)]">Pull request created, updated, or merged</p>
+                    </div>
+                    <Switch
+                      checked={notifPrefs.events.prUpdates}
+                      onCheckedChange={(checked) =>
+                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, prUpdates: checked } })
+                      }
+                    />
+                  </div>
+                  <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
+                    <div>
+                      <p className="text-sm text-white">Analysis Complete</p>
+                      <p className="text-xs text-[var(--github-text-secondary)]">AI analysis finished for a PR</p>
+                    </div>
+                    <Switch
+                      checked={notifPrefs.events.analysisComplete}
+                      onCheckedChange={(checked) =>
+                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, analysisComplete: checked } })
+                      }
+                    />
+                  </div>
+                  <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
+                    <div>
+                      <p className="text-sm text-white">Weekly Reports</p>
+                      <p className="text-xs text-[var(--github-text-secondary)]">Weekly code quality summary</p>
+                    </div>
+                    <Switch
+                      checked={notifPrefs.events.weeklyReport}
+                      onCheckedChange={(checked) =>
+                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, weeklyReport: checked } })
+                      }
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Button
+                onClick={handleSaveNotifications}
+                disabled={notifSaving}
+                className="btn-x-primary gap-2"
+              >
+                {notifSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                {notifSaved ? <CheckCircle className="w-4 h-4" /> : null}
+                {notifSaving ? 'Saving...' : notifSaved ? 'Saved!' : 'Save Notification Settings'}
+              </Button>
+            </>
+          )}
         </TabsContent>
 
         {/* Integrations Tab */}
@@ -365,24 +516,24 @@ export function Settings() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="current" className="text-sm text-white">Current Password</Label>
-                <Input 
-                  id="current" 
+                <Input
+                  id="current"
                   type="password"
                   className="bg-[var(--github-surface)] border-[var(--github-border)]"
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="new" className="text-sm text-white">New Password</Label>
-                <Input 
-                  id="new" 
+                <Input
+                  id="new"
                   type="password"
                   className="bg-[var(--github-surface)] border-[var(--github-border)]"
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirm" className="text-sm text-white">Confirm New Password</Label>
-                <Input 
-                  id="confirm" 
+                <Input
+                  id="confirm"
                   type="password"
                   className="bg-[var(--github-surface)] border-[var(--github-border)]"
                 />

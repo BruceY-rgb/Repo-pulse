@@ -10,6 +10,9 @@ import { WebhookModule } from './modules/webhook/webhook.module';
 import { EventModule } from './modules/event/event.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { AIModule } from './modules/ai/ai.module';
+import { FilterModule } from './modules/filter/filter.module';
+import { ApprovalModule } from './modules/approval/approval.module';
+import { NotificationModule } from './modules/notification/notification.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { HttpExceptionFilter } from './common/filters';
@@ -57,11 +60,11 @@ import { envValidationSchema } from './config/env.validation';
     EventModule,
     SettingsModule,
     AIModule,
+    FilterModule,
+    ApprovalModule,
+    NotificationModule,
 
     // Future modules (uncomment as implemented):
-    // FilterModule,
-    // ApprovalModule,
-    // NotificationModule,
     // DashboardModule,
     // ReportModule,
     // WorkspaceModule,

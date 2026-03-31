@@ -1,0 +1,119 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Body,
+  Param,
+  ParseUUIDPipe,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import {
+  NotificationService,
+  NotificationPreferences,
+  SendNotificationDto,
+} from './notification.service';
+import type { Notification, NotificationStatus, NotificationChannel } from '@repo-pulse/database';
+
+@Controller('notifications')
+@UseGuards(AuthGuard('jwt'))
+export class NotificationController {
+  constructor(private readonly notificationService: NotificationService) {}
+
+  /**
+   * 获取用户通知偏好
+   */
+  @Get('preferences')
+  async getPreferences(
+    @CurrentUser() user: { userId: string },
+  ): Promise<NotificationPreferences> {
+    return this.notificationService.getPreferences(user.userId);
+  }
+
+  /**
+   * 更新用户通知偏好
+   */
+  @Post('preferences')
+  async updatePreferences(
+    @CurrentUser() user: { userId: string },
+    @Body() prefs: Partial<NotificationPreferences>,
+  ): Promise<NotificationPreferences> {
+    return this.notificationService.updatePreferences(user.userId, prefs);
+  }
+
+  /**
+   * 获取通知列表
+   */
+  @Get()
+  async getNotifications(
+    @CurrentUser() user: { userId: string },
+    @Query('status') status?: NotificationStatus,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ): Promise<{ notifications: Notification[]; total: number }> {
+    return this.notificationService.getUserNotifications(user.userId, {
+      status,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
+  }
+
+  /**
+   * 获取未读数量
+   */
+  @Get('unread-count')
+  async getUnreadCount(
+    @CurrentUser() user: { userId: string },
+  ): Promise<{ count: number }> {
+    const count = await this.notificationService.getUnreadCount(user.userId);
+    return { count };
+  }
+
+  /**
+   * 标记通知为已读
+   */
+  @Post(':id/read')
+  async markAsRead(
+    @CurrentUser() user: { userId: string },
+    @Param('id', ParseUUIDPipe) notificationId: string,
+  ): Promise<{ success: boolean }> {
+    await this.notificationService.markAsRead(notificationId, user.userId);
+    return { success: true };
+  }
+
+  /**
+   * 标记所有通知为已读
+   */
+  @Post('read-all')
+  async markAllAsRead(
+    @CurrentUser() user: { userId: string },
+  ): Promise<{ success: boolean }> {
+    await this.notificationService.markAllAsRead(user.userId);
+    return { success: true };
+  }
+
+  /**
+   * 删除通知
+   */
+  @Delete(':id')
+  async deleteNotification(
+    @CurrentUser() user: { userId: string },
+    @Param('id', ParseUUIDPipe) notificationId: string,
+  ): Promise<{ success: boolean }> {
+    await this.notificationService.deleteNotification(notificationId, user.userId);
+    return { success: true };
+  }
+
+  /**
+   * 手动发送通知（管理员用）
+   */
+  @Post('send')
+  async sendNotification(
+    @Body() dto: SendNotificationDto,
+  ): Promise<Notification> {
+    return this.notificationService.send(dto);
+  }
+}

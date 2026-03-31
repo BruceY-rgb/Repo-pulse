@@ -8,6 +8,7 @@ import { AIAnalysis } from '@/pages/AIAnalysis';
 import { Notifications } from '@/pages/Notifications';
 import { Reports } from '@/pages/Reports';
 import { Settings } from '@/pages/Settings';
+import { Approvals } from '@/pages/Approvals';
 import { Landing } from '@/pages/Landing';
 import { Login } from '@/pages/Login';
 import { AuthCallback } from '@/pages/AuthCallback';
@@ -30,6 +31,7 @@ function App() {
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/approvals" element={<Approvals />} />
           </Route>
         </Route>
       </Routes>
