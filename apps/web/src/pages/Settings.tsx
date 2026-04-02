@@ -13,7 +13,6 @@ import {
   CheckCircle,
   AlertTriangle,
   Brain,
-  Loader2,
   Link,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -26,6 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Spinner } from '@/components/ui/spinner';
 import { settingsService } from '@/services/settings.service';
 import { notificationService } from '@/services/notification.service';
 import type { AIProvider, AIConfig, NotificationPreferences } from '@/services/notification.service';
@@ -269,7 +269,7 @@ export function Settings() {
         <TabsContent value="notifications" className="mt-4 space-y-4">
           {notifLoading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-[var(--github-accent)]" />
+              <Spinner className="h-6 w-6 text-[var(--github-accent)]" />
             </div>
           ) : (
             <>
@@ -429,7 +429,7 @@ export function Settings() {
                 disabled={notifSaving}
                 className="btn-x-primary gap-2"
               >
-                {notifSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                {notifSaving && <Spinner className="h-4 w-4" />}
                 {notifSaved ? <CheckCircle className="w-4 h-4" /> : null}
                 {notifSaving ? 'Saving...' : notifSaved ? 'Saved!' : 'Save Notification Settings'}
               </Button>
@@ -580,7 +580,7 @@ export function Settings() {
             <CardContent className="space-y-6">
               {aiLoading ? (
                 <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-[var(--github-accent)]" />
+                  <Spinner className="h-6 w-6 text-[var(--github-accent)]" />
                 </div>
               ) : (
                 <>
@@ -674,7 +674,7 @@ export function Settings() {
                     disabled={aiSaving || !aiConfig.aiProvider}
                     className="btn-x-primary gap-2"
                   >
-                    {aiSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {aiSaving && <Spinner className="h-4 w-4" />}
                     {aiSaved ? <CheckCircle className="w-4 h-4" /> : null}
                     {aiSaving ? 'Saving...' : aiSaved ? 'Saved!' : 'Save AI Config'}
                   </Button>
