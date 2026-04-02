@@ -57,6 +57,7 @@ export function Login() {
             <div className="space-y-2">
               <Label>Github Client Secret</Label>
               <Input
+                type="password"
                 value={clientSecret}
                 onChange={(e) => setClientSecret(e.target.value)}
                 placeholder="输入 Client Secret"
