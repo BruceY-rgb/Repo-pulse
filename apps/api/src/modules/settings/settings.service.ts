@@ -1,13 +1,41 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { prisma } from '@repo-pulse/database';
 
-export type AIProvider = 'openai' | 'anthropic' | 'ollama' | 'custom';
+export type AIProvider =
+  | 'openai'
+  | 'anthropic'
+  | 'ollama'
+  | 'deepseek'
+  | 'google'
+  | 'moonshot'
+  | 'zhipu'
+  | 'minimax'
+  | 'doubao'
+  | 'qwen'
+  | 'custom';
 
 export interface AIConfig {
   aiProvider?: AIProvider;
   aiApiKey?: string;
   aiBaseUrl?: string;
   aiModel?: string;
+}
+
+export interface ConnectionTestResult {
+  success: boolean;
+  message: string;
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+
+export interface FetchModelsResult {
+  success: boolean;
+  message: string;
+  models: ModelInfo[];
 }
 
 @Injectable()
@@ -96,5 +124,30 @@ export class SettingsService {
       aiBaseUrl: updatedUser.aiBaseUrl || undefined,
       aiModel: updatedUser.aiModel || undefined,
     };
+  }
+
+  /**
+   * 测试 AI 连接
+   */
+  async testConnection(
+    provider: AIProvider,
+    apiKey: string,
+    baseUrl?: string,
+  ): Promise<ConnectionTestResult> {
+    // 动态导入 ai-sdk，避免循环依赖
+    const { testConnection: test } = await import('@repo-pulse/ai-sdk');
+    return test(provider, apiKey, baseUrl);
+  }
+
+  /**
+   * 拉取 AI 模型列表
+   */
+  async fetchModels(
+    provider: AIProvider,
+    apiKey: string,
+    baseUrl?: string,
+  ): Promise<FetchModelsResult> {
+    const { fetchModels: fetch } = await import('@repo-pulse/ai-sdk');
+    return fetch(provider, apiKey, baseUrl);
   }
 }
