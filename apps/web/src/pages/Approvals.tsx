@@ -6,8 +6,6 @@ import {
   Clock,
   AlertTriangle,
   Loader2,
-  Search,
-  Filter,
   MessageSquare,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';

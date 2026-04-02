@@ -7,7 +7,6 @@ import {
   Github,
   Key,
   Mail,
-  Smartphone,
   Slack,
   Save,
   CheckCircle,
@@ -26,9 +25,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { settingsService } from '@/services/settings.service';
+import { settingsService, PROVIDER_LABELS, PROVIDER_DEFAULT_MODELS } from '@/services/settings.service';
+import type { AIProvider, AIConfig } from '@/services/settings.service';
+import { getProviderLogo } from '@/lib/provider-logo';
 import { notificationService } from '@/services/notification.service';
-import type { AIProvider, AIConfig, NotificationPreferences } from '@/services/notification.service';
+import type { NotificationPreferences } from '@/services/notification.service';
 
 const connectedAccounts = [
   { provider: 'GitHub', username: 'johndoe', connected: true, icon: Github },
@@ -597,30 +598,76 @@ export function Settings() {
                       <SelectContent>
                         <SelectItem value="openai">
                           <div className="flex items-center gap-2">
-                            <span>OpenAI (GPT-4)</span>
+                            <img src={getProviderLogo('openai')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.openai}</span>
                           </div>
                         </SelectItem>
                         <SelectItem value="anthropic">
                           <div className="flex items-center gap-2">
-                            <span>Anthropic (Claude)</span>
+                            <img src={getProviderLogo('anthropic')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.anthropic}</span>
                           </div>
                         </SelectItem>
                         <SelectItem value="ollama">
                           <div className="flex items-center gap-2">
-                            <span>Ollama (Local)</span>
+                            <img src={getProviderLogo('ollama')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.ollama}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="deepseek">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('deepseek')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.deepseek}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="google">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('google')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.google}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="moonshot">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('moonshot')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.moonshot}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="zhipu">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('zhipu')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.zhipu}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="minimax">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('minimax')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.minimax}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="doubao">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('doubao')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.doubao}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="qwen">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('qwen')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.qwen}</span>
                           </div>
                         </SelectItem>
                         <SelectItem value="custom">
                           <div className="flex items-center gap-2">
-                            <span>Custom Endpoint</span>
+                            <img src={getProviderLogo('custom')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.custom}</span>
                           </div>
                         </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
-                  {/* API Key - only show for openai and anthropic */}
-                  {(aiConfig.aiProvider === 'openai' || aiConfig.aiProvider === 'anthropic') && (
+                  {/* API Key - show for all providers except ollama and custom */}
+                  {(aiConfig.aiProvider && aiConfig.aiProvider !== 'ollama' && aiConfig.aiProvider !== 'custom') && (
                     <div className="space-y-2">
                       <Label htmlFor="aiApiKey" className="text-sm text-white">API Key</Label>
                       <Input
@@ -690,28 +737,33 @@ export function Settings() {
 
 // Helper functions
 function getDefaultModel(provider?: string): string {
-  switch (provider) {
-    case 'openai':
-      return 'gpt-4';
-    case 'anthropic':
-      return 'claude-sonnet-4-20250514';
-    case 'ollama':
-      return 'llama3';
-    case 'custom':
-      return 'gpt-4';
-    default:
-      return '';
-  }
+  if (!provider || !(provider in PROVIDER_DEFAULT_MODELS)) return '';
+  return PROVIDER_DEFAULT_MODELS[provider as AIProvider] || '';
 }
 
 function getModelHint(provider?: string): string {
+  if (!provider) return 'Select a provider first';
   switch (provider) {
     case 'openai':
-      return 'e.g., gpt-4, gpt-4-turbo, gpt-3.5-turbo';
+      return 'e.g., gpt-4o, gpt-4-turbo, gpt-3.5-turbo';
     case 'anthropic':
-      return 'e.g., claude-sonnet-4-20250514, claude-opus-4-20250514, claude-3-5-sonnet-20241022';
+      return 'e.g., claude-sonnet-4-20250514, claude-opus-4-20250514';
     case 'ollama':
       return 'e.g., llama3, mistral, codellama';
+    case 'deepseek':
+      return 'e.g., deepseek-chat, deepseek-coder';
+    case 'google':
+      return 'e.g., gemini-2.0-flash-exp, gemini-1.5-pro';
+    case 'moonshot':
+      return 'e.g., kimi-longtext-chat, kimi-math';
+    case 'zhipu':
+      return 'e.g., glm-4-flash, glm-4';
+    case 'minimax':
+      return 'e.g., MiniMax-M2.1';
+    case 'doubao':
+      return 'e.g., doubao-pro-32k';
+    case 'qwen':
+      return 'e.g., qwen-turbo, qwen-plus';
     case 'custom':
       return 'Enter the model name supported by your custom endpoint';
     default:

@@ -1,9 +1,60 @@
 /**
+ * AI 提供商类型定义
+ */
+export type ProviderType =
+  | 'anthropic'
+  | 'openai'
+  | 'deepseek'
+  | 'google'
+  | 'moonshot'
+  | 'zhipu'
+  | 'minimax'
+  | 'doubao'
+  | 'qwen'
+  | 'custom';
+
+/**
+ * 各提供商的默认 Base URL
+ */
+export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
+  anthropic: 'https://api.anthropic.com',
+  openai: 'https://api.openai.com/v1',
+  deepseek: 'https://api.deepseek.com',
+  google: 'https://generativelanguage.googleapis.com',
+  moonshot: 'https://api.moonshot.cn/v1',
+  zhipu: 'https://open.bigmodel.cn/api/paas/v4',
+  minimax: 'https://api.minimax.chat/v1',
+  doubao: 'https://ark.cn-beijing.volces.com/api/v3',
+  qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  custom: '',
+};
+
+/**
+ * 提供商显示名称
+ */
+export const PROVIDER_LABELS: Record<ProviderType, string> = {
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  deepseek: 'DeepSeek',
+  google: 'Google Gemini',
+  moonshot: 'Moonshot / Kimi',
+  zhipu: '智谱 AI',
+  minimax: 'MiniMax',
+  doubao: '豆包',
+  qwen: '通义千问',
+  custom: 'OpenAI 兼容格式',
+};
+
+/**
  * AI 提供商统一接口
  * 所有模型提供商（OpenAI、Anthropic、Ollama）必须实现此接口
  */
 export interface AIProvider {
   readonly name: string;
+  /** 渠道标识符 */
+  readonly channelId: string;
+  /** 渠道显示名称 */
+  readonly displayName: string;
 
   /** 同步分析（等待完整结果） */
   analyze(input: AnalysisInput): Promise<AnalysisOutput>;
@@ -54,6 +105,7 @@ export interface AIProviderConfig {
   apiKey?: string;
   baseUrl?: string;
   model: string;
+  provider?: ProviderType;
   timeout?: number;
   maxRetries?: number;
 }
