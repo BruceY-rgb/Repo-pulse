@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { UserService } from '../user/user.service';
+import { SyncService } from '../sync/sync.service';
 import { User } from '@repo-pulse/database';
 
 export interface JwtPayload {
@@ -24,6 +25,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly userService: UserService,
+    private readonly syncService: SyncService,
   ) {}
 
   async validateUser(email: string, password: string): Promise<User> {
@@ -104,6 +106,14 @@ export class AuthService {
         githubRefreshToken: profile.githubRefreshToken,
       });
     }
+
+    // 登录成功后触发后台同步（不 await，避免阻塞登录响应）
+    // 使用 setTimeout 延迟一下，确保用户记录已提交到数据库
+    setTimeout(() => {
+      this.syncService.syncUserRepositories(user.id).catch((err) => {
+        this.logger.error(`Failed to sync user repositories for ${user.id}`, err);
+      });
+    }, 100);
 
     return this.generateTokens({
       sub: user.id,
