@@ -9,6 +9,7 @@ import { GithubStrategy } from './strategies/github.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { UserModule } from '../user/user.module';
+import { SyncModule } from '../sync/sync.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { UserModule } from '../user/user.module';
       }),
     }),
     UserModule,
+    SyncModule,
   ],
   controllers: [AuthController],
   providers: [

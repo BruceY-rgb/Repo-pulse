@@ -80,6 +80,17 @@ export function Settings() {
   const [notifSaving, setNotifSaving] = useState(false);
   const [notifSaved, setNotifSaved] = useState(false);
 
+  // 安全获取 channels 数组
+  const getChannels = () => notifPrefs?.channels || ['inApp'];
+
+  // 安全获取 events 对象
+  const getEvents = () => notifPrefs?.events || {
+    highRisk: true,
+    prUpdates: true,
+    analysisComplete: true,
+    weeklyReport: false,
+  };
+
   // 加载 AI 配置
   useEffect(() => {
     const loadAIConfig = async () => {
@@ -207,11 +218,12 @@ export function Settings() {
   };
 
   const toggleChannel = (channel: string) => {
-    const isIncluded = notifPrefs.channels.includes(channel as typeof notifPrefs.channels[number]);
-    const channels = isIncluded
-      ? notifPrefs.channels.filter((c) => c !== channel)
-      : [...notifPrefs.channels, channel as typeof notifPrefs.channels[number]];
-    setNotifPrefs({ ...notifPrefs, channels });
+    const channels = getChannels();
+    const isIncluded = channels.includes(channel as typeof channels[number]);
+    const newChannels = isIncluded
+      ? channels.filter((c) => c !== channel)
+      : [...channels, channel as typeof channels[number]];
+    setNotifPrefs({ ...notifPrefs, channels: newChannels });
   };
 
   return (
@@ -371,11 +383,11 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('email')}
+                        checked={getChannels().includes('email')}
                         onCheckedChange={() => toggleChannel('email')}
                       />
                     </div>
-                    {notifPrefs.channels.includes('email') && (
+                    {getChannels().includes('email') && (
                       <div className="ml-12 space-y-2">
                         <Input
                           placeholder="your@email.com"
@@ -395,7 +407,7 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('dingtalk')}
+                        checked={getChannels().includes('dingtalk')}
                         onCheckedChange={() => toggleChannel('dingtalk')}
                       />
                     </div>
@@ -409,7 +421,7 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('feishu')}
+                        checked={getChannels().includes('feishu')}
                         onCheckedChange={() => toggleChannel('feishu')}
                       />
                     </div>
@@ -423,15 +435,15 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('inApp')}
+                        checked={getChannels().includes('inApp')}
                         onCheckedChange={() => toggleChannel('inApp')}
                       />
                     </div>
                   </div>
 
-                  {(notifPrefs.channels.includes('dingtalk') ||
-                    notifPrefs.channels.includes('feishu') ||
-                    notifPrefs.channels.includes('webhook')) && (
+                  {(getChannels().includes('dingtalk') ||
+                    getChannels().includes('feishu') ||
+                    getChannels().includes('webhook')) && (
                     <>
                       <Separator className="bg-[var(--github-border)]" />
                       <div className="space-y-2">
@@ -459,9 +471,9 @@ export function Settings() {
                       <p className="text-xs text-[var(--github-text-secondary)]">Critical security and performance issues</p>
                     </div>
                     <Switch
-                      checked={notifPrefs.events.highRisk}
+                      checked={getEvents().highRisk}
                       onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, highRisk: checked } })
+                        setNotifPrefs({ ...notifPrefs, events: { ...getEvents(), highRisk: checked } })
                       }
                     />
                   </div>
@@ -471,9 +483,9 @@ export function Settings() {
                       <p className="text-xs text-[var(--github-text-secondary)]">Pull request created, updated, or merged</p>
                     </div>
                     <Switch
-                      checked={notifPrefs.events.prUpdates}
+                      checked={getEvents().prUpdates}
                       onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, prUpdates: checked } })
+                        setNotifPrefs({ ...notifPrefs, events: { ...getEvents(), prUpdates: checked } })
                       }
                     />
                   </div>
@@ -483,9 +495,9 @@ export function Settings() {
                       <p className="text-xs text-[var(--github-text-secondary)]">AI analysis finished for a PR</p>
                     </div>
                     <Switch
-                      checked={notifPrefs.events.analysisComplete}
+                      checked={getEvents().analysisComplete}
                       onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, analysisComplete: checked } })
+                        setNotifPrefs({ ...notifPrefs, events: { ...getEvents(), analysisComplete: checked } })
                       }
                     />
                   </div>
@@ -495,9 +507,9 @@ export function Settings() {
                       <p className="text-xs text-[var(--github-text-secondary)]">Weekly code quality summary</p>
                     </div>
                     <Switch
-                      checked={notifPrefs.events.weeklyReport}
+                      checked={getEvents().weeklyReport}
                       onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, weeklyReport: checked } })
+                        setNotifPrefs({ ...notifPrefs, events: { ...getEvents(), weeklyReport: checked } })
                       }
                     />
                   </div>
