@@ -5,8 +5,6 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @ApiTags('设置')
-@ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
 @Controller('settings')
 export class SettingsController {
   constructor(private readonly settingsService: SettingsService) {}
@@ -15,6 +13,8 @@ export class SettingsController {
    * 获取当前用户的 AI 配置
    */
   @Get('ai')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: '获取 AI 配置' })
   async getAIConfig(@CurrentUser() user: { sub: string }) {
     return this.settingsService.getAIConfig(user.sub);
@@ -24,6 +24,8 @@ export class SettingsController {
    * 更新当前用户的 AI 配置
    */
   @Post('ai')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: '更新 AI 配置' })
   async updateAIConfig(
     @CurrentUser() user: { sub: string },
@@ -39,12 +41,11 @@ export class SettingsController {
   }
 
   /**
-   * 测试 AI 连接
+   * 测试 AI 连接（无需登录，用于配置时测试）
    */
   @Post('ai/test')
   @ApiOperation({ summary: '测试 AI 连接' })
   async testConnection(
-    @CurrentUser() user: { sub: string },
     @Body()
     body: {
       provider: AIProvider;
@@ -60,12 +61,11 @@ export class SettingsController {
   }
 
   /**
-   * 拉取 AI 模型列表
+   * 拉取 AI 模型列表（无需登录，用于配置时拉取）
    */
   @Post('ai/models')
   @ApiOperation({ summary: '拉取 AI 模型列表' })
   async fetchModels(
-    @CurrentUser() user: { sub: string },
     @Body()
     body: {
       provider: AIProvider;
