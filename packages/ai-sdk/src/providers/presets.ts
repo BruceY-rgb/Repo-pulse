@@ -75,6 +75,12 @@ export const PROVIDER_PRESETS: Record<ProviderType, ProviderPreset> = {
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     defaultModel: 'qwen-turbo',
   },
+  ollama: {
+    channelId: 'ollama',
+    displayName: 'Ollama (本地)',
+    baseUrl: 'http://localhost:11434',
+    defaultModel: 'llama3',
+  },
   custom: {
     channelId: 'custom',
     displayName: 'OpenAI 兼容格式',

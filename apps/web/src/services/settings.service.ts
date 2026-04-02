@@ -21,6 +21,23 @@ export interface AIConfig {
   aiModel?: string;
 }
 
+export interface ConnectionTestResult {
+  success: boolean;
+  message: string;
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+
+export interface FetchModelsResult {
+  success: boolean;
+  message: string;
+  models: ModelInfo[];
+}
+
 /**
  * 提供商显示名称
  */
@@ -72,6 +89,38 @@ export const settingsService = {
    */
   async updateAIConfig(config: Partial<AIConfig>): Promise<AIConfig> {
     const { data } = await apiClient.post<ApiResponse<AIConfig>>('/settings/ai', config);
+    return data.data;
+  },
+
+  /**
+   * 测试 AI 连接
+   */
+  async testConnection(
+    provider: AIProvider,
+    apiKey: string,
+    baseUrl?: string
+  ): Promise<ConnectionTestResult> {
+    const { data } = await apiClient.post<ApiResponse<ConnectionTestResult>>('/settings/ai/test', {
+      provider,
+      apiKey,
+      baseUrl,
+    });
+    return data.data;
+  },
+
+  /**
+   * 拉取 AI 模型列表
+   */
+  async fetchModels(
+    provider: AIProvider,
+    apiKey: string,
+    baseUrl?: string
+  ): Promise<FetchModelsResult> {
+    const { data } = await apiClient.post<ApiResponse<FetchModelsResult>>('/settings/ai/models', {
+      provider,
+      apiKey,
+      baseUrl,
+    });
     return data.data;
   },
 };

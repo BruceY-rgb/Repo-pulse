@@ -37,4 +37,46 @@ export class SettingsController {
   ) {
     return this.settingsService.updateAIConfig(user.sub, body);
   }
+
+  /**
+   * 测试 AI 连接
+   */
+  @Post('ai/test')
+  @ApiOperation({ summary: '测试 AI 连接' })
+  async testConnection(
+    @CurrentUser() user: { sub: string },
+    @Body()
+    body: {
+      provider: AIProvider;
+      apiKey: string;
+      baseUrl?: string;
+    },
+  ) {
+    return this.settingsService.testConnection(
+      body.provider,
+      body.apiKey,
+      body.baseUrl,
+    );
+  }
+
+  /**
+   * 拉取 AI 模型列表
+   */
+  @Post('ai/models')
+  @ApiOperation({ summary: '拉取 AI 模型列表' })
+  async fetchModels(
+    @CurrentUser() user: { sub: string },
+    @Body()
+    body: {
+      provider: AIProvider;
+      apiKey: string;
+      baseUrl?: string;
+    },
+  ) {
+    return this.settingsService.fetchModels(
+      body.provider,
+      body.apiKey,
+      body.baseUrl,
+    );
+  }
 }

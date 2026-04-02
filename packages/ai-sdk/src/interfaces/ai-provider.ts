@@ -11,6 +11,7 @@ export type ProviderType =
   | 'minimax'
   | 'doubao'
   | 'qwen'
+  | 'ollama'
   | 'custom';
 
 /**
@@ -26,6 +27,7 @@ export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   minimax: 'https://api.minimax.chat/v1',
   doubao: 'https://ark.cn-beijing.volces.com/api/v3',
   qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  ollama: 'http://localhost:11434',
   custom: '',
 };
 
@@ -42,6 +44,7 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   minimax: 'MiniMax',
   doubao: '豆包',
   qwen: '通义千问',
+  ollama: 'Ollama (本地)',
   custom: 'OpenAI 兼容格式',
 };
 

@@ -47,3 +47,4 @@ packages/database/prisma/migrations/
 
 # claude
 .claude/
+CLAUDE.md

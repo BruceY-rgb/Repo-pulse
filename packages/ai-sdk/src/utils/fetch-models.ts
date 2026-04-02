@@ -110,7 +110,45 @@ export async function fetchModels(
       case 'minimax':
       case 'doubao':
       case 'qwen':
+      case 'ollama':
       case 'custom': {
+        // Ollama 需要特殊处理
+        if (provider === 'ollama') {
+          try {
+            const response = await fetch(`${url}/api/tags`, {
+              method: 'GET',
+            });
+
+            if (!response.ok) {
+              return {
+                success: false,
+                message: `拉取失败 (${response.status})`,
+                models: [],
+              };
+            }
+
+            const data = await response.json() as { models?: { name: string }[] };
+            const models: ModelInfo[] = (data.models || []).map((item) => ({
+              id: item.name,
+              name: item.name,
+              enabled: true,
+            }));
+
+            return {
+              success: true,
+              message: `成功获取 ${models.length} 个模型`,
+              models,
+            };
+          } catch (error) {
+            const message = error instanceof Error ? error.message : '未知错误';
+            return {
+              success: false,
+              message: `拉取失败: ${message}`,
+              models: [],
+            };
+          }
+        }
+
         // OpenAI 兼容格式
         const response = await fetch(`${url}/models`, {
           method: 'GET',

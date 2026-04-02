@@ -64,6 +64,7 @@ export async function testConnection(
       case 'minimax':
       case 'doubao':
       case 'qwen':
+      case 'ollama':
       case 'custom': {
         const openaiProvider = new OpenAICompatibleProvider({
           apiKey,

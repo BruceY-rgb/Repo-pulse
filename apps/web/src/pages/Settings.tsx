@@ -14,6 +14,10 @@ import {
   Brain,
   Loader2,
   Link,
+  Eye,
+  EyeOff,
+  Wifi,
+  Download,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,7 +29,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { settingsService, PROVIDER_LABELS, PROVIDER_DEFAULT_MODELS } from '@/services/settings.service';
+import { settingsService, PROVIDER_LABELS, PROVIDER_DEFAULT_MODELS, type ConnectionTestResult, type ModelInfo } from '@/services/settings.service';
 import type { AIProvider, AIConfig } from '@/services/settings.service';
 import { getProviderLogo } from '@/lib/provider-logo';
 import { notificationService } from '@/services/notification.service';
@@ -51,6 +55,17 @@ export function Settings() {
   const [aiSaving, setAiSaving] = useState(false);
   const [aiSaved, setAiSaved] = useState(false);
 
+  // 连接测试状态
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [hasExistingApiKey, setHasExistingApiKey] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<ConnectionTestResult | null>(null);
+
+  // 模型拉取状态
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [modelFetchResult, setModelFetchResult] = useState<{ success: boolean; message: string; models: ModelInfo[] } | null>(null);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+
   // 通知配置状态
   const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>({
     channels: ['inApp'],
@@ -71,7 +86,14 @@ export function Settings() {
       setAiLoading(true);
       try {
         const config = await settingsService.getAIConfig();
-        setAiConfig(config);
+        // 后端返回 '***' 表示 API Key 已设置（不返回明文）
+        // 前端显示为空，让用户知道已设置，但记录已有 key
+        const hasKey = config.aiApiKey === '***';
+        setHasExistingApiKey(hasKey);
+        setAiConfig({
+          ...config,
+          aiApiKey: '', // 不显示明文
+        });
       } catch (error) {
         console.error('Failed to load AI config:', error);
       } finally {
@@ -110,6 +132,62 @@ export function Settings() {
     }
   };
 
+  const handleTestConnection = async () => {
+    if (!aiConfig.aiProvider) return;
+
+    setTestingConnection(true);
+    setConnectionTestResult(null);
+
+    try {
+      const result = await settingsService.testConnection(
+        aiConfig.aiProvider,
+        aiConfig.aiApiKey || '',
+        aiConfig.aiBaseUrl
+      );
+      setConnectionTestResult(result);
+    } catch (error) {
+      setConnectionTestResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Connection test failed',
+      });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const handleFetchModels = async () => {
+    if (!aiConfig.aiProvider) return;
+
+    setFetchingModels(true);
+    setModelFetchResult(null);
+
+    try {
+      const result = await settingsService.fetchModels(
+        aiConfig.aiProvider,
+        aiConfig.aiApiKey || '',
+        aiConfig.aiBaseUrl
+      );
+      setModelFetchResult(result);
+      if (result.success) {
+        setModels(result.models);
+      }
+    } catch (error) {
+      setModelFetchResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to fetch models',
+        models: [],
+      });
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
+  const toggleModelEnabled = (modelId: string) => {
+    setModels(models.map(m =>
+      m.id === modelId ? { ...m, enabled: !m.enabled } : m
+    ));
+  };
+
   const handleSaveNotifications = async () => {
     setNotifSaving(true);
     try {
@@ -129,9 +207,10 @@ export function Settings() {
   };
 
   const toggleChannel = (channel: string) => {
-    const channels = notifPrefs.channels.includes(channel as any)
+    const isIncluded = notifPrefs.channels.includes(channel as typeof notifPrefs.channels[number]);
+    const channels = isIncluded
       ? notifPrefs.channels.filter((c) => c !== channel)
-      : [...notifPrefs.channels, channel as any];
+      : [...notifPrefs.channels, channel as typeof notifPrefs.channels[number]];
     setNotifPrefs({ ...notifPrefs, channels });
   };
 
@@ -666,25 +745,25 @@ export function Settings() {
                     </Select>
                   </div>
 
-                  {/* API Key - show for all providers except ollama and custom */}
-                  {(aiConfig.aiProvider && aiConfig.aiProvider !== 'ollama' && aiConfig.aiProvider !== 'custom') && (
+                  {/* Base URL - always visible, with default value */}
+                  {aiConfig.aiProvider && aiConfig.aiProvider !== 'ollama' && aiConfig.aiProvider !== 'custom' && (
                     <div className="space-y-2">
-                      <Label htmlFor="aiApiKey" className="text-sm text-white">API Key</Label>
+                      <Label htmlFor="aiBaseUrl" className="text-sm text-white">Base URL</Label>
                       <Input
-                        id="aiApiKey"
-                        type="password"
-                        placeholder={aiConfig.aiApiKey ? '***' : 'Enter your API key'}
-                        value={aiConfig.aiApiKey || ''}
-                        onChange={(e) => setAiConfig({ ...aiConfig, aiApiKey: e.target.value })}
+                        id="aiBaseUrl"
+                        type="url"
+                        placeholder={getDefaultBaseUrl(aiConfig.aiProvider)}
+                        value={aiConfig.aiBaseUrl || ''}
+                        onChange={(e) => setAiConfig({ ...aiConfig, aiBaseUrl: e.target.value })}
                         className="bg-[var(--github-surface)] border-[var(--github-border)]"
                       />
                       <p className="text-xs text-[var(--github-text-secondary)]">
-                        Leave empty to keep the existing API key
+                        Default: {getDefaultBaseUrl(aiConfig.aiProvider)} - Custom URL will override
                       </p>
                     </div>
                   )}
 
-                  {/* Base URL - show for ollama and custom */}
+                  {/* Base URL - for ollama and custom (required) */}
                   {(aiConfig.aiProvider === 'ollama' || aiConfig.aiProvider === 'custom') && (
                     <div className="space-y-2">
                       <Label htmlFor="aiBaseUrl" className="text-sm text-white">
@@ -701,6 +780,72 @@ export function Settings() {
                     </div>
                   )}
 
+                  {/* API Key - with show/hide toggle */}
+                  {(aiConfig.aiProvider && aiConfig.aiProvider !== 'ollama') && (
+                    <div className="space-y-2">
+                      <Label htmlFor="aiApiKey" className="text-sm text-white">API Key</Label>
+                      <div className="relative">
+                        <Input
+                          id="aiApiKey"
+                          type={showApiKey ? 'text' : 'password'}
+                          placeholder="Enter your API key"
+                          value={aiConfig.aiApiKey || ''}
+                          onChange={(e) => setAiConfig({ ...aiConfig, aiApiKey: e.target.value })}
+                          className="bg-[var(--github-surface)] border-[var(--github-border)] pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey(!showApiKey)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--github-text-secondary)] hover:text-white"
+                        >
+                          {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      {aiConfig.aiProvider !== 'custom' && (
+                        <p className="text-xs text-[var(--github-text-secondary)]">
+                          {hasExistingApiKey ? 'API key is set. Enter new value to replace, or leave empty to keep existing.' : 'Leave empty to keep the existing API key'}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Endpoint Preview */}
+                  {aiConfig.aiProvider && aiConfig.aiProvider !== 'ollama' && (
+                    <div className="p-3 rounded-lg bg-white/5 border border-[var(--github-border)]">
+                      <p className="text-xs text-[var(--github-text-secondary)] mb-1">Endpoint Preview</p>
+                      <code className="text-sm text-white break-all">
+                        {getEndpointPreview(aiConfig.aiProvider, aiConfig.aiBaseUrl)}
+                      </code>
+                    </div>
+                  )}
+
+                  {/* Test Connection Button */}
+                  <div className="flex items-center gap-3">
+                    <Button
+                      onClick={handleTestConnection}
+                      disabled={testingConnection || !aiConfig.aiProvider}
+                      variant="outline"
+                      className="border-[var(--github-border)] gap-2"
+                    >
+                      {testingConnection ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Wifi className="w-4 h-4" />
+                      )}
+                      {testingConnection ? 'Testing...' : 'Test Connection'}
+                    </Button>
+                    {connectionTestResult && (
+                      <div className={`flex items-center gap-2 text-sm ${connectionTestResult.success ? 'text-green-400' : 'text-red-400'}`}>
+                        {connectionTestResult.success ? (
+                          <CheckCircle className="w-4 h-4" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4" />
+                        )}
+                        {connectionTestResult.message}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Model */}
                   <div className="space-y-2">
                     <Label htmlFor="aiModel" className="text-sm text-white">Model</Label>
@@ -715,6 +860,65 @@ export function Settings() {
                       {getModelHint(aiConfig.aiProvider)}
                     </p>
                   </div>
+
+                  {/* Fetch Models Button */}
+                  {aiConfig.aiProvider && aiConfig.aiProvider !== 'custom' && (
+                    <div className="space-y-3">
+                      <Button
+                        onClick={handleFetchModels}
+                        disabled={fetchingModels}
+                        variant="outline"
+                        className="border-[var(--github-border)] gap-2"
+                      >
+                        {fetchingModels ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Download className="w-4 h-4" />
+                        )}
+                        {fetchingModels ? 'Fetching...' : 'Fetch Models from Provider'}
+                      </Button>
+
+                      {modelFetchResult && !modelFetchResult.success && (
+                        <div className="flex items-center gap-2 text-sm text-red-400">
+                          <AlertTriangle className="w-4 h-4" />
+                          {modelFetchResult.message}
+                        </div>
+                      )}
+
+                      {/* Model List */}
+                      {models.length > 0 && (
+                        <div className="space-y-2">
+                          <Label className="text-sm text-white">Available Models</Label>
+                          <div className="max-h-48 overflow-y-auto space-y-1 border border-[var(--github-border)] rounded-lg">
+                            {models.map((model) => (
+                              <div
+                                key={model.id}
+                                className="flex items-center justify-between p-2 hover:bg-white/5"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Switch
+                                    checked={model.enabled}
+                                    onCheckedChange={() => toggleModelEnabled(model.id)}
+                                  />
+                                  <span className="text-sm text-white">{model.name}</span>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    setAiConfig({ ...aiConfig, aiModel: model.id });
+                                  }}
+                                  className="text-xs text-[var(--github-accent)] hover:underline"
+                                >
+                                  Use
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <Separator className="bg-[var(--github-border)]" />
 
                   <Button
                     onClick={handleSaveAI}
@@ -739,6 +943,68 @@ export function Settings() {
 function getDefaultModel(provider?: string): string {
   if (!provider || !(provider in PROVIDER_DEFAULT_MODELS)) return '';
   return PROVIDER_DEFAULT_MODELS[provider as AIProvider] || '';
+}
+
+function getDefaultBaseUrl(provider?: string): string {
+  if (!provider) return '';
+
+  const defaultBaseUrls: Record<string, string> = {
+    openai: 'https://api.openai.com/v1',
+    anthropic: 'https://api.anthropic.com',
+    deepseek: 'https://api.deepseek.com',
+    google: 'https://generativelanguage.googleapis.com',
+    moonshot: 'https://api.moonshot.cn/v1',
+    zhipu: 'https://open.bigmodel.cn/api/paas/v4',
+    minimax: 'https://api.minimax.chat/v1',
+    doubao: 'https://ark.cn-beijing.volces.com/api/v3',
+    qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    ollama: 'http://localhost:11434',
+    custom: '',
+  };
+
+  return defaultBaseUrls[provider] || '';
+}
+
+function getEndpointPreview(provider?: string, customBaseUrl?: string): string {
+  if (!provider) return '';
+
+  // 各提供商的端点路径（用于实际 API 调用）
+  const endpointPaths: Record<string, string> = {
+    openai: '/chat/completions',
+    anthropic: '/v1/messages',
+    deepseek: '/chat/completions',
+    google: '/generateContent', // Google 使用特殊的端点
+    moonshot: '/chat/completions',
+    zhipu: '/chat/completions',
+    minimax: '/chat/completions',
+    doubao: '/chat/completions',
+    qwen: '/chat/completions',
+    ollama: '/chat', // Ollama 使用 /chat 端点
+    custom: '/chat/completions',
+  };
+
+  // 如果用户配置了自定义 Base URL，使用自定义的
+  if (customBaseUrl) {
+    const normalizedBaseUrl = customBaseUrl.replace(/\/$/, '');
+    return normalizedBaseUrl + (endpointPaths[provider] || '/chat/completions');
+  }
+
+  // 否则使用默认的完整 URL
+  const defaultUrls: Record<string, string> = {
+    openai: 'https://api.openai.com/v1/chat/completions',
+    anthropic: 'https://api.anthropic.com/v1/messages',
+    deepseek: 'https://api.deepseek.com/v1/chat/completions',
+    google: 'https://generativelanguage.googleapis.com/v1beta/models:generateContent',
+    moonshot: 'https://api.moonshot.cn/v1/chat/completions',
+    zhipu: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    minimax: 'https://api.minimax.chat/v1/chat/completions',
+    doubao: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+    qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+    ollama: 'http://localhost:11434/api/chat',
+    custom: '',
+  };
+
+  return defaultUrls[provider] || '';
 }
 
 function getModelHint(provider?: string): string {
