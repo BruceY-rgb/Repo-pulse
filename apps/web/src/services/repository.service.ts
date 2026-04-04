@@ -1,5 +1,13 @@
 import { apiClient } from './api-client';
-import type { ApiResponse, Repository, CreateRepositoryDto, PaginatedResponse, Event, SearchResult } from '@/types/api';
+import type {
+  ApiResponse,
+  Repository,
+  CreateRepositoryDto,
+  UpdateRepositoryDto,
+  PaginatedResponse,
+  Event,
+  SearchResult,
+} from '@/types/api';
 
 export const repositoryService = {
   async getAll(isActive?: boolean): Promise<Repository[]> {
@@ -18,7 +26,7 @@ export const repositoryService = {
     return data.data;
   },
 
-  async update(id: string, dto: Partial<CreateRepositoryDto>): Promise<Repository> {
+  async update(id: string, dto: UpdateRepositoryDto): Promise<Repository> {
     const { data } = await apiClient.patch<ApiResponse<Repository>>(`/repositories/${id}`, dto);
     return data.data;
   },

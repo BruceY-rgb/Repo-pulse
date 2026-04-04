@@ -34,6 +34,17 @@ export const authService = {
   },
 
   /**
+   * 运行时配置 GitHub OAuth 客户端参数
+   */
+  async configureGithubOAuth(clientId: string, clientSecret: string): Promise<{ message: string }> {
+    const { data } = await apiClient.post<{ message: string }>('/auth/github/config', {
+      clientId,
+      clientSecret,
+    });
+    return data;
+  },
+
+  /**
    * 登出 — 调用后端接口清除 Cookie
    */
   async logout(): Promise<void> {

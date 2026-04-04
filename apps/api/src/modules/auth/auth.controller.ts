@@ -20,6 +20,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { UserService } from '../user/user.service';
+import { GithubStrategy } from './strategies/github.strategy';
 
 // Cookie 配置常量
 const COOKIE_OPTIONS = {
@@ -38,7 +39,8 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly userService: UserService,
-  ) { }
+    private readonly githubStrategy: GithubStrategy,
+  ) {}
 
   /**
    * 邮箱密码登录 — Token 写入 HttpOnly Cookie
@@ -108,6 +110,31 @@ export class AuthController {
     res.redirect(url);
   }
 
+  /**
+   * 运行时配置 GitHub OAuth 客户端参数（仅内存生效，重启后失效）
+   */
+  @Post('github/config')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '配置 GitHub OAuth 客户端参数（运行时）' })
+  configureGithubOAuth(
+    @Body() body: { clientId?: string; clientSecret?: string },
+  ) {
+    const clientId = body.clientId?.trim();
+    const clientSecret = body.clientSecret?.trim();
+
+    if (!clientId || !clientSecret) {
+      throw new UnauthorizedException('GitHub Client ID / Client Secret 不能为空');
+    }
+
+    this.githubStrategy.updateCredentials(clientId, clientSecret);
+
+    return { message: 'GitHub OAuth 配置已更新（重启后需重新配置）' };
+  }
+
+  /**
+   * GitHub OAuth 回调 — 将 Token 写入 Cookie 后重定向到前端
+   */
   @Get('github/callback')
 @Public()
 async githubCallback(

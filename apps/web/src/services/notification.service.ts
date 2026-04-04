@@ -1,6 +1,6 @@
 import { apiClient } from './api-client';
 
-export type NotificationChannel = 'email' | 'dingtalk' | 'feishu' | 'webhook' | 'inApp';
+export type NotificationChannel = 'EMAIL' | 'DINGTALK' | 'FEISHU' | 'WEBHOOK' | 'IN_APP';
 
 export interface NotificationPreferences {
   channels: NotificationChannel[];
@@ -22,6 +22,7 @@ interface Notification {
   title: string;
   content: string;
   status: string;
+  readAt: string | null;
   createdAt: string;
 }
 

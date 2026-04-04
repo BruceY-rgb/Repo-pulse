@@ -7,17 +7,13 @@ import {
   Github,
   Key,
   Mail,
+  Smartphone,
   Slack,
   Save,
   CheckCircle,
   AlertTriangle,
   Brain,
-  Loader2,
   Link,
-  Eye,
-  EyeOff,
-  Wifi,
-  Download,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,11 +25,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { settingsService, PROVIDER_LABELS, PROVIDER_DEFAULT_MODELS, type ConnectionTestResult, type ModelInfo } from '@/services/settings.service';
-import type { AIProvider, AIConfig } from '@/services/settings.service';
-import { getProviderLogo } from '@/lib/provider-logo';
+import { Spinner } from '@/components/ui/spinner';
+import { settingsService } from '@/services/settings.service';
 import { notificationService } from '@/services/notification.service';
-import type { NotificationPreferences } from '@/services/notification.service';
+import type { AIProvider, AIConfig, NotificationPreferences } from '@/services/notification.service';
 
 const connectedAccounts = [
   { provider: 'GitHub', username: 'johndoe', connected: true, icon: Github },
@@ -55,17 +50,6 @@ export function Settings() {
   const [aiSaving, setAiSaving] = useState(false);
   const [aiSaved, setAiSaved] = useState(false);
 
-  // 连接测试状态
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [hasExistingApiKey, setHasExistingApiKey] = useState(false);
-  const [testingConnection, setTestingConnection] = useState(false);
-  const [connectionTestResult, setConnectionTestResult] = useState<ConnectionTestResult | null>(null);
-
-  // 模型拉取状态
-  const [fetchingModels, setFetchingModels] = useState(false);
-  const [modelFetchResult, setModelFetchResult] = useState<{ success: boolean; message: string; models: ModelInfo[] } | null>(null);
-  const [models, setModels] = useState<ModelInfo[]>([]);
-
   // 通知配置状态
   const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>({
     channels: ['inApp'],
@@ -80,31 +64,13 @@ export function Settings() {
   const [notifSaving, setNotifSaving] = useState(false);
   const [notifSaved, setNotifSaved] = useState(false);
 
-  // 安全获取 channels 数组
-  const getChannels = () => notifPrefs?.channels || ['inApp'];
-
-  // 安全获取 events 对象
-  const getEvents = () => notifPrefs?.events || {
-    highRisk: true,
-    prUpdates: true,
-    analysisComplete: true,
-    weeklyReport: false,
-  };
-
   // 加载 AI 配置
   useEffect(() => {
     const loadAIConfig = async () => {
       setAiLoading(true);
       try {
         const config = await settingsService.getAIConfig();
-        // 后端返回 '***' 表示 API Key 已设置（不返回明文）
-        // 前端显示为空，让用户知道已设置，但记录已有 key
-        const hasKey = config.aiApiKey === '***';
-        setHasExistingApiKey(hasKey);
-        setAiConfig({
-          ...config,
-          aiApiKey: '', // 不显示明文
-        });
+        setAiConfig(config);
       } catch (error) {
         console.error('Failed to load AI config:', error);
       } finally {
@@ -143,62 +109,6 @@ export function Settings() {
     }
   };
 
-  const handleTestConnection = async () => {
-    if (!aiConfig.aiProvider) return;
-
-    setTestingConnection(true);
-    setConnectionTestResult(null);
-
-    try {
-      const result = await settingsService.testConnection(
-        aiConfig.aiProvider,
-        aiConfig.aiApiKey || '',
-        aiConfig.aiBaseUrl
-      );
-      setConnectionTestResult(result);
-    } catch (error) {
-      setConnectionTestResult({
-        success: false,
-        message: error instanceof Error ? error.message : 'Connection test failed',
-      });
-    } finally {
-      setTestingConnection(false);
-    }
-  };
-
-  const handleFetchModels = async () => {
-    if (!aiConfig.aiProvider) return;
-
-    setFetchingModels(true);
-    setModelFetchResult(null);
-
-    try {
-      const result = await settingsService.fetchModels(
-        aiConfig.aiProvider,
-        aiConfig.aiApiKey || '',
-        aiConfig.aiBaseUrl
-      );
-      setModelFetchResult(result);
-      if (result.success) {
-        setModels(result.models);
-      }
-    } catch (error) {
-      setModelFetchResult({
-        success: false,
-        message: error instanceof Error ? error.message : 'Failed to fetch models',
-        models: [],
-      });
-    } finally {
-      setFetchingModels(false);
-    }
-  };
-
-  const toggleModelEnabled = (modelId: string) => {
-    setModels(models.map(m =>
-      m.id === modelId ? { ...m, enabled: !m.enabled } : m
-    ));
-  };
-
   const handleSaveNotifications = async () => {
     setNotifSaving(true);
     try {
@@ -218,12 +128,10 @@ export function Settings() {
   };
 
   const toggleChannel = (channel: string) => {
-    const channels = getChannels();
-    const isIncluded = channels.includes(channel as typeof channels[number]);
-    const newChannels = isIncluded
-      ? channels.filter((c) => c !== channel)
-      : [...channels, channel as typeof channels[number]];
-    setNotifPrefs({ ...notifPrefs, channels: newChannels });
+    const channels = notifPrefs.channels.includes(channel as any)
+      ? notifPrefs.channels.filter((c) => c !== channel)
+      : [...notifPrefs.channels, channel as any];
+    setNotifPrefs({ ...notifPrefs, channels });
   };
 
   return (
@@ -361,7 +269,7 @@ export function Settings() {
         <TabsContent value="notifications" className="mt-4 space-y-4">
           {notifLoading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-[var(--github-accent)]" />
+              <Spinner className="h-6 w-6 text-[var(--github-accent)]" />
             </div>
           ) : (
             <>
@@ -383,11 +291,11 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={getChannels().includes('email')}
+                        checked={notifPrefs.channels.includes('email')}
                         onCheckedChange={() => toggleChannel('email')}
                       />
                     </div>
-                    {getChannels().includes('email') && (
+                    {notifPrefs.channels.includes('email') && (
                       <div className="ml-12 space-y-2">
                         <Input
                           placeholder="your@email.com"
@@ -407,7 +315,7 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={getChannels().includes('dingtalk')}
+                        checked={notifPrefs.channels.includes('dingtalk')}
                         onCheckedChange={() => toggleChannel('dingtalk')}
                       />
                     </div>
@@ -421,7 +329,7 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={getChannels().includes('feishu')}
+                        checked={notifPrefs.channels.includes('feishu')}
                         onCheckedChange={() => toggleChannel('feishu')}
                       />
                     </div>
@@ -435,15 +343,15 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={getChannels().includes('inApp')}
+                        checked={notifPrefs.channels.includes('inApp')}
                         onCheckedChange={() => toggleChannel('inApp')}
                       />
                     </div>
                   </div>
 
-                  {(getChannels().includes('dingtalk') ||
-                    getChannels().includes('feishu') ||
-                    getChannels().includes('webhook')) && (
+                  {(notifPrefs.channels.includes('dingtalk') ||
+                    notifPrefs.channels.includes('feishu') ||
+                    notifPrefs.channels.includes('webhook')) && (
                     <>
                       <Separator className="bg-[var(--github-border)]" />
                       <div className="space-y-2">
@@ -471,9 +379,9 @@ export function Settings() {
                       <p className="text-xs text-[var(--github-text-secondary)]">Critical security and performance issues</p>
                     </div>
                     <Switch
-                      checked={getEvents().highRisk}
+                      checked={notifPrefs.events.highRisk}
                       onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...getEvents(), highRisk: checked } })
+                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, highRisk: checked } })
                       }
                     />
                   </div>
@@ -483,9 +391,9 @@ export function Settings() {
                       <p className="text-xs text-[var(--github-text-secondary)]">Pull request created, updated, or merged</p>
                     </div>
                     <Switch
-                      checked={getEvents().prUpdates}
+                      checked={notifPrefs.events.prUpdates}
                       onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...getEvents(), prUpdates: checked } })
+                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, prUpdates: checked } })
                       }
                     />
                   </div>
@@ -495,9 +403,9 @@ export function Settings() {
                       <p className="text-xs text-[var(--github-text-secondary)]">AI analysis finished for a PR</p>
                     </div>
                     <Switch
-                      checked={getEvents().analysisComplete}
+                      checked={notifPrefs.events.analysisComplete}
                       onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...getEvents(), analysisComplete: checked } })
+                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, analysisComplete: checked } })
                       }
                     />
                   </div>
@@ -507,9 +415,9 @@ export function Settings() {
                       <p className="text-xs text-[var(--github-text-secondary)]">Weekly code quality summary</p>
                     </div>
                     <Switch
-                      checked={getEvents().weeklyReport}
+                      checked={notifPrefs.events.weeklyReport}
                       onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...getEvents(), weeklyReport: checked } })
+                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, weeklyReport: checked } })
                       }
                     />
                   </div>
@@ -521,7 +429,7 @@ export function Settings() {
                 disabled={notifSaving}
                 className="btn-x-primary gap-2"
               >
-                {notifSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                {notifSaving && <Spinner className="h-4 w-4" />}
                 {notifSaved ? <CheckCircle className="w-4 h-4" /> : null}
                 {notifSaving ? 'Saving...' : notifSaved ? 'Saved!' : 'Save Notification Settings'}
               </Button>
@@ -672,7 +580,7 @@ export function Settings() {
             <CardContent className="space-y-6">
               {aiLoading ? (
                 <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-[var(--github-accent)]" />
+                  <Spinner className="h-6 w-6 text-[var(--github-accent)]" />
                 </div>
               ) : (
                 <>
@@ -689,93 +597,47 @@ export function Settings() {
                       <SelectContent>
                         <SelectItem value="openai">
                           <div className="flex items-center gap-2">
-                            <img src={getProviderLogo('openai')} alt="" className="w-5 h-5" />
-                            <span>{PROVIDER_LABELS.openai}</span>
+                            <span>OpenAI (GPT-4)</span>
                           </div>
                         </SelectItem>
                         <SelectItem value="anthropic">
                           <div className="flex items-center gap-2">
-                            <img src={getProviderLogo('anthropic')} alt="" className="w-5 h-5" />
-                            <span>{PROVIDER_LABELS.anthropic}</span>
+                            <span>Anthropic (Claude)</span>
                           </div>
                         </SelectItem>
                         <SelectItem value="ollama">
                           <div className="flex items-center gap-2">
-                            <img src={getProviderLogo('ollama')} alt="" className="w-5 h-5" />
-                            <span>{PROVIDER_LABELS.ollama}</span>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="deepseek">
-                          <div className="flex items-center gap-2">
-                            <img src={getProviderLogo('deepseek')} alt="" className="w-5 h-5" />
-                            <span>{PROVIDER_LABELS.deepseek}</span>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="google">
-                          <div className="flex items-center gap-2">
-                            <img src={getProviderLogo('google')} alt="" className="w-5 h-5" />
-                            <span>{PROVIDER_LABELS.google}</span>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="moonshot">
-                          <div className="flex items-center gap-2">
-                            <img src={getProviderLogo('moonshot')} alt="" className="w-5 h-5" />
-                            <span>{PROVIDER_LABELS.moonshot}</span>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="zhipu">
-                          <div className="flex items-center gap-2">
-                            <img src={getProviderLogo('zhipu')} alt="" className="w-5 h-5" />
-                            <span>{PROVIDER_LABELS.zhipu}</span>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="minimax">
-                          <div className="flex items-center gap-2">
-                            <img src={getProviderLogo('minimax')} alt="" className="w-5 h-5" />
-                            <span>{PROVIDER_LABELS.minimax}</span>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="doubao">
-                          <div className="flex items-center gap-2">
-                            <img src={getProviderLogo('doubao')} alt="" className="w-5 h-5" />
-                            <span>{PROVIDER_LABELS.doubao}</span>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="qwen">
-                          <div className="flex items-center gap-2">
-                            <img src={getProviderLogo('qwen')} alt="" className="w-5 h-5" />
-                            <span>{PROVIDER_LABELS.qwen}</span>
+                            <span>Ollama (Local)</span>
                           </div>
                         </SelectItem>
                         <SelectItem value="custom">
                           <div className="flex items-center gap-2">
-                            <img src={getProviderLogo('custom')} alt="" className="w-5 h-5" />
-                            <span>{PROVIDER_LABELS.custom}</span>
+                            <span>Custom Endpoint</span>
                           </div>
                         </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
-                  {/* Base URL - always visible, with default value */}
-                  {aiConfig.aiProvider && aiConfig.aiProvider !== 'ollama' && aiConfig.aiProvider !== 'custom' && (
+                  {/* API Key - only show for openai and anthropic */}
+                  {(aiConfig.aiProvider === 'openai' || aiConfig.aiProvider === 'anthropic') && (
                     <div className="space-y-2">
-                      <Label htmlFor="aiBaseUrl" className="text-sm text-white">Base URL</Label>
+                      <Label htmlFor="aiApiKey" className="text-sm text-white">API Key</Label>
                       <Input
-                        id="aiBaseUrl"
-                        type="url"
-                        placeholder={getDefaultBaseUrl(aiConfig.aiProvider)}
-                        value={aiConfig.aiBaseUrl || ''}
-                        onChange={(e) => setAiConfig({ ...aiConfig, aiBaseUrl: e.target.value })}
+                        id="aiApiKey"
+                        type="password"
+                        placeholder={aiConfig.aiApiKey ? '***' : 'Enter your API key'}
+                        value={aiConfig.aiApiKey || ''}
+                        onChange={(e) => setAiConfig({ ...aiConfig, aiApiKey: e.target.value })}
                         className="bg-[var(--github-surface)] border-[var(--github-border)]"
                       />
                       <p className="text-xs text-[var(--github-text-secondary)]">
-                        Default: {getDefaultBaseUrl(aiConfig.aiProvider)} - Custom URL will override
+                        Leave empty to keep the existing API key
                       </p>
                     </div>
                   )}
 
-                  {/* Base URL - for ollama and custom (required) */}
+                  {/* Base URL - show for ollama and custom */}
                   {(aiConfig.aiProvider === 'ollama' || aiConfig.aiProvider === 'custom') && (
                     <div className="space-y-2">
                       <Label htmlFor="aiBaseUrl" className="text-sm text-white">
@@ -792,72 +654,6 @@ export function Settings() {
                     </div>
                   )}
 
-                  {/* API Key - with show/hide toggle */}
-                  {(aiConfig.aiProvider && aiConfig.aiProvider !== 'ollama') && (
-                    <div className="space-y-2">
-                      <Label htmlFor="aiApiKey" className="text-sm text-white">API Key</Label>
-                      <div className="relative">
-                        <Input
-                          id="aiApiKey"
-                          type={showApiKey ? 'text' : 'password'}
-                          placeholder="Enter your API key"
-                          value={aiConfig.aiApiKey || ''}
-                          onChange={(e) => setAiConfig({ ...aiConfig, aiApiKey: e.target.value })}
-                          className="bg-[var(--github-surface)] border-[var(--github-border)] pr-10"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowApiKey(!showApiKey)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--github-text-secondary)] hover:text-white"
-                        >
-                          {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
-                      </div>
-                      {aiConfig.aiProvider !== 'custom' && (
-                        <p className="text-xs text-[var(--github-text-secondary)]">
-                          {hasExistingApiKey ? 'API key is set. Enter new value to replace, or leave empty to keep existing.' : 'Leave empty to keep the existing API key'}
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Endpoint Preview */}
-                  {aiConfig.aiProvider && aiConfig.aiProvider !== 'ollama' && (
-                    <div className="p-3 rounded-lg bg-white/5 border border-[var(--github-border)]">
-                      <p className="text-xs text-[var(--github-text-secondary)] mb-1">Endpoint Preview</p>
-                      <code className="text-sm text-white break-all">
-                        {getEndpointPreview(aiConfig.aiProvider, aiConfig.aiBaseUrl)}
-                      </code>
-                    </div>
-                  )}
-
-                  {/* Test Connection Button */}
-                  <div className="flex items-center gap-3">
-                    <Button
-                      onClick={handleTestConnection}
-                      disabled={testingConnection || !aiConfig.aiProvider}
-                      variant="outline"
-                      className="border-[var(--github-border)] gap-2"
-                    >
-                      {testingConnection ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Wifi className="w-4 h-4" />
-                      )}
-                      {testingConnection ? 'Testing...' : 'Test Connection'}
-                    </Button>
-                    {connectionTestResult && (
-                      <div className={`flex items-center gap-2 text-sm ${connectionTestResult.success ? 'text-green-400' : 'text-red-400'}`}>
-                        {connectionTestResult.success ? (
-                          <CheckCircle className="w-4 h-4" />
-                        ) : (
-                          <AlertTriangle className="w-4 h-4" />
-                        )}
-                        {connectionTestResult.message}
-                      </div>
-                    )}
-                  </div>
-
                   {/* Model */}
                   <div className="space-y-2">
                     <Label htmlFor="aiModel" className="text-sm text-white">Model</Label>
@@ -873,71 +669,12 @@ export function Settings() {
                     </p>
                   </div>
 
-                  {/* Fetch Models Button */}
-                  {aiConfig.aiProvider && aiConfig.aiProvider !== 'custom' && (
-                    <div className="space-y-3">
-                      <Button
-                        onClick={handleFetchModels}
-                        disabled={fetchingModels}
-                        variant="outline"
-                        className="border-[var(--github-border)] gap-2"
-                      >
-                        {fetchingModels ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Download className="w-4 h-4" />
-                        )}
-                        {fetchingModels ? 'Fetching...' : 'Fetch Models from Provider'}
-                      </Button>
-
-                      {modelFetchResult && !modelFetchResult.success && (
-                        <div className="flex items-center gap-2 text-sm text-red-400">
-                          <AlertTriangle className="w-4 h-4" />
-                          {modelFetchResult.message}
-                        </div>
-                      )}
-
-                      {/* Model List */}
-                      {models.length > 0 && (
-                        <div className="space-y-2">
-                          <Label className="text-sm text-white">Available Models</Label>
-                          <div className="max-h-48 overflow-y-auto space-y-1 border border-[var(--github-border)] rounded-lg">
-                            {models.map((model) => (
-                              <div
-                                key={model.id}
-                                className="flex items-center justify-between p-2 hover:bg-white/5"
-                              >
-                                <div className="flex items-center gap-2">
-                                  <Switch
-                                    checked={model.enabled}
-                                    onCheckedChange={() => toggleModelEnabled(model.id)}
-                                  />
-                                  <span className="text-sm text-white">{model.name}</span>
-                                </div>
-                                <button
-                                  onClick={() => {
-                                    setAiConfig({ ...aiConfig, aiModel: model.id });
-                                  }}
-                                  className="text-xs text-[var(--github-accent)] hover:underline"
-                                >
-                                  Use
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <Separator className="bg-[var(--github-border)]" />
-
                   <Button
                     onClick={handleSaveAI}
                     disabled={aiSaving || !aiConfig.aiProvider}
                     className="btn-x-primary gap-2"
                   >
-                    {aiSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {aiSaving && <Spinner className="h-4 w-4" />}
                     {aiSaved ? <CheckCircle className="w-4 h-4" /> : null}
                     {aiSaving ? 'Saving...' : aiSaved ? 'Saved!' : 'Save AI Config'}
                   </Button>
@@ -953,95 +690,28 @@ export function Settings() {
 
 // Helper functions
 function getDefaultModel(provider?: string): string {
-  if (!provider || !(provider in PROVIDER_DEFAULT_MODELS)) return '';
-  return PROVIDER_DEFAULT_MODELS[provider as AIProvider] || '';
-}
-
-function getDefaultBaseUrl(provider?: string): string {
-  if (!provider) return '';
-
-  const defaultBaseUrls: Record<string, string> = {
-    openai: 'https://api.openai.com/v1',
-    anthropic: 'https://api.anthropic.com',
-    deepseek: 'https://api.deepseek.com',
-    google: 'https://generativelanguage.googleapis.com',
-    moonshot: 'https://api.moonshot.cn/v1',
-    zhipu: 'https://open.bigmodel.cn/api/paas/v4',
-    minimax: 'https://api.minimax.chat/v1',
-    doubao: 'https://ark.cn-beijing.volces.com/api/v3',
-    qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    ollama: 'http://localhost:11434',
-    custom: '',
-  };
-
-  return defaultBaseUrls[provider] || '';
-}
-
-function getEndpointPreview(provider?: string, customBaseUrl?: string): string {
-  if (!provider) return '';
-
-  // 各提供商的端点路径（用于实际 API 调用）
-  const endpointPaths: Record<string, string> = {
-    openai: '/chat/completions',
-    anthropic: '/v1/messages',
-    deepseek: '/chat/completions',
-    google: '/generateContent', // Google 使用特殊的端点
-    moonshot: '/chat/completions',
-    zhipu: '/chat/completions',
-    minimax: '/chat/completions',
-    doubao: '/chat/completions',
-    qwen: '/chat/completions',
-    ollama: '/chat', // Ollama 使用 /chat 端点
-    custom: '/chat/completions',
-  };
-
-  // 如果用户配置了自定义 Base URL，使用自定义的
-  if (customBaseUrl) {
-    const normalizedBaseUrl = customBaseUrl.replace(/\/$/, '');
-    return normalizedBaseUrl + (endpointPaths[provider] || '/chat/completions');
+  switch (provider) {
+    case 'openai':
+      return 'gpt-4';
+    case 'anthropic':
+      return 'claude-sonnet-4-20250514';
+    case 'ollama':
+      return 'llama3';
+    case 'custom':
+      return 'gpt-4';
+    default:
+      return '';
   }
-
-  // 否则使用默认的完整 URL
-  const defaultUrls: Record<string, string> = {
-    openai: 'https://api.openai.com/v1/chat/completions',
-    anthropic: 'https://api.anthropic.com/v1/messages',
-    deepseek: 'https://api.deepseek.com/v1/chat/completions',
-    google: 'https://generativelanguage.googleapis.com/v1beta/models:generateContent',
-    moonshot: 'https://api.moonshot.cn/v1/chat/completions',
-    zhipu: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
-    minimax: 'https://api.minimax.chat/v1/chat/completions',
-    doubao: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
-    qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
-    ollama: 'http://localhost:11434/api/chat',
-    custom: '',
-  };
-
-  return defaultUrls[provider] || '';
 }
 
 function getModelHint(provider?: string): string {
-  if (!provider) return 'Select a provider first';
   switch (provider) {
     case 'openai':
-      return 'e.g., gpt-4o, gpt-4-turbo, gpt-3.5-turbo';
+      return 'e.g., gpt-4, gpt-4-turbo, gpt-3.5-turbo';
     case 'anthropic':
-      return 'e.g., claude-sonnet-4-20250514, claude-opus-4-20250514';
+      return 'e.g., claude-sonnet-4-20250514, claude-opus-4-20250514, claude-3-5-sonnet-20241022';
     case 'ollama':
       return 'e.g., llama3, mistral, codellama';
-    case 'deepseek':
-      return 'e.g., deepseek-chat, deepseek-coder';
-    case 'google':
-      return 'e.g., gemini-2.0-flash-exp, gemini-1.5-pro';
-    case 'moonshot':
-      return 'e.g., kimi-longtext-chat, kimi-math';
-    case 'zhipu':
-      return 'e.g., glm-4-flash, glm-4';
-    case 'minimax':
-      return 'e.g., MiniMax-M2.1';
-    case 'doubao':
-      return 'e.g., doubao-pro-32k';
-    case 'qwen':
-      return 'e.g., qwen-turbo, qwen-plus';
     case 'custom':
       return 'Enter the model name supported by your custom endpoint';
     default:

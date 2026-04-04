@@ -17,78 +17,118 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { useLanguage } from '@/contexts/LanguageContext';
 import gsap from 'gsap';
 
 const features = [
   {
     icon: Brain,
-    title: 'AI-Powered Analysis',
-    description: 'Get instant insights into your code with advanced AI that understands context and intent.',
+    titleKey: 'landing.features.items.analysis.title',
+    descriptionKey: 'landing.features.items.analysis.description',
     color: 'from-purple-500 to-pink-500',
   },
   {
     icon: Shield,
-    title: 'Risk Detection',
-    description: 'Identify security vulnerabilities and high-risk changes before they reach production.',
+    titleKey: 'landing.features.items.risk.title',
+    descriptionKey: 'landing.features.items.risk.description',
     color: 'from-red-500 to-orange-500',
   },
   {
     icon: TrendingUp,
-    title: 'DORA Metrics',
-    description: 'Track deployment frequency, lead time, and team productivity with industry-standard metrics.',
+    titleKey: 'landing.features.items.dora.title',
+    descriptionKey: 'landing.features.items.dora.description',
     color: 'from-green-500 to-emerald-500',
   },
   {
     icon: Bell,
-    title: 'Smart Notifications',
-    description: 'Stay informed with intelligent alerts delivered to Slack, Email, or DingTalk.',
+    titleKey: 'landing.features.items.notifications.title',
+    descriptionKey: 'landing.features.items.notifications.description',
     color: 'from-blue-500 to-cyan-500',
   },
   {
     icon: BarChart3,
-    title: 'Real-time Dashboard',
-    description: 'Visualize your codebase health and team activity in a beautiful, intuitive interface.',
+    titleKey: 'landing.features.items.dashboard.title',
+    descriptionKey: 'landing.features.items.dashboard.description',
     color: 'from-yellow-500 to-amber-500',
   },
   {
     icon: FileText,
-    title: 'Auto Reports',
-    description: 'Generate weekly and monthly reports automatically to share with your team.',
+    titleKey: 'landing.features.items.reports.title',
+    descriptionKey: 'landing.features.items.reports.description',
     color: 'from-indigo-500 to-violet-500',
   },
 ];
 
 const testimonials = [
   {
-    quote: "Repo-Pulse has transformed how we review code. The AI insights catch issues we'd miss, and the DORA metrics help us continuously improve.",
-    author: "Sarah Chen",
-    role: "Tech Lead at Stripe",
+    quoteKey: 'landing.testimonials.items.0.quote',
+    authorKey: 'landing.testimonials.items.0.author',
+    roleKey: 'landing.testimonials.items.0.role',
     avatar: "SC",
   },
   {
-    quote: "The risk detection feature alone has saved us countless hours. We caught a critical security vulnerability before it went live.",
-    author: "Michael Park",
-    role: "Engineering Manager at Netflix",
+    quoteKey: 'landing.testimonials.items.1.quote',
+    authorKey: 'landing.testimonials.items.1.author',
+    roleKey: 'landing.testimonials.items.1.role',
     avatar: "MP",
   },
   {
-    quote: "Finally, a tool that understands developer workflows. The smart notifications mean I only get alerted when it actually matters.",
-    author: "Emily Rodriguez",
-    role: "Senior Developer at GitHub",
+    quoteKey: 'landing.testimonials.items.2.quote',
+    authorKey: 'landing.testimonials.items.2.author',
+    roleKey: 'landing.testimonials.items.2.role',
     avatar: "ER",
   },
 ];
 
 const stats = [
-  { value: '10K+', label: 'Repositories Analyzed' },
-  { value: '50M+', label: 'Lines of Code Processed' },
-  { value: '99.9%', label: 'Uptime SLA' },
-  { value: '4.9/5', label: 'User Rating' },
+  { value: '10K+', labelKey: 'landing.stats.repositories' },
+  { value: '50M+', labelKey: 'landing.stats.lines' },
+  { value: '99.9%', labelKey: 'landing.stats.uptime' },
+  { value: '4.9/5', labelKey: 'landing.stats.rating' },
+];
+
+const footerGroups = [
+  {
+    titleKey: 'landing.footer.product.title',
+    itemKeys: [
+      'landing.footer.product.features',
+      'landing.footer.product.pricing',
+      'landing.footer.product.integrations',
+      'landing.footer.product.changelog',
+    ],
+  },
+  {
+    titleKey: 'landing.footer.company.title',
+    itemKeys: [
+      'landing.footer.company.about',
+      'landing.footer.company.blog',
+      'landing.footer.company.careers',
+      'landing.footer.company.contact',
+    ],
+  },
+  {
+    titleKey: 'landing.footer.resources.title',
+    itemKeys: [
+      'landing.footer.resources.documentation',
+      'landing.footer.resources.api',
+      'landing.footer.resources.community',
+      'landing.footer.resources.support',
+    ],
+  },
+  {
+    titleKey: 'landing.footer.legal.title',
+    itemKeys: [
+      'landing.footer.legal.privacy',
+      'landing.footer.legal.terms',
+      'landing.footer.legal.security',
+    ],
+  },
 ];
 
 export function Landing() {
   const heroRef = useRef<HTMLDivElement>(null);
   const featuresRef = useRef<HTMLDivElement>(null);
+  const { t } = useLanguage();
 
   useEffect(() => {
     // Hero animation
@@ -124,26 +164,26 @@ export function Landing() {
     <div className="min-h-screen bg-[var(--github-bg)]">
       {/* Navigation */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-[var(--github-bg)]/80 backdrop-blur-md border-b border-[var(--github-border)]">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+        <div className="w-full px-6 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-3">
             <img src="/avator.png" alt="Repo-Pulse" className="h-9" />
             <span className="font-bold text-xl text-white">Repo-Pulse</span>
           </Link>
           <div className="flex items-center gap-6">
             <a href="#features" className="text-sm text-[var(--github-text-secondary)] hover:text-white transition-colors">
-              Features
+              {t('landing.nav.features')}
             </a>
             <a href="#testimonials" className="text-sm text-[var(--github-text-secondary)] hover:text-white transition-colors">
-              Testimonials
+              {t('landing.nav.testimonials')}
             </a>
             <Link to="/dashboard">
               <Button variant="ghost" className="text-[var(--github-text-secondary)] hover:text-white">
-                Sign In
+                {t('landing.nav.signIn')}
               </Button>
             </Link>
             <Link to="/dashboard">
               <Button className="btn-x-primary gap-2">
-                Get Started
+                {t('landing.nav.getStarted')}
                 <ArrowRight className="w-4 h-4" />
               </Button>
             </Link>
@@ -159,28 +199,27 @@ export function Landing() {
               <div className="animate-in">
                 <Badge className="bg-[var(--github-accent)]/20 text-[var(--github-accent)] border-[var(--github-accent)]/30 mb-4">
                   <Star className="w-3 h-3 mr-1" />
-                  Now with AI Code Review
+                  {t('landing.hero.badge')}
                 </Badge>
                 <h1 className="text-5xl lg:text-6xl font-bold text-white leading-tight">
-                  AI-Powered{' '}
-                  <span className="gradient-text">Code Intelligence</span>{' '}
-                  for Modern Teams
+                  {t('landing.hero.title.prefix')}{' '}
+                  <span className="gradient-text">{t('landing.hero.title.highlight')}</span>{' '}
+                  {t('landing.hero.title.suffix')}
                 </h1>
               </div>
               <p className="animate-in text-xl text-[var(--github-text-secondary)] max-w-lg">
-                Get instant insights into your codebase. From vulnerability detection to 
-                DORA metrics, Repo-Pulse is your AI development companion.
+                {t('landing.hero.description')}
               </p>
               <div className="animate-in flex flex-wrap gap-4">
                 <Link to="/dashboard">
                   <Button className="btn-x-primary gap-2 text-lg px-8 py-6">
-                    Start Free Trial
+                    {t('landing.hero.primaryCta')}
                     <ArrowRight className="w-5 h-5" />
                   </Button>
                 </Link>
                 <Button variant="outline" className="border-[var(--github-border)] text-lg px-8 py-6">
                   <Github className="w-5 h-5 mr-2" />
-                  View on GitHub
+                  {t('landing.hero.secondaryCta')}
                 </Button>
               </div>
               <div className="animate-in flex items-center gap-6 pt-4">
@@ -195,7 +234,7 @@ export function Landing() {
                   ))}
                 </div>
                 <p className="text-sm text-[var(--github-text-secondary)]">
-                  Trusted by <span className="text-white font-medium">10,000+</span> developers
+                  {t('landing.hero.trustedByPrefix')} <span className="text-white font-medium">10,000+</span> {t('landing.hero.trustedBySuffix')}
                 </p>
               </div>
             </div>
@@ -211,26 +250,26 @@ export function Landing() {
                     <div className="p-4 rounded-lg bg-[var(--github-bg)] border border-[var(--github-border)]">
                       <div className="flex items-center gap-3 mb-3">
                         <Brain className="w-5 h-5 text-[var(--github-accent)]" />
-                        <span className="text-sm text-white font-medium">AI Analysis Complete</span>
+                        <span className="text-sm text-white font-medium">{t('landing.preview.analysisComplete')}</span>
                       </div>
                       <p className="text-sm text-[var(--github-text-secondary)]">
-                        Found 2 security issues and 3 performance optimizations
+                        {t('landing.preview.analysisResult')}
                       </p>
                     </div>
                     <div className="p-4 rounded-lg bg-red-400/5 border border-red-400/20">
                       <div className="flex items-start gap-3">
                         <Shield className="w-5 h-5 text-red-400 mt-0.5" />
                         <div>
-                          <p className="text-sm text-white font-medium">Security Alert</p>
+                          <p className="text-sm text-white font-medium">{t('landing.preview.securityAlert')}</p>
                           <p className="text-sm text-[var(--github-text-secondary)] mt-1">
-                            Potential SQL injection vulnerability in auth.js:42
+                            {t('landing.preview.securityMessage')}
                           </p>
                         </div>
                       </div>
                     </div>
                     <div className="p-4 rounded-lg bg-[var(--github-bg)] border border-[var(--github-border)]">
                       <div className="flex items-center justify-between">
-                        <span className="text-sm text-[var(--github-text-secondary)]">Deployment Frequency</span>
+                        <span className="text-sm text-[var(--github-text-secondary)]">{t('landing.preview.deploymentFrequency')}</span>
                         <span className="text-sm text-green-400 font-medium">4.2/day ↑</span>
                       </div>
                       <div className="mt-2 h-2 bg-[var(--github-border)] rounded-full overflow-hidden">
@@ -254,7 +293,7 @@ export function Landing() {
             {stats.map((stat, i) => (
               <div key={i} className="text-center">
                 <p className="text-3xl lg:text-4xl font-bold text-white">{stat.value}</p>
-                <p className="text-sm text-[var(--github-text-secondary)] mt-1">{stat.label}</p>
+                <p className="text-sm text-[var(--github-text-secondary)] mt-1">{t(stat.labelKey)}</p>
               </div>
             ))}
           </div>
@@ -266,11 +305,10 @@ export function Landing() {
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
-              Everything you need to ship better code
+              {t('landing.features.title')}
             </h2>
             <p className="text-lg text-[var(--github-text-secondary)] max-w-2xl mx-auto">
-              From AI-powered analysis to team collaboration, Repo-Pulse provides 
-              the tools you need to build high-quality software faster.
+              {t('landing.features.description')}
             </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -285,8 +323,8 @@ export function Landing() {
                     <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${feature.color} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
                       <Icon className="w-6 h-6 text-white" />
                     </div>
-                    <h3 className="text-lg font-semibold text-white mb-2">{feature.title}</h3>
-                    <p className="text-sm text-[var(--github-text-secondary)]">{feature.description}</p>
+                    <h3 className="text-lg font-semibold text-white mb-2">{t(feature.titleKey)}</h3>
+                    <p className="text-sm text-[var(--github-text-secondary)]">{t(feature.descriptionKey)}</p>
                   </CardContent>
                 </Card>
               );
@@ -300,10 +338,10 @@ export function Landing() {
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
-              Loved by developers worldwide
+              {t('landing.testimonials.title')}
             </h2>
             <p className="text-lg text-[var(--github-text-secondary)]">
-              See what teams are saying about Repo-Pulse
+              {t('landing.testimonials.description')}
             </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -316,15 +354,15 @@ export function Landing() {
                     ))}
                   </div>
                   <p className="text-[var(--github-text)] mb-6 leading-relaxed">
-                    "{testimonial.quote}"
+                    "{t(testimonial.quoteKey)}"
                   </p>
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--github-accent)] to-[#ff8c00] flex items-center justify-center text-white text-sm font-medium">
                       {testimonial.avatar}
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-white">{testimonial.author}</p>
-                      <p className="text-xs text-[var(--github-text-secondary)]">{testimonial.role}</p>
+                      <p className="text-sm font-medium text-white">{t(testimonial.authorKey)}</p>
+                      <p className="text-xs text-[var(--github-text-secondary)]">{t(testimonial.roleKey)}</p>
                     </div>
                   </div>
                 </CardContent>
@@ -339,20 +377,20 @@ export function Landing() {
         <div className="absolute inset-0 bg-gradient-to-r from-[var(--github-accent)]/10 to-purple-500/10" />
         <div className="max-w-4xl mx-auto text-center relative z-10">
           <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
-            Ready to transform your code review process?
+            {t('landing.cta.title')}
           </h2>
           <p className="text-lg text-[var(--github-text-secondary)] mb-8 max-w-2xl mx-auto">
-            Join thousands of developers who are shipping better code faster with Repo-Pulse.
+            {t('landing.cta.description')}
           </p>
           <div className="flex flex-wrap justify-center gap-4">
             <Link to="/dashboard">
               <Button className="btn-x-primary gap-2 text-lg px-8 py-6">
-                Get Started Free
+                {t('landing.cta.primary')}
                 <ArrowRight className="w-5 h-5" />
               </Button>
             </Link>
             <Button variant="outline" className="border-[var(--github-border)] text-lg px-8 py-6">
-              Schedule Demo
+              {t('landing.cta.secondary')}
             </Button>
           </div>
         </div>
@@ -362,54 +400,20 @@ export function Landing() {
       <footer className="py-12 px-6 border-t border-[var(--github-border)]">
         <div className="max-w-7xl mx-auto">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
-            <div>
-              <h4 className="text-sm font-semibold text-white mb-4">Product</h4>
-              <ul className="space-y-2">
-                {['Features', 'Pricing', 'Integrations', 'Changelog'].map((item) => (
-                  <li key={item}>
-                    <a href="#" className="text-sm text-[var(--github-text-secondary)] hover:text-white transition-colors">
-                      {item}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <h4 className="text-sm font-semibold text-white mb-4">Company</h4>
-              <ul className="space-y-2">
-                {['About', 'Blog', 'Careers', 'Contact'].map((item) => (
-                  <li key={item}>
-                    <a href="#" className="text-sm text-[var(--github-text-secondary)] hover:text-white transition-colors">
-                      {item}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <h4 className="text-sm font-semibold text-white mb-4">Resources</h4>
-              <ul className="space-y-2">
-                {['Documentation', 'API Reference', 'Community', 'Support'].map((item) => (
-                  <li key={item}>
-                    <a href="#" className="text-sm text-[var(--github-text-secondary)] hover:text-white transition-colors">
-                      {item}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <h4 className="text-sm font-semibold text-white mb-4">Legal</h4>
-              <ul className="space-y-2">
-                {['Privacy', 'Terms', 'Security'].map((item) => (
-                  <li key={item}>
-                    <a href="#" className="text-sm text-[var(--github-text-secondary)] hover:text-white transition-colors">
-                      {item}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {footerGroups.map((group) => (
+              <div key={group.titleKey}>
+                <h4 className="text-sm font-semibold text-white mb-4">{t(group.titleKey)}</h4>
+                <ul className="space-y-2">
+                  {group.itemKeys.map((itemKey) => (
+                    <li key={itemKey}>
+                      <a href="#" className="text-sm text-[var(--github-text-secondary)] hover:text-white transition-colors">
+                        {t(itemKey)}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
           <div className="flex flex-col md:flex-row items-center justify-between pt-8 border-t border-[var(--github-border)]">
             <div className="flex items-center gap-3 mb-4 md:mb-0">
@@ -419,7 +423,7 @@ export function Landing() {
               <span className="font-semibold text-white">Repo-Pulse</span>
             </div>
             <p className="text-sm text-[var(--github-text-secondary)] mb-4 md:mb-0">
-              © 2025 Repo-Pulse. All rights reserved.
+              {t('landing.footer.copyright')}
             </p>
             <div className="flex items-center gap-4">
               <a href="#" className="text-[var(--github-text-secondary)] hover:text-white transition-colors">
