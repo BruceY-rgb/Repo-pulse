@@ -14,6 +14,8 @@ export function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,6 +26,9 @@ export function Login() {
     } catch {
       setError('登录失败，请检查邮箱和密码');
     }
+  };
+  const handleGithubLogin = () => {
+    window.location.href = `/api/auth/github?clientId=${clientId}&clientSecret=${clientSecret}`;
   };
 
   return (
@@ -39,10 +44,31 @@ export function Login() {
         </CardHeader>
         <CardContent className="space-y-6">
           {/* GitHub OAuth */}
+
+          <div className="space-y-4 mt-4">
+            <div className="space-y-2">
+              <Label>Github Client ID</Label>
+              <Input
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+                placeholder="输入 Client ID"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Github Client Secret</Label>
+              <Input
+                type="password"
+                value={clientSecret}
+                onChange={(e) => setClientSecret(e.target.value)}
+                placeholder="输入 Client Secret"
+              />
+            </div>
+          </div>
+
           <Button
             variant="outline"
             className="w-full gap-2"
-            onClick={loginWithGithub}
+            onClick={handleGithubLogin}
           >
             <Github className="h-4 w-4" />
             使用 GitHub 登录
