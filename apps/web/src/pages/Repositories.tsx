@@ -389,8 +389,8 @@ export function Repositories() {
                       <TabsContent value="starred" />
                     </Tabs>
 
-                    <ScrollArea className="h-[320px] rounded-lg border border-border p-3">
-                      <div className="space-y-3">
+                    <ScrollArea className="h-[320px] max-w-full overflow-x-hidden rounded-lg border border-border p-3">
+                      <div className="max-w-full space-y-3 overflow-x-hidden">
                         {currentCandidatesLoading ? (
                           <>
                             <CandidateItemSkeleton />
@@ -417,7 +417,7 @@ export function Repositories() {
                               <div
                                 key={`${candidate.platform}-${candidate.id}`}
                                 className={[
-                                  'space-y-3 rounded-lg border p-4 transition-all',
+                                  'w-full max-w-full space-y-3 overflow-hidden rounded-lg border p-4 transition-all',
                                   alreadyMonitored
                                     ? 'border-primary/30 bg-primary/5'
                                     : 'border-border bg-card hover:border-primary/20 hover:bg-white/5',
@@ -455,7 +455,7 @@ export function Repositories() {
                                   ) : null}
                                 </div>
 
-                                <div className="flex items-center gap-2">
+                                <div className="grid min-w-0 max-w-full grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
                                   <Button
                                     size="sm"
                                     onClick={() => {
@@ -471,7 +471,7 @@ export function Repositories() {
                                       isEnabling ||
                                       isAnyActionPending
                                     }
-                                    className="gap-2"
+                                    className="w-full gap-2 sm:w-auto"
                                   >
                                     {isCreating || isEnabling ? (
                                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -488,7 +488,7 @@ export function Repositories() {
                                   <Button
                                     variant="outline"
                                     size="sm"
-                                    className="gap-2"
+                                    className="w-full gap-2 sm:w-auto"
                                     onClick={() => openSourceLink(candidate.htmlUrl)}
                                   >
                                     <ExternalLink className="h-4 w-4" />
