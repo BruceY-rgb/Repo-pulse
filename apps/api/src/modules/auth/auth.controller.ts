@@ -8,8 +8,10 @@ import {
   Res,
   HttpCode,
   HttpStatus,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiCookieAuth } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
@@ -37,6 +39,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly userService: UserService,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
@@ -100,6 +103,7 @@ export class AuthController {
   @UseGuards(AuthGuard('github'))
   @ApiOperation({ summary: 'GitHub OAuth 跳转' })
   githubAuth() {
+    this.ensureGithubOauthConfigured();
     // Passport 会自动重定向到 GitHub，无需实现
   }
 
@@ -111,6 +115,7 @@ export class AuthController {
   @UseGuards(AuthGuard('github'))
   @ApiOperation({ summary: 'GitHub OAuth 回调' })
   async githubCallback(@Req() req: Request, @Res() res: Response) {
+    this.ensureGithubOauthConfigured();
     const profile = req.user as {
       id: string;
       email: string;
@@ -153,5 +158,16 @@ export class AuthController {
       ...COOKIE_OPTIONS,
       maxAge: REFRESH_TOKEN_MAX_AGE,
     });
+  }
+
+  private ensureGithubOauthConfigured() {
+    const clientId = this.configService.get<string>('GITHUB_CLIENT_ID');
+    const clientSecret = this.configService.get<string>('GITHUB_CLIENT_SECRET');
+
+    if (!clientId || !clientSecret) {
+      throw new ServiceUnavailableException(
+        'GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET first.',
+      );
+    }
   }
 }

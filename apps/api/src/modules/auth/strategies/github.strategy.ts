@@ -6,10 +6,15 @@ import { ConfigService } from '@nestjs/config';
 @Injectable()
 export class GithubStrategy extends PassportStrategy(Strategy, 'github') {
   constructor(configService: ConfigService) {
+    const clientID = configService.get<string>('GITHUB_CLIENT_ID');
+    const clientSecret = configService.get<string>('GITHUB_CLIENT_SECRET');
+    const callbackURL = configService.get<string>('GITHUB_CALLBACK_URL');
+
     super({
-      clientID: configService.get<string>('GITHUB_CLIENT_ID') || '',
-      clientSecret: configService.get<string>('GITHUB_CLIENT_SECRET') || '',
-      callbackURL: configService.get<string>('GITHUB_CALLBACK_URL') || '',
+      // Keep the app bootable in local development when OAuth is not configured.
+      clientID: clientID || 'github-oauth-disabled',
+      clientSecret: clientSecret || 'github-oauth-disabled',
+      callbackURL: callbackURL || 'http://localhost:3001/auth/github/callback',
       scope: ['user:email', 'repo'],
     });
   }
