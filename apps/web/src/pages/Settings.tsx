@@ -7,7 +7,6 @@ import {
   Github,
   Key,
   Mail,
-  Smartphone,
   Slack,
   Save,
   CheckCircle,
@@ -26,9 +25,16 @@ import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
-import { settingsService } from '@/services/settings.service';
+import {
+  settingsService,
+  type AIProvider,
+  type AIConfig,
+} from '@/services/settings.service';
 import { notificationService } from '@/services/notification.service';
-import type { AIProvider, AIConfig, NotificationPreferences } from '@/services/notification.service';
+import type {
+  NotificationChannel,
+  NotificationPreferences,
+} from '@/services/notification.service';
 
 const connectedAccounts = [
   { provider: 'GitHub', username: 'johndoe', connected: true, icon: Github },
@@ -52,7 +58,7 @@ export function Settings() {
 
   // 通知配置状态
   const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>({
-    channels: ['inApp'],
+    channels: ['IN_APP'],
     events: {
       highRisk: true,
       prUpdates: true,
@@ -127,10 +133,10 @@ export function Settings() {
     setTimeout(() => setSaved(false), 3000);
   };
 
-  const toggleChannel = (channel: string) => {
-    const channels = notifPrefs.channels.includes(channel as any)
+  const toggleChannel = (channel: NotificationChannel) => {
+    const channels = notifPrefs.channels.includes(channel)
       ? notifPrefs.channels.filter((c) => c !== channel)
-      : [...notifPrefs.channels, channel as any];
+      : [...notifPrefs.channels, channel];
     setNotifPrefs({ ...notifPrefs, channels });
   };
 
@@ -291,11 +297,11 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('email')}
-                        onCheckedChange={() => toggleChannel('email')}
+                        checked={notifPrefs.channels.includes('EMAIL')}
+                        onCheckedChange={() => toggleChannel('EMAIL')}
                       />
                     </div>
-                    {notifPrefs.channels.includes('email') && (
+                    {notifPrefs.channels.includes('EMAIL') && (
                       <div className="ml-12 space-y-2">
                         <Input
                           placeholder="your@email.com"
@@ -315,8 +321,8 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('dingtalk')}
-                        onCheckedChange={() => toggleChannel('dingtalk')}
+                        checked={notifPrefs.channels.includes('DINGTALK')}
+                        onCheckedChange={() => toggleChannel('DINGTALK')}
                       />
                     </div>
 
@@ -329,8 +335,8 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('feishu')}
-                        onCheckedChange={() => toggleChannel('feishu')}
+                        checked={notifPrefs.channels.includes('FEISHU')}
+                        onCheckedChange={() => toggleChannel('FEISHU')}
                       />
                     </div>
 
@@ -343,15 +349,15 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('inApp')}
-                        onCheckedChange={() => toggleChannel('inApp')}
+                        checked={notifPrefs.channels.includes('IN_APP')}
+                        onCheckedChange={() => toggleChannel('IN_APP')}
                       />
                     </div>
                   </div>
 
-                  {(notifPrefs.channels.includes('dingtalk') ||
-                    notifPrefs.channels.includes('feishu') ||
-                    notifPrefs.channels.includes('webhook')) && (
+                  {(notifPrefs.channels.includes('DINGTALK') ||
+                    notifPrefs.channels.includes('FEISHU') ||
+                    notifPrefs.channels.includes('WEBHOOK')) && (
                     <>
                       <Separator className="bg-[var(--github-border)]" />
                       <div className="space-y-2">

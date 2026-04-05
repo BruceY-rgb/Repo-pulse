@@ -1,14 +1,14 @@
 # Repo-Pulse
 
-Repo-Pulse is a monorepo for an AI-assisted repository monitoring platform. It includes:
+Repo-Pulse 是一个用于 AI 辅助仓库监控的平台 Monorepo，包含：
 
-- `apps/web`: Vite + React frontend
-- `apps/api`: NestJS backend
-- `packages/database`: Prisma client and schema
-- `packages/shared`: shared constants and types
-- `packages/ai-sdk`: AI provider abstraction
+- `apps/web`：基于 Vite + React 的前端
+- `apps/api`：基于 NestJS 的后端
+- `packages/database`：Prisma Client 与数据库 schema
+- `packages/shared`：共享常量与类型
+- `packages/ai-sdk`：AI Provider 抽象层
 
-## Tech Stack
+## 技术栈
 
 - Node.js 20+
 - pnpm workspace
@@ -18,22 +18,22 @@ Repo-Pulse is a monorepo for an AI-assisted repository monitoring platform. It i
 - Prisma + PostgreSQL
 - BullMQ + Redis
 
-## Project Structure
+## 项目结构
 
 ```text
 apps/
   api/        NestJS API
-  web/        React frontend
+  web/        React 前端
 packages/
-  ai-sdk/     AI provider adapters
-  database/   Prisma schema and client exports
-  shared/     Shared types/constants
-docs/         Planning and design documents
+  ai-sdk/     AI Provider 适配层
+  database/   Prisma schema 与客户端导出
+  shared/     共享类型与常量
+docs/         规划与设计文档
 ```
 
-## Local Environment
+## 本地环境
 
-The project expects a root `.env`. A local development file is already present in this repo with these defaults:
+项目依赖根目录下的 `.env` 文件。当前仓库中已经提供了本地开发所需的默认配置：
 
 ```env
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/repo_pulse
@@ -43,27 +43,27 @@ FRONTEND_URL=http://localhost:5173
 API_URL=http://localhost:3001
 ```
 
-If you need to recreate it, use `.env.example` as the template.
+如果需要重新创建，可使用 `.env.example` 作为模板。
 
-## Install
+## 安装依赖
 
-If `pnpm` is not installed globally, use Corepack:
+如果系统没有全局安装 `pnpm`，可以通过 Corepack 使用：
 
 ```powershell
 $env:COREPACK_HOME="$PWD\.corepack"
 corepack pnpm install
 ```
 
-Then generate Prisma Client:
+然后生成 Prisma Client：
 
 ```powershell
 $env:COREPACK_HOME="$PWD\.corepack"
 corepack pnpm --filter @repo-pulse/database db:generate
 ```
 
-## Build
+## 构建
 
-Package-level builds that were verified locally:
+本地验证通过的分包构建顺序如下：
 
 ```powershell
 $env:COREPACK_HOME="$PWD\.corepack"
@@ -74,96 +74,96 @@ corepack pnpm --filter @repo-pulse/api build
 corepack pnpm --filter @repo-pulse/web build
 ```
 
-Notes:
+说明：
 
-- In this environment, `turbo run build` did not work because `pnpm` was not installed globally and Turbo could not resolve the package-manager binary.
-- The backend requires `prisma generate` before TypeScript can resolve Prisma model and enum types.
+- 在当前环境下，`turbo run build` 可能无法直接工作，因为 `pnpm` 未全局安装时，Turbo 可能无法解析 package manager 可执行文件。
+- 后端在 TypeScript 编译前需要先执行 `prisma generate`，否则无法正确解析 Prisma 的 model 和 enum 类型。
 
-## Run
+## 运行
 
-### Backend
+### 后端
 
 ```powershell
 $env:COREPACK_HOME="$PWD\.corepack"
 corepack pnpm --filter @repo-pulse/api dev
 ```
 
-Expected local URLs:
+默认本地地址：
 
-- API: `http://localhost:3001`
-- Swagger: `http://localhost:3001/docs`
+- API：`http://localhost:3001`
+- Swagger：`http://localhost:3001/docs`
 
-### Frontend
+### 前端
 
-Development mode:
+开发模式：
 
 ```powershell
 $env:COREPACK_HOME="$PWD\.corepack"
 corepack pnpm --filter @repo-pulse/web dev
 ```
 
-Preview the production build:
+预览生产构建：
 
 ```powershell
 $env:COREPACK_HOME="$PWD\.corepack"
 corepack pnpm --filter @repo-pulse/web preview -- --host 127.0.0.1 --port 4173
 ```
 
-Default frontend URL:
+默认前端地址：
 
 - `http://localhost:5173`
 
-## Infrastructure Services
+## 基础依赖服务
 
-The backend is designed to use PostgreSQL and Redis. The repository includes a `docker-compose.yml` for local dependencies:
+后端依赖 PostgreSQL 和 Redis。仓库中包含 `docker-compose.yml`，可用于本地启动这些基础服务：
 
 ```powershell
 docker compose up -d
 ```
 
-Services:
+服务默认地址：
 
-- PostgreSQL: `localhost:5432`
-- Redis: `localhost:6379`
+- PostgreSQL：`localhost:5432`
+- Redis：`localhost:6379`
 
-Without Redis, the API can still boot and listen on `3001`, but BullMQ will continuously log `ECONNREFUSED` errors.
+如果没有 Redis，API 仍然可以启动并监听 `3001`，但 BullMQ 会持续输出 `ECONNREFUSED` 错误日志。
 
-## OAuth Behavior
+## OAuth 行为
 
-GitHub OAuth is optional for local boot now:
+本地开发时，GitHub OAuth 现在是可选项：
 
-- If `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are missing, the API still starts.
-- `/auth/github` and `/auth/github/callback` will return a `503` until those variables are configured.
+- 如果未配置 `GITHUB_CLIENT_ID` 和 `GITHUB_CLIENT_SECRET`，API 仍然可以启动。
+- `/auth/github` 和 `/auth/github/callback` 在未配置相关变量时会返回 `503`。
 
-## What Was Verified
+## 当前仓库已验证内容
 
-Verified in this workspace:
+在当前工作区中，以下内容已经验证通过：
 
-- `packages/shared`, `packages/ai-sdk`, `packages/database` build successfully
-- `apps/api` builds successfully
-- `apps/web` builds successfully with Vite
-- `apps/api` starts and listens on port `3001`
-- `apps/web` preview starts successfully
+- `packages/shared`、`packages/ai-sdk`、`packages/database` 可以成功构建
+- `apps/api` 可以成功构建
+- `apps/web` 可以成功构建
+- `apps/api` 可以启动并监听 `3001`
+- `apps/web` 的 preview 可以成功启动
 
-Current machine limitations during verification:
+当前机器上的限制：
 
-- `docker` is not installed, so PostgreSQL and Redis were not started from `docker-compose.yml`
-- local port `6379` was unavailable, so Redis-backed queues reported connection errors
+- 没有安装 `docker`，因此无法通过 `docker-compose.yml` 启动 PostgreSQL 和 Redis
+- 本地 `6379` 端口不可用时，Redis 相关队列会持续报连接错误
 
-## Troubleshooting
+## 故障排查
 
-- `pnpm` not found:
+- `pnpm` 未找到：
 
-  Use `corepack pnpm ...` instead of `pnpm ...`.
+  请使用 `corepack pnpm ...`，不要直接使用 `pnpm ...`
 
-- Prisma model types missing from `@repo-pulse/database`:
+- `@repo-pulse/database` 中缺少 Prisma model 类型：
 
-  Run `corepack pnpm --filter @repo-pulse/database db:generate`.
+  请执行 `corepack pnpm --filter @repo-pulse/database db:generate`
 
-- API crashes on OAuth startup:
+- API 因 OAuth 配置启动失败：
 
-  Ensure you are using the latest code in this repo; the backend now tolerates missing GitHub OAuth env vars during local startup.
+  请确认你使用的是当前仓库中的最新代码；当前版本后端已兼容本地缺少 GitHub OAuth 环境变量的情况
 
-- Frontend preview picks another port:
+- 前端 preview 自动切换到其他端口：
 
-  That means the requested port is already in use. Vite will move to the next available port.
+  说明指定端口已被占用，Vite 会自动选择下一个可用端口
