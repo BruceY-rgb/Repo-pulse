@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { Layout } from '@/components/ui-custom/Layout';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
@@ -17,12 +17,11 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Public routes */}
-        <Route path="/" element={<Landing />} />
+        <Route path="/" element={<Navigate to="/landing" replace />} />
+        <Route path="/landing" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
 
-        {/* Protected routes */}
         <Route element={<ProtectedRoute />}>
           <Route element={<Layout />}>
             <Route path="/dashboard" element={<Dashboard />} />
@@ -34,6 +33,8 @@ function App() {
             <Route path="/approvals" element={<Approvals />} />
           </Route>
         </Route>
+
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
       <Toaster theme="dark" position="top-right" richColors />
     </BrowserRouter>

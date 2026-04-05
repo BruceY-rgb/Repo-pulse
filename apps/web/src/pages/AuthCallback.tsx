@@ -1,33 +1,37 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
-import { useAuthStore } from '@/stores/auth.store';
+import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
+import { Card, CardContent } from '@/components/ui/card';
+import { Spinner } from '@/components/ui/spinner';
+import { useLanguage } from '@/contexts/LanguageContext';
 
-/**
- * OAuth 回调页面
- * 后端完成 OAuth 认证后，将 Token 写入 HttpOnly Cookie 并重定向到此页面
- * 此页面只需调用 getMe 验证 Cookie 是否有效，无需从 URL 参数读取 Token
- */
 export function AuthCallback() {
   const navigate = useNavigate();
-  const { handleOAuthCallback } = useAuthStore();
+  const { t } = useLanguage();
+  const { data: user, isLoading, isError } = useCurrentUserQuery();
 
   useEffect(() => {
-    handleOAuthCallback()
-      .then(() => {
-        navigate('/dashboard', { replace: true });
-      })
-      .catch(() => {
-        navigate('/login?error=oauth_failed', { replace: true });
-      });
-  }, [handleOAuthCallback, navigate]);
+    if (user) {
+      navigate('/dashboard', { replace: true });
+      return;
+    }
+
+    if (!isLoading && isError) {
+      navigate('/login?error=oauth_failed', { replace: true });
+    }
+  }, [isError, isLoading, navigate, user]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="flex items-center gap-3 text-muted-foreground">
-        <Loader2 className="h-5 w-5 animate-spin" />
-        <span>正在登录，请稍候...</span>
-      </div>
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <Card className="w-full max-w-md rounded-xl border-border bg-card">
+        <CardContent className="space-y-4 p-6">
+          <p className="text-base font-medium text-foreground">{t('auth.callback.title')}</p>
+          <p className="text-sm text-muted-foreground">{t('auth.callback.description')}</p>
+          <div className="flex items-center justify-center py-2">
+            <Spinner className="h-6 w-6 text-primary" />
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

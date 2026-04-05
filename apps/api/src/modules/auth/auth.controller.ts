@@ -8,10 +8,9 @@ import {
   Res,
   HttpCode,
   HttpStatus,
-  ServiceUnavailableException,
   UnauthorizedException,
+  Query,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiCookieAuth } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
@@ -21,6 +20,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { UserService } from '../user/user.service';
+import { GithubStrategy } from './strategies/github.strategy';
 
 // Cookie 配置常量
 const COOKIE_OPTIONS = {
@@ -30,7 +30,7 @@ const COOKIE_OPTIONS = {
   path: '/',
 };
 
-const ACCESS_TOKEN_MAX_AGE = 15 * 60 * 1000;        // 15 分钟
+const ACCESS_TOKEN_MAX_AGE = 15 * 60 * 1000; // 15 分钟
 const REFRESH_TOKEN_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 天
 
 @ApiTags('认证')
@@ -39,7 +39,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly userService: UserService,
-    private readonly configService: ConfigService,
+    private readonly githubStrategy: GithubStrategy,
   ) {}
 
   /**
@@ -100,11 +100,34 @@ export class AuthController {
    */
   @Get('github')
   @Public()
-  @UseGuards(AuthGuard('github'))
-  @ApiOperation({ summary: 'GitHub OAuth 跳转' })
-  githubAuth() {
-    this.ensureGithubOauthConfigured();
-    // Passport 会自动重定向到 GitHub，无需实现
+  githubAuth(
+    @Query('clientId') clientId: string,
+    @Query('clientSecret') clientSecret: string,
+    @Res() res: Response,
+  ) {
+    // 把两个参数存在 session 或直接传递
+    const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=http://localhost:3001/auth/github/callback&scope=user:email repo&state=${clientId},${clientSecret}`;
+    res.redirect(url);
+  }
+
+  /**
+   * 运行时配置 GitHub OAuth 客户端参数（仅内存生效，重启后失效）
+   */
+  @Post('github/config')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '配置 GitHub OAuth 客户端参数（运行时）' })
+  configureGithubOAuth(@Body() body: { clientId?: string; clientSecret?: string }) {
+    const clientId = body.clientId?.trim();
+    const clientSecret = body.clientSecret?.trim();
+
+    if (!clientId || !clientSecret) {
+      throw new UnauthorizedException('GitHub Client ID / Client Secret 不能为空');
+    }
+
+    this.githubStrategy.updateCredentials(clientId, clientSecret);
+
+    return { message: 'GitHub OAuth 配置已更新（重启后需重新配置）' };
   }
 
   /**
@@ -112,25 +135,47 @@ export class AuthController {
    */
   @Get('github/callback')
   @Public()
-  @UseGuards(AuthGuard('github'))
-  @ApiOperation({ summary: 'GitHub OAuth 回调' })
-  async githubCallback(@Req() req: Request, @Res() res: Response) {
-    this.ensureGithubOauthConfigured();
-    const profile = req.user as {
-      id: string;
-      email: string;
-      displayName: string;
-      avatar: string;
-      githubAccessToken: string;
-      githubRefreshToken: string;
-    };
+  async githubCallback(
+    @Query('code') code: string,
+    @Query('state') state: string,
+    @Res() res: Response,
+  ) {
+    // 从 state 取出用户输入的 clientId / clientSecret
+    const [clientId, clientSecret] = state.split(',');
 
-    const tokens = await this.authService.handleGithubAuth(profile);
+    // 手动获取 GitHub token
+    const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        redirect_uri: 'http://localhost:3001/auth/github/callback',
+      }),
+    });
+    const tokenData = await tokenRes.json();
+    const accessToken = tokenData.access_token;
 
-    // 将 Token 写入 HttpOnly Cookie
+    // 获取用户信息
+    const userRes = await fetch('https://api.github.com/user', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/vnd.github.v3+json',
+      },
+    });
+    const profile = await userRes.json();
+
+    const tokens = await this.authService.handleGithubAuth({
+      id: profile.id.toString(),
+      email: profile.email || `${profile.id}@github.com`,
+      displayName: profile.name || profile.login,
+      avatar: profile.avatar_url || '',
+      githubAccessToken: accessToken,
+      githubRefreshToken: '',
+    });
+
     this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
-
-    // 重定向到前端，不在 URL 中暴露 Token
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     res.redirect(`${frontendUrl}/auth/callback`);
   }
@@ -158,16 +203,5 @@ export class AuthController {
       ...COOKIE_OPTIONS,
       maxAge: REFRESH_TOKEN_MAX_AGE,
     });
-  }
-
-  private ensureGithubOauthConfigured() {
-    const clientId = this.configService.get<string>('GITHUB_CLIENT_ID');
-    const clientSecret = this.configService.get<string>('GITHUB_CLIENT_SECRET');
-
-    if (!clientId || !clientSecret) {
-      throw new ServiceUnavailableException(
-        'GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET first.',
-      );
-    }
   }
 }

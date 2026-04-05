@@ -1,567 +1,546 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import {
-  GitBranch,
-  AlertCircle,
-  Clock,
-  Search,
-  Plus,
-  MoreHorizontal,
   ExternalLink,
-  RefreshCw,
-  Trash2,
+  GitBranch,
   Loader2,
+  Plus,
+  RefreshCcw,
+  Search,
+  ShieldAlert,
   Star,
-  Code,
+  Trash2,
 } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Progress } from '@/components/ui/progress';
+import { format } from 'date-fns';
+import { enUS, zhCN } from 'date-fns/locale';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { toast } from 'sonner';
-import { repositoryService } from '@/services/repository.service';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Spinner } from '@/components/ui/spinner';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
+import {
+  repositoryQueryKeys,
+  useCreateRepositoryMutation,
+  useDeleteRepositoryMutation,
+  useMyRepositoryCandidatesQuery,
+  useRepositoryListQuery,
+  useSearchRepositoryCandidatesQuery,
+  useStarredRepositoryCandidatesQuery,
+  useSyncRepositoryMutation,
+  useUpdateRepositoryMutation,
+} from '@/hooks/queries/use-repository-queries';
+import { dashboardQueryKeys } from '@/hooks/queries/use-dashboard-queries';
 import type { Repository, SearchResult } from '@/types/api';
 
-const filters = [
-  { value: 'all', label: '全部' },
-  { value: 'monitored', label: '已监控' },
-  { value: 'recent', label: '最近更新' },
-];
+type CandidateSource = 'search' | 'my' | 'starred';
+type FilterMode = 'all' | 'active' | 'inactive';
 
-export function Repositories() {
-  const [repositories, setRepositories] = useState<Repository[]>([]);
-  const [myRepos, setMyRepos] = useState<SearchResult[]>([]);
-  const [starredRepos, setStarredRepos] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [myReposLoading, setMyReposLoading] = useState(false);
-  const [starredLoading, setStarredLoading] = useState(false);
-  const [syncingId, setSyncingId] = useState<string | null>(null);
-  const [activeFilter, setActiveFilter] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-
-  // 搜索相关状态
-  const [searchInput, setSearchInput] = useState('');
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [isAdding, setIsAdding] = useState(false);
-
-  useEffect(() => {
-    loadRepositories();
-  }, []);
-
-  const loadRepositories = async () => {
-    try {
-      setLoading(true);
-      const data = await repositoryService.getAll();
-      setRepositories(data);
-    } catch (error) {
-      console.error('Failed to load repositories:', error);
-      toast.error('加载仓库失败');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadMyRepos = async () => {
-    if (myRepos.length > 0) return; // 已有数据不重复加载
-    try {
-      setMyReposLoading(true);
-      const data = await repositoryService.getMyRepos();
-      setMyRepos(data);
-      if (data.length === 0) {
-        toast.info('暂无作为 contributor 的仓库');
-      }
-    } catch (error) {
-      console.error('Failed to load my repos:', error);
-      toast.error('加载我的仓库失败');
-    } finally {
-      setMyReposLoading(false);
-    }
-  };
-
-  const loadStarredRepos = async () => {
-    if (starredRepos.length > 0) return; // 已有数据不重复加载
-    try {
-      setStarredLoading(true);
-      const data = await repositoryService.getStarred();
-      setStarredRepos(data);
-      if (data.length === 0) {
-        toast.info('暂无 star 过的仓库');
-      }
-    } catch (error) {
-      console.error('Failed to load starred repos:', error);
-      toast.error('加载 starred 仓库失败');
-    } finally {
-      setStarredLoading(false);
-    }
-  };
-
-  // 搜索仓库
-  const handleSearch = useCallback(async (query: string) => {
-    if (!query.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    try {
-      setIsSearching(true);
-      const results = await repositoryService.search(query);
-      setSearchResults(results);
-    } catch (error) {
-      console.error('Failed to search repositories:', error);
-    } finally {
-      setIsSearching(false);
-    }
-  }, []);
-
-  // 防抖搜索
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      handleSearch(searchInput);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchInput, handleSearch]);
-
-  // 添加仓库（通过搜索结果）
-  const handleAddFromSearch = async (repo: SearchResult) => {
-    const [owner, name] = repo.fullName.split('/');
-    try {
-      setIsAdding(true);
-      await repositoryService.create({
-        platform: repo.platform,
-        owner,
-        repo: name,
-      });
-      toast.success(`已添加 ${repo.fullName}`);
-      setIsAddDialogOpen(false);
-      setSearchInput('');
-      setSearchResults([]);
-      loadRepositories();
-    } catch (error) {
-      console.error('Failed to add repository:', error);
-      toast.error('添加仓库失败');
-    } finally {
-      setIsAdding(false);
-    }
-  };
-
-  const handleSync = async (id: string) => {
-    try {
-      setSyncingId(id);
-      await repositoryService.sync(id);
-      toast.success('同步完成');
-      loadRepositories();
-    } catch (error) {
-      console.error('Failed to sync repository:', error);
-      toast.error('同步失败');
-    } finally {
-      setSyncingId(null);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await repositoryService.delete(id);
-      toast.success('仓库已移除');
-      loadRepositories();
-    } catch (error) {
-      console.error('Failed to delete repository:', error);
-      toast.error('移除仓库失败');
-    }
-  };
-
-  const filteredRepos = repositories.filter((repo) => {
-    const matchesSearch =
-      repo.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      repo.fullName.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFilter =
-      activeFilter === 'all' ||
-      (activeFilter === 'monitored' && repo.isActive) ||
-      (activeFilter === 'recent' && repo.lastSyncAt);
-    return matchesSearch && matchesFilter;
-  });
-
-  // 检查仓库是否已添加
-  const isRepoMonitored = (fullName: string) => {
-    return repositories.some((r) => r.fullName === fullName);
-  };
-
-  const formatStars = (count: number) => {
-    if (count >= 1000) {
-      return `${(count / 1000).toFixed(1)}k`;
-    }
-    return count.toString();
-  };
-
-  // 渲染仓库卡片
-  const renderRepoCard = (repo: Repository) => (
-    <Card
-      key={repo.id}
-      className="card-github hover:border-[var(--github-accent)]/30 transition-all duration-300 group"
-    >
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-3 mb-2">
-              <GitBranch className="w-5 h-5 text-[var(--github-accent)]" />
-              <h3 className="text-lg font-semibold text-white group-hover:text-[var(--github-accent)] transition-colors">
-                {repo.fullName}
-              </h3>
-              <span className="px-2 py-0.5 text-xs rounded-full bg-[var(--github-border)] text-[var(--github-text-secondary)]">
-                {repo.platform === 'GITHUB' ? 'GitHub' : 'GitLab'}
-              </span>
-            </div>
-            <p className="text-sm text-[var(--github-text-secondary)] mb-3">{repo.url}</p>
-            <div className="flex flex-wrap items-center gap-4 text-sm">
-              <div className="flex items-center gap-1 text-[var(--github-text-secondary)]">
-                <GitBranch className="w-4 h-4" />
-                {repo.defaultBranch}
-              </div>
-              <div className="flex items-center gap-1 text-[var(--github-text-secondary)]">
-                <Clock className="w-4 h-4" />
-                {repo.lastSyncAt
-                  ? new Date(repo.lastSyncAt).toLocaleString('zh-CN')
-                  : '未同步'}
-              </div>
-              <div className="flex items-center gap-1 text-[var(--github-text-secondary)]">
-                <AlertCircle className="w-4 h-4" />
-                {repo._count?.events || 0} 事件
-              </div>
-            </div>
-          </div>
-          <div className="flex flex-col items-end gap-3">
-            <Badge variant={repo.isActive ? 'default' : 'secondary'} className={repo.isActive ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'}>
-              {repo.isActive ? 'Active' : 'Inactive'}
-            </Badge>
-            <div className="w-24">
-              <div className="flex items-center justify-between text-xs mb-1">
-                <span className="text-[var(--github-text-secondary)]">事件</span>
-                <span className="font-medium text-white">{repo._count?.events || 0}</span>
-              </div>
-              <Progress
-                value={Math.min((repo._count?.events || 0) / 10, 1) * 100}
-                className="h-1.5 bg-[var(--github-border)]"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-[var(--github-text-secondary)]"
-                onClick={() => handleSync(repo.id)}
-                disabled={syncingId === repo.id}
-              >
-                {syncingId === repo.id ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-4 h-4" />
-                )}
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-[var(--github-text-secondary)]">
-                    <MoreHorizontal className="w-4 h-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="bg-[var(--github-surface)] border-[var(--github-border)]">
-                  <DropdownMenuItem
-                    className="text-sm text-[var(--github-text)] hover:bg-white/5"
-                    onClick={() => window.open(repo.url, '_blank')}
-                  >
-                    <ExternalLink className="w-4 h-4 mr-2" />
-                    在 {repo.platform === 'GITHUB' ? 'GitHub' : 'GitLab'} 查看
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="text-sm text-[var(--github-text)] hover:bg-white/5"
-                    onClick={() => handleSync(repo.id)}
-                    disabled={syncingId === repo.id}
-                  >
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                    同步事件
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="text-sm text-red-400 hover:bg-white/5"
-                    onClick={() => handleDelete(repo.id)}
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    移除仓库
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-        </div>
+function RepositoryCardSkeleton() {
+  return (
+    <Card>
+      <CardContent className="flex items-center justify-center p-8">
+        <Spinner className="h-6 w-6 text-primary" />
       </CardContent>
     </Card>
   );
+}
 
-  // 渲染搜索结果卡片
-  const renderSearchCard = (repo: SearchResult, isMonitored: boolean) => (
-    <div
-      key={repo.id}
-      className={`p-4 rounded-lg border transition-all duration-200 ${
-        isMonitored
-          ? 'border-green-500/30 bg-green-500/5 cursor-default'
-          : 'border-[var(--github-border)] hover:border-[var(--github-accent)]/50 bg-[var(--github-surface)] cursor-pointer'
-      }`}
-      onClick={() => !isMonitored && handleAddFromSearch(repo)}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <img
-              src={repo.owner.avatarUrl}
-              alt={repo.owner.login}
-              className="w-5 h-5 rounded-full"
-            />
-            <span className="text-sm text-[var(--github-text-secondary)]">
-              {repo.owner.login}/
-            </span>
-            <span className="text-sm font-medium text-white">{repo.name}</span>
-          </div>
-          <p className="text-sm text-[var(--github-text-secondary)] line-clamp-1 mb-2">
-            {repo.description || '暂无描述'}
-          </p>
-          <div className="flex items-center gap-4 text-xs text-[var(--github-text-secondary)]">
-            <div className="flex items-center gap-1">
-              <Star className="w-3.5 h-3.5" />
-              {formatStars(repo.stargazersCount)}
-            </div>
-            {repo.language && (
-              <div className="flex items-center gap-1">
-                <Code className="w-3.5 h-3.5" />
-                {repo.language}
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="flex-shrink-0">
-          {isMonitored ? (
-            <Badge variant="outline" className="border-green-500/30 text-green-400">
-              已监控
-            </Badge>
-          ) : (
-            <Button size="sm" className="btn-x-primary gap-1 h-8">
-              <Plus className="w-3.5 h-3.5" />
-              添加
-            </Button>
-          )}
-        </div>
-      </div>
+function CandidateItemSkeleton() {
+  return (
+    <div className="flex items-center justify-center rounded-lg border border-border bg-card p-8">
+      <Spinner className="h-5 w-5 text-primary" />
     </div>
   );
+}
+
+export function Repositories() {
+  const { t, language } = useLanguage();
+  const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+
+  const [filter, setFilter] = useState<FilterMode>('all');
+  const [keyword, setKeyword] = useState(searchParams.get('keyword') ?? '');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [source, setSource] = useState<CandidateSource>('search');
+  const [searchInput, setSearchInput] = useState('');
+  const [searchKeyword, setSearchKeyword] = useState('');
+
+  const repositoriesQuery = useRepositoryListQuery();
+  const createMutation = useCreateRepositoryMutation();
+  const syncMutation = useSyncRepositoryMutation();
+  const deleteMutation = useDeleteRepositoryMutation();
+  const updateMutation = useUpdateRepositoryMutation();
+
+  const myCandidatesQuery = useMyRepositoryCandidatesQuery(dialogOpen && source === 'my');
+  const starredCandidatesQuery = useStarredRepositoryCandidatesQuery(dialogOpen && source === 'starred');
+  const searchCandidatesQuery = useSearchRepositoryCandidatesQuery(
+    searchKeyword,
+    dialogOpen && source === 'search' && searchKeyword.length > 1,
+  );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearchKeyword(searchInput.trim());
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    setKeyword(searchParams.get('keyword') ?? '');
+  }, [searchParams]);
+
+  const monitoredRepositories = repositoriesQuery.data ?? [];
+  const monitoredRepositoryIds = useMemo(
+    () => monitoredRepositories.map((repository) => repository.id),
+    [monitoredRepositories],
+  );
+
+  useRepositoryRealtimeSubscription(monitoredRepositoryIds);
+
+  const filteredRepositories = useMemo(() => {
+    return monitoredRepositories.filter((item) => {
+      const matchesKeyword =
+        item.name.toLowerCase().includes(keyword.toLowerCase()) ||
+        item.fullName.toLowerCase().includes(keyword.toLowerCase());
+
+      if (filter === 'active') {
+        return matchesKeyword && item.isActive;
+      }
+
+      if (filter === 'inactive') {
+        return matchesKeyword && !item.isActive;
+      }
+
+      return matchesKeyword;
+    });
+  }, [filter, keyword, monitoredRepositories]);
+
+  const currentCandidates = useMemo<SearchResult[]>(() => {
+    if (source === 'my') {
+      return myCandidatesQuery.data ?? [];
+    }
+
+    if (source === 'starred') {
+      return starredCandidatesQuery.data ?? [];
+    }
+
+    return searchCandidatesQuery.data ?? [];
+  }, [myCandidatesQuery.data, searchCandidatesQuery.data, source, starredCandidatesQuery.data]);
+
+  const currentCandidatesLoading =
+    (source === 'my' && myCandidatesQuery.isLoading) ||
+    (source === 'starred' && starredCandidatesQuery.isLoading) ||
+    (source === 'search' && searchCandidatesQuery.isLoading);
+
+  const monitoredMap = useMemo(
+    () => new Map(monitoredRepositories.map((item) => [item.fullName, item])),
+    [monitoredRepositories],
+  );
+
+  const formatDateTime = (dateString?: string | null) => {
+    if (!dateString) {
+      return t('repositories.repo.neverSynced');
+    }
+
+    const locale = language === 'zh' ? zhCN : enUS;
+    return format(new Date(dateString), 'PP p', { locale });
+  };
+
+  const refreshRepositories = async () => {
+    await queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
+    await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.repositories() });
+    await repositoriesQuery.refetch();
+  };
+
+  const addRepository = async (candidate: SearchResult) => {
+    const [owner, repo] = candidate.fullName.split('/');
+
+    if (!owner || !repo) {
+      return;
+    }
+
+    await createMutation.mutateAsync({
+      platform: candidate.platform,
+      owner,
+      repo,
+    });
+
+    await refreshRepositories();
+  };
+
+  const syncRepository = async (id: string) => {
+    await syncMutation.mutateAsync(id);
+    await refreshRepositories();
+  };
+
+  const removeRepository = async (id: string) => {
+    await deleteMutation.mutateAsync(id);
+    await refreshRepositories();
+  };
+
+  const updateRepositoryStatus = async (id: string, isActive: boolean) => {
+    await updateMutation.mutateAsync({ id, isActive });
+    await refreshRepositories();
+  };
+
+  const openSourceLink = (url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const isAnyActionPending =
+    createMutation.isPending ||
+    syncMutation.isPending ||
+    deleteMutation.isPending ||
+    updateMutation.isPending;
+
+  const renderRepositoryCard = (repo: Repository) => {
+    const isSyncing = syncMutation.isPending && syncMutation.variables === repo.id;
+    const isDeleting = deleteMutation.isPending && deleteMutation.variables === repo.id;
+    const isUpdating = updateMutation.isPending && updateMutation.variables?.id === repo.id;
+    const cardStyle = repo.isActive
+      ? 'border-emerald-500/30 bg-emerald-500/5'
+      : 'border-border/80 bg-muted/35 opacity-90';
+    const urlStyle = repo.isActive ? '' : 'text-muted-foreground/80';
+    const statusBadgeStyle = repo.isActive
+      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+      : 'border-border/70 bg-muted/60 text-muted-foreground';
+
+    return (
+      <Card key={repo.id} className={cardStyle}>
+        <CardHeader className="space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1">
+              <CardTitle className="text-lg font-semibold tracking-tight text-foreground">
+                {repo.fullName}
+              </CardTitle>
+              <CardDescription className={urlStyle}>{repo.url}</CardDescription>
+            </div>
+            <Badge variant="outline" className={`rounded-full ${statusBadgeStyle}`}>
+              {repo.isActive ? t('repositories.repo.active') : t('repositories.repo.inactive')}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 text-sm text-muted-foreground md:grid-cols-3">
+            <div className="flex items-center gap-2">
+              <GitBranch className="h-4 w-4" />
+              <span>{repo.defaultBranch}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <RefreshCcw className="h-4 w-4" />
+              <span>{formatDateTime(repo.lastSyncAt)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4" />
+              <span>
+                {t('repositories.repo.eventCount')}: {repo._count?.events ?? 0}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => updateRepositoryStatus(repo.id, !repo.isActive)}
+              disabled={isUpdating || isAnyActionPending}
+            >
+              {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
+              {repo.isActive ? t('repositories.actions.disable') : t('repositories.actions.enable')}
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => syncRepository(repo.id)}
+              disabled={isSyncing || isAnyActionPending}
+            >
+              {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+              {t('repositories.actions.sync')}
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => openSourceLink(repo.url)}
+            >
+              <ExternalLink className="h-4 w-4" />
+              {t('repositories.actions.open')}
+            </Button>
+
+            <Button
+              variant="destructive"
+              size="sm"
+              className="gap-2"
+              onClick={() => removeRepository(repo.id)}
+              disabled={isDeleting || isAnyActionPending}
+            >
+              {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {t('repositories.actions.remove')}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
-      {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">仓库管理</h1>
-          <p className="text-sm text-[var(--github-text-secondary)] mt-1">
-            管理并监控您连接的代码仓库
-          </p>
-        </div>
-        <Button
-          className="btn-x-primary gap-2"
-          onClick={() => setIsAddDialogOpen(true)}
-        >
-          <Plus className="w-4 h-4" />
-          添加仓库
-        </Button>
-      </div>
+    <TooltipProvider>
+      <div className="space-y-6">
+        <section className="space-y-2">
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">{t('repositories.page.title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('repositories.page.description')}</p>
+        </section>
 
-      {/* Search & Filters */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--github-text-secondary)]" />
-          <Input
-            placeholder="搜索已监控的仓库..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-[var(--github-surface)] border-[var(--github-border)] text-sm"
-          />
-        </div>
-        <div className="flex items-center gap-2 overflow-x-auto pb-2 sm:pb-0">
-          {filters.map((filter) => (
-            <Button
-              key={filter.value}
-              variant={activeFilter === filter.value ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setActiveFilter(filter.value)}
-              className={`whitespace-nowrap text-xs ${
-                activeFilter === filter.value
-                  ? 'bg-orange-500 text-white hover:bg-orange-600'
-                  : 'border-[var(--github-border)] text-[var(--github-text-secondary)] hover:text-white hover:bg-white/5'
-              }`}
-            >
-              {filter.label}
-            </Button>
-          ))}
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <Tabs defaultValue="monitored" className="space-y-4">
-        <TabsList className="bg-[var(--github-surface)] border border-[var(--github-border)]">
-          <TabsTrigger
-            value="monitored"
-            className="data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:border-orange-500"
-          >
-            已监控 ({repositories.length})
-          </TabsTrigger>
-          <TabsTrigger
-            value="myrepos"
-            className="data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:border-orange-500"
-            onClick={loadMyRepos}
-          >
-            我的仓库
-          </TabsTrigger>
-          <TabsTrigger
-            value="starred"
-            className="data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=active]:border-orange-500"
-            onClick={loadStarredRepos}
-          >
-            Starred
-          </TabsTrigger>
-        </TabsList>
-
-        {/* 已监控的仓库 */}
-        <TabsContent value="monitored" className="space-y-4">
-          {loading ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="w-8 h-8 animate-spin text-[var(--github-accent)]" />
-            </div>
-          ) : filteredRepos.length > 0 ? (
-            <div className="space-y-4">{filteredRepos.map(renderRepoCard)}</div>
-          ) : (
-            <div className="text-center py-16">
-              <div className="w-16 h-16 rounded-full bg-[var(--github-surface)] flex items-center justify-center mx-auto mb-4">
-                <GitBranch className="w-8 h-8 text-[var(--github-text-secondary)]" />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg font-semibold text-foreground">{t('repositories.toolbar.title')}</CardTitle>
+            <CardDescription>{t('repositories.toolbar.description')}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="relative w-full md:max-w-md">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={keyword}
+                  onChange={(event) => setKeyword(event.target.value)}
+                  placeholder={t('repositories.toolbar.searchPlaceholder')}
+                  className="pl-9"
+                />
               </div>
-              <h3 className="text-lg font-medium text-white mb-2">暂无仓库</h3>
-              <p className="text-sm text-[var(--github-text-secondary)] mb-4">
-                添加您的第一个代码仓库以开始监控
-              </p>
-              <Button onClick={() => setIsAddDialogOpen(true)} className="btn-x-primary gap-2">
-                <Plus className="w-4 h-4" />
-                添加仓库
+
+              <div className="flex items-center gap-2">
+                <Tabs value={filter} onValueChange={(value) => setFilter(value as FilterMode)}>
+                  <TabsList>
+                    <TabsTrigger value="all">{t('repositories.filters.all')}</TabsTrigger>
+                    <TabsTrigger value="active">{t('repositories.filters.active')}</TabsTrigger>
+                    <TabsTrigger value="inactive">{t('repositories.filters.inactive')}</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+
+                <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button className="gap-2" onClick={() => setDialogOpen(true)}>
+                        <Plus className="h-4 w-4" />
+                        {t('repositories.actions.add')}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t('repositories.actions.add')}</TooltipContent>
+                  </Tooltip>
+
+                  <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                      <DialogTitle>{t('repositories.dialog.title')}</DialogTitle>
+                      <DialogDescription>{t('repositories.dialog.description')}</DialogDescription>
+                    </DialogHeader>
+
+                    <Tabs value={source} onValueChange={(value) => setSource(value as CandidateSource)}>
+                      <TabsList>
+                        <TabsTrigger value="search">{t('repositories.dialog.tabs.search')}</TabsTrigger>
+                        <TabsTrigger value="my">{t('repositories.dialog.tabs.my')}</TabsTrigger>
+                        <TabsTrigger value="starred">{t('repositories.dialog.tabs.starred')}</TabsTrigger>
+                      </TabsList>
+
+                      <TabsContent value="search" className="space-y-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="repo-search-input">{t('repositories.dialog.searchLabel')}</Label>
+                          <Input
+                            id="repo-search-input"
+                            value={searchInput}
+                            onChange={(event) => setSearchInput(event.target.value)}
+                            placeholder={t('repositories.dialog.searchPlaceholder')}
+                          />
+                        </div>
+                      </TabsContent>
+
+                      <TabsContent value="my" />
+                      <TabsContent value="starred" />
+                    </Tabs>
+
+                    <ScrollArea className="h-[320px] max-w-full overflow-x-hidden rounded-lg border border-border p-3">
+                      <div className="max-w-full space-y-3 overflow-x-hidden">
+                        {currentCandidatesLoading ? (
+                          <>
+                            <CandidateItemSkeleton />
+                            <CandidateItemSkeleton />
+                          </>
+                        ) : currentCandidates.length === 0 ? (
+                          <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+                            {t('repositories.dialog.empty')}
+                          </div>
+                        ) : (
+                          currentCandidates.map((candidate) => {
+                            const existingRepository = monitoredMap.get(candidate.fullName);
+                            const alreadyMonitored = Boolean(existingRepository);
+                            const canEnable = Boolean(existingRepository && !existingRepository.isActive);
+                            const isCreating =
+                              createMutation.isPending &&
+                              createMutation.variables?.owner === candidate.owner.login &&
+                              createMutation.variables?.repo === candidate.name;
+                            const isEnabling =
+                              updateMutation.isPending &&
+                              updateMutation.variables?.id === existingRepository?.id;
+
+                            return (
+                              <div
+                                key={`${candidate.platform}-${candidate.id}`}
+                                className={[
+                                  'w-full max-w-full space-y-3 overflow-hidden rounded-lg border p-4 transition-all',
+                                  alreadyMonitored
+                                    ? 'border-primary/30 bg-primary/5'
+                                    : 'border-border bg-card hover:border-primary/20 hover:bg-white/5',
+                                ].join(' ')}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <Avatar className="h-10 w-10 rounded-full border border-border">
+                                    <AvatarImage src={candidate.owner.avatarUrl} alt={candidate.owner.login} />
+                                    <AvatarFallback className="bg-muted text-foreground">
+                                      {candidate.owner.login.slice(0, 1).toUpperCase()}
+                                    </AvatarFallback>
+                                  </Avatar>
+
+                                  <div className="min-w-0 flex-1 space-y-1">
+                                    <p className="truncate text-sm font-medium text-foreground">{candidate.fullName}</p>
+                                    <p className="line-clamp-2 text-sm text-muted-foreground">
+                                      {candidate.description || t('repositories.dialog.noDescription')}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                  <Badge variant="secondary" className="rounded-full">
+                                    {candidate.platform}
+                                  </Badge>
+                                  <span className="flex items-center gap-1">
+                                    <Star className="h-3 w-3" />
+                                    {candidate.stargazersCount}
+                                  </span>
+                                  {candidate.language ? (
+                                    <span className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                                      <span className="font-mono">&lt;&gt;</span>
+                                      {candidate.language}
+                                    </span>
+                                  ) : null}
+                                </div>
+
+                                <div className="grid min-w-0 max-w-full grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
+                                  <Button
+                                    size="sm"
+                                    onClick={() => {
+                                      if (canEnable && existingRepository) {
+                                        updateRepositoryStatus(existingRepository.id, true);
+                                        return;
+                                      }
+                                      addRepository(candidate);
+                                    }}
+                                    disabled={
+                                      (!canEnable && alreadyMonitored) ||
+                                      isCreating ||
+                                      isEnabling ||
+                                      isAnyActionPending
+                                    }
+                                    className="w-full gap-2 sm:w-auto"
+                                  >
+                                    {isCreating || isEnabling ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Plus className="h-4 w-4" />
+                                    )}
+                                    {canEnable
+                                      ? t('repositories.dialog.enableButton')
+                                      : alreadyMonitored
+                                        ? t('repositories.dialog.added')
+                                        : t('repositories.dialog.addButton')}
+                                  </Button>
+
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="w-full gap-2 sm:w-auto"
+                                    onClick={() => openSourceLink(candidate.htmlUrl)}
+                                  >
+                                    <ExternalLink className="h-4 w-4" />
+                                    {t('repositories.actions.open')}
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </ScrollArea>
+
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                        {t('repositories.dialog.close')}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {repositoriesQuery.isLoading ? (
+          <section className="space-y-4">
+            <RepositoryCardSkeleton />
+            <RepositoryCardSkeleton />
+          </section>
+        ) : repositoriesQuery.isError ? (
+          <Card>
+            <CardContent className="flex items-center justify-between gap-4 p-4">
+              <div className="flex items-center gap-2 text-sm text-destructive">
+                <ShieldAlert className="h-4 w-4" />
+                <span>{t('repositories.error.loadFailed')}</span>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => repositoriesQuery.refetch()}>
+                {t('repositories.error.retry')}
               </Button>
-            </div>
-          )}
-        </TabsContent>
-
-        {/* 我的仓库 (作为 contributor) */}
-        <TabsContent value="myrepos" className="space-y-4">
-          {myReposLoading ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="w-8 h-8 animate-spin text-[var(--github-accent)]" />
-            </div>
-          ) : myRepos.length > 0 ? (
-            <div className="space-y-3">
-              {myRepos.map((repo) => renderSearchCard(repo, isRepoMonitored(repo.fullName)))}
-            </div>
-          ) : (
-            <div className="text-center py-16">
-              <div className="w-16 h-16 rounded-full bg-[var(--github-surface)] flex items-center justify-center mx-auto mb-4">
-                <GitBranch className="w-8 h-8 text-[var(--github-text-secondary)]" />
-              </div>
-              <h3 className="text-lg font-medium text-white mb-2">暂无仓库</h3>
-              <p className="text-sm text-[var(--github-text-secondary)]">
-                您还没有作为 contributor 的仓库，或未绑定 GitHub 账号
-              </p>
-            </div>
-          )}
-        </TabsContent>
-
-        {/* Starred 仓库 */}
-        <TabsContent value="starred" className="space-y-4">
-          {starredLoading ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="w-8 h-8 animate-spin text-[var(--github-accent)]" />
-            </div>
-          ) : starredRepos.length > 0 ? (
-            <div className="space-y-3">
-              {starredRepos.map((repo) => renderSearchCard(repo, isRepoMonitored(repo.fullName)))}
-            </div>
-          ) : (
-            <div className="text-center py-16">
-              <div className="w-16 h-16 rounded-full bg-[var(--github-surface)] flex items-center justify-center mx-auto mb-4">
-                <Star className="w-8 h-8 text-[var(--github-text-secondary)]" />
-              </div>
-              <h3 className="text-lg font-medium text-white mb-2">暂无 Starred</h3>
-              <p className="text-sm text-[var(--github-text-secondary)]">
-                您还没有 star 过的仓库，或未绑定 GitHub 账号
-              </p>
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
-
-      {/* 添加仓库对话框 - 搜索选择模式 */}
-      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle>添加仓库</DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 overflow-hidden flex flex-col gap-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--github-text-secondary)]" />
-              <Input
-                placeholder="搜索 GitHub 仓库..."
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                className="pl-10"
-                autoFocus
-              />
-            </div>
-
-            <div className="flex-1 overflow-y-auto space-y-2 min-h-[200px] max-h-[400px]">
-              {isSearching ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-[var(--github-accent)]" />
-                </div>
-              ) : searchResults.length > 0 ? (
-                <div className="space-y-2">
-                  <Label className="text-xs text-[var(--github-text-secondary)]">
-                    搜索结果
-                  </Label>
-                  {searchResults.map((repo) =>
-                    renderSearchCard(repo, isRepoMonitored(repo.fullName))
-                  )}
-                </div>
-              ) : searchInput ? (
-                <div className="text-center py-8 text-sm text-[var(--github-text-secondary)]">
-                  未找到相关仓库
-                </div>
-              ) : (
-                <div className="text-center py-8 text-sm text-[var(--github-text-secondary)]">
-                  输入关键词搜索 GitHub 仓库
-                </div>
-              )}
-            </div>
-
-            {isAdding && (
-              <div className="absolute inset-0 bg-background/50 flex items-center justify-center">
-                <Loader2 className="w-6 h-6 animate-spin text-[var(--github-accent)]" />
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
+            </CardContent>
+          </Card>
+        ) : filteredRepositories.length === 0 ? (
+          <Card>
+            <CardContent className="p-6 text-sm text-muted-foreground">
+              {t('repositories.empty.list')}
+            </CardContent>
+          </Card>
+        ) : (
+          <section className="space-y-4">{filteredRepositories.map(renderRepositoryCard)}</section>
+        )}
+      </div>
+    </TooltipProvider>
   );
 }

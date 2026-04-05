@@ -46,6 +46,7 @@ packages/database/prisma/migrations/
 # Misc
 *.tsbuildinfo
 .cache/
+.dev-services/
 
 # claude
 .claude/
