@@ -80,7 +80,7 @@ corepack pnpm --filter @repo-pulse/web build
 - 后端在 TypeScript 编译前需要先执行 `prisma generate`，否则无法正确解析 Prisma 的 model 和 enum 类型。
 
 ## 运行
-
+一件运行指令： powershell -ExecutionPolicy Bypass -File .\scripts\run-local.ps1    
 ### 后端
 
 ```powershell
