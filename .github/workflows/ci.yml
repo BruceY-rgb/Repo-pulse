@@ -89,6 +89,8 @@ jobs:
       JWT_SECRET: ci-e2e-jwt-secret
       JWT_REFRESH_SECRET: ci-e2e-refresh-secret
       FRONTEND_URL: http://localhost:5173
+      GITHUB_CLIENT_ID: dummy
+      GITHUB_CLIENT_SECRET: dummy
     steps:
       - uses: actions/checkout@v4
 
