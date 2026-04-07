@@ -41,11 +41,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build shared packages
-        run: pnpm --filter=@repo-pulse/shared --filter=@repo-pulse/database --filter=@repo-pulse/ai-sdk build
-
       - name: Generate Prisma client
         run: pnpm db:generate
+
+      - name: Build shared packages
+        run: pnpm --filter=@repo-pulse/shared --filter=@repo-pulse/database --filter=@repo-pulse/ai-sdk build
 
       - name: Build web (Vite)
         run: pnpm --filter=@repo-pulse/web build
@@ -104,11 +104,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build shared packages
-        run: pnpm --filter=@repo-pulse/shared --filter=@repo-pulse/database --filter=@repo-pulse/ai-sdk build
-
       - name: Generate Prisma client
         run: pnpm db:generate
+
+      - name: Build shared packages
+        run: pnpm --filter=@repo-pulse/shared --filter=@repo-pulse/database --filter=@repo-pulse/ai-sdk build
 
       - name: Run DB migrations
         run: pnpm db:migrate
