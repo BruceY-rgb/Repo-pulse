@@ -112,6 +112,8 @@ jobs:
 
       - name: Run DB migrations
         run: pnpm db:migrate
+        env:
+          DATABASE_URL: postgresql://repopulse:repopulse@localhost:5432/repopulse_test
 
       - name: Run E2E tests
         run: pnpm --filter=@repo-pulse/api test:e2e
