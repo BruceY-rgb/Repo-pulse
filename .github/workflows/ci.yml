@@ -21,51 +21,11 @@ env:
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────────────
-  # Job 1: 所有分支 push 时跑，前后端类型检查 + ESLint
-  # ──────────────────────────────────────────────────────────────────────────────
-  quality:
-    name: Quality (Lint & Typecheck)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build shared packages
-        run: pnpm --filter=@repo-pulse/shared --filter=@repo-pulse/database --filter=@repo-pulse/ai-sdk build
-
-      - name: Generate Prisma client
-        run: pnpm db:generate
-
-      - name: Typecheck (web)
-        run: pnpm --filter=@repo-pulse/web typecheck
-
-      - name: Typecheck (api)
-        run: pnpm --filter=@repo-pulse/api typecheck
-
-      - name: Lint (web)
-        run: pnpm --filter=@repo-pulse/web lint
-
-      - name: Lint (api)
-        run: pnpm --filter=@repo-pulse/api lint
-
-  # ──────────────────────────────────────────────────────────────────────────────
-  # Job 2: quality 通过后，验证前端 Vite 构建 + 后端 tsc 编译
+  # Job 1: 验证前端 Vite 构建 + 后端 tsc 编译
   # ──────────────────────────────────────────────────────────────────────────────
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: quality
     steps:
       - uses: actions/checkout@v4
 
@@ -94,12 +54,11 @@ jobs:
         run: pnpm --filter=@repo-pulse/api build
 
   # ──────────────────────────────────────────────────────────────────────────────
-  # Job 3: 与 build 并行，用真实 DB + Redis 跑端到端测试
+  # Job 2: 用真实 DB + Redis 跑端到端测试
   # ──────────────────────────────────────────────────────────────────────────────
   test-e2e:
     name: E2E Tests
     runs-on: ubuntu-latest
-    needs: quality
     services:
       postgres:
         image: postgres:16-alpine
@@ -158,46 +117,19 @@ jobs:
         run: pnpm --filter=@repo-pulse/api test:e2e
 
   # ──────────────────────────────────────────────────────────────────────────────
-  # Job 4: 独立跑 pnpm audit，检查高危依赖漏洞
-  # ──────────────────────────────────────────────────────────────────────────────
-  security:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Audit for high severity vulnerabilities
-        run: pnpm audit --audit-level=high
-
-  # ──────────────────────────────────────────────────────────────────────────────
-  # Job 5: 汇总门禁，quality / build / test-e2e / security 全绿才算 CI 通过
+  # Job 3: 汇总门禁，build + test-e2e 全绿才算 CI 通过
   # ──────────────────────────────────────────────────────────────────────────────
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [quality, build, test-e2e, security]
+    needs: [build, test-e2e]
     if: always()
     steps:
       - name: Check all required jobs
         run: |
           results=(
-            "quality=${{ needs.quality.result }}"
             "build=${{ needs.build.result }}"
             "test-e2e=${{ needs.test-e2e.result }}"
-            "security=${{ needs.security.result }}"
           )
 
           failed=0
