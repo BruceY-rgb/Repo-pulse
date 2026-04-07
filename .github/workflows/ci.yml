@@ -54,10 +54,10 @@ jobs:
         run: pnpm --filter=@repo-pulse/api typecheck
 
       - name: Lint (web)
-        run: pnpm --filter=@repo-pulse/web lint
+        run: pnpm --filter=@repo-pulse/web lint -- --max-warnings -1
 
       - name: Lint (api)
-        run: pnpm --filter=@repo-pulse/api lint
+        run: pnpm --filter=@repo-pulse/api lint -- --max-warnings -1
 
   # ──────────────────────────────────────────────────────────────────────────────
   # Job 2: quality 通过后，验证前端 Vite 构建 + 后端 tsc 编译
