@@ -111,7 +111,7 @@ jobs:
         run: pnpm --filter=@repo-pulse/shared --filter=@repo-pulse/database --filter=@repo-pulse/ai-sdk build
 
       - name: Run DB migrations
-        run: pnpm db:migrate
+        run: pnpm --filter=@repo-pulse/database exec prisma migrate deploy
         env:
           DATABASE_URL: postgresql://repopulse:repopulse@localhost:5432/repopulse_test
 
