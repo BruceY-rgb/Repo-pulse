@@ -23,33 +23,72 @@ describe('AuthModule (e2e)', () => {
     await app.init();
   });
 
-  // 1. 测试：符合契约的正常登录
-  it('/auth/login (POST) - 正常登录', () => {
-    return request(app.getHttpServer())
-      .post('/auth/login')
-      .send({
-        email: 'test@example.com',
-        password: 'password123',
-      })
-      .expect((res) => {
-        if (res.status === 201) {
-          expect(res.body).toHaveProperty('accessToken');
-        }
-      });
-  });
-
-  // 2. 契约对齐测试：错误的邮箱格式
-  it('/auth/login (POST) - 拦截非法邮箱', () => {
-    return request(app.getHttpServer())
-      .post('/auth/login')
-      .send({
-        email: 'invalid-email-format', 
-        password: 'password123',
-      })
-      .expect(400); // 预期 ValidationPipe 拦截并返回 400
-  });
-
   afterAll(async () => {
     await app.close();
+  });
+
+  describe('POST /auth/login', () => {
+    it('非法邮箱格式应返回 400', () => {
+      return request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'not-an-email', password: 'password123' })
+        .expect(400);
+    });
+
+    it('缺少必填字段应返回 400', () => {
+      return request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'test@example.com' })
+        .expect(400);
+    });
+
+    it('凭证错误应返回 401', () => {
+      return request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'nonexistent@example.com', password: 'wrong-password' })
+        .expect(401);
+    });
+  });
+
+  describe('GET /auth/me', () => {
+    it('未携带 Token 应返回 401', () => {
+      return request(app.getHttpServer()).get('/auth/me').expect(401);
+    });
+  });
+
+  describe('POST /auth/refresh', () => {
+    it('无 Cookie 应返回 401', () => {
+      return request(app.getHttpServer()).post('/auth/refresh').expect(401);
+    });
+  });
+
+  describe('POST /auth/logout', () => {
+    it('应返回 200 并清除 Cookie', () => {
+      return request(app.getHttpServer())
+        .post('/auth/logout')
+        .expect(200)
+        .expect((res) => {
+          expect(res.body).toHaveProperty('message');
+        });
+    });
+  });
+
+  describe('POST /auth/github/config', () => {
+    it('传入有效参数应返回 200', () => {
+      return request(app.getHttpServer())
+        .post('/auth/github/config')
+        .send({ clientId: 'test-client-id', clientSecret: 'test-client-secret' })
+        .expect(200)
+        .expect((res) => {
+          expect(res.body).toHaveProperty('message');
+        });
+    });
+
+    it('缺少参数应返回 401', () => {
+      return request(app.getHttpServer())
+        .post('/auth/github/config')
+        .send({ clientId: '' })
+        .expect(401);
+    });
   });
 });
