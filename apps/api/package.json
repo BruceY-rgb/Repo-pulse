@@ -4,16 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "ts-node -r tsconfig-paths/register src/main.ts",
-    "dev:watch": "node_modules/.bin/nest start --watch",
-    "build": "node_modules/.bin/tsc -p tsconfig.json",
+    "dev:watch": "nest start --watch",
+    "build": "tsc -p tsconfig.json",
     "start": "node dist/main",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:cov": "jest --coverage",
-    "test:e2e": "jest --config test/jest-e2e.json --runInBand"
+    "test:cov": "jest --coverage"
   },
   "dependencies": {
     "@nestjs/bullmq": "^11.0.0",
