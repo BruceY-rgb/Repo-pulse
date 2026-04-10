@@ -35,7 +35,7 @@ export class ApprovalService {
       select: { repositoryId: true },
     });
 
-    const repoIds = userRepos.map((r) => r.repositoryId);
+    const repoIds = userRepos.map((r: { repositoryId: string }) => r.repositoryId);
 
     // 如果用户没有任何仓库，返回空结果
     if (repoIds.length === 0) {
@@ -47,7 +47,7 @@ export class ApprovalService {
       where: { repositoryId: { in: repoIds } },
       select: { id: true },
     });
-    const eventIds = events.map((e) => e.id);
+    const eventIds = events.map((e: { id: string }) => e.id);
 
     // 如果没有事件，返回空结果
     if (eventIds.length === 0) {
@@ -90,7 +90,7 @@ export class ApprovalService {
       select: { repositoryId: true },
     });
 
-    const repoIds = userRepos.map((r) => r.repositoryId);
+    const repoIds = userRepos.map((r: { repositoryId: string }) => r.repositoryId);
 
     // 如果用户没有任何仓库，返回 0
     if (repoIds.length === 0) {
@@ -101,7 +101,7 @@ export class ApprovalService {
       where: { repositoryId: { in: repoIds } },
       select: { id: true },
     });
-    const eventIds = events.map((e) => e.id);
+    const eventIds = events.map((e: { id: string }) => e.id);
 
     // 如果没有事件，返回 0
     if (eventIds.length === 0) {

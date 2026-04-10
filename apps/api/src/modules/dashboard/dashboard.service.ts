@@ -17,7 +17,7 @@ export class DashboardService {
       select: { id: true },
     });
 
-    const repositoryIds = repositories.map((r) => r.id);
+    const repositoryIds = repositories.map((r: { id: string }) => r.id);
 
     if (repositoryIds.length === 0) {
       return {
@@ -74,7 +74,7 @@ export class DashboardService {
       select: { id: true },
     });
 
-    const repositoryIds = repositories.map((r) => r.id);
+    const repositoryIds = repositories.map((r: { id: string }) => r.id);
 
     if (repositoryIds.length === 0) {
       // 返回空数据
@@ -154,8 +154,8 @@ export class DashboardService {
       select: { id: true, name: true },
     });
 
-    const repositoryIds = repositories.map((r) => r.id);
-    const repoMap = new Map(repositories.map((r) => [r.id, r.name]));
+    const repositoryIds = repositories.map((r: { id: string; name: string }) => r.id);
+    const repoMap = new Map(repositories.map((r: { id: string; name: string }) => [r.id, r.name]));
 
     if (repositoryIds.length === 0) {
       return [];
@@ -178,7 +178,7 @@ export class DashboardService {
       },
     });
 
-    return events.map((event) => ({
+    return events.map((event: { id: string; type: string; action: string | null; title: string | null; author: string | null; repositoryId: string; createdAt: Date }) => ({
       id: event.id,
       type: event.type,
       action: event.action,
