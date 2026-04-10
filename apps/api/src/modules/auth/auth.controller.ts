@@ -9,7 +9,6 @@ import {
   HttpCode,
   HttpStatus,
   UnauthorizedException,
-  Query,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiCookieAuth } from '@nestjs/swagger';
@@ -30,7 +29,7 @@ const COOKIE_OPTIONS = {
   path: '/',
 };
 
-const ACCESS_TOKEN_MAX_AGE = 15 * 60 * 1000; // 15 分钟
+const ACCESS_TOKEN_MAX_AGE = 15 * 60 * 1000;        // 15 分钟
 const REFRESH_TOKEN_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 天
 
 @ApiTags('认证')
@@ -40,7 +39,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly userService: UserService,
     private readonly githubStrategy: GithubStrategy,
-  ) {}
+  ) { }
 
   /**
    * 邮箱密码登录 — Token 写入 HttpOnly Cookie
@@ -100,14 +99,10 @@ export class AuthController {
    */
   @Get('github')
   @Public()
-  githubAuth(
-    @Query('clientId') clientId: string,
-    @Query('clientSecret') clientSecret: string,
-    @Res() res: Response,
-  ) {
-    // 把两个参数存在 session 或直接传递
-    const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=http://localhost:3001/auth/github/callback&scope=user:email repo&state=${clientId},${clientSecret}`;
-    res.redirect(url);
+  @UseGuards(AuthGuard('github'))
+  @ApiOperation({ summary: 'GitHub OAuth 跳转' })
+  githubAuth() {
+    // Passport 会自动重定向到 GitHub，无需实现
   }
 
   /**
@@ -117,7 +112,9 @@ export class AuthController {
   @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '配置 GitHub OAuth 客户端参数（运行时）' })
-  configureGithubOAuth(@Body() body: { clientId?: string; clientSecret?: string }) {
+  configureGithubOAuth(
+    @Body() body: { clientId?: string; clientSecret?: string },
+  ) {
     const clientId = body.clientId?.trim();
     const clientSecret = body.clientSecret?.trim();
 
@@ -135,47 +132,29 @@ export class AuthController {
    */
   @Get('github/callback')
   @Public()
+  @UseGuards(AuthGuard('github'))
+  @ApiOperation({ summary: 'GitHub OAuth 回调' })
   async githubCallback(
-    @Query('code') code: string,
-    @Query('state') state: string,
-    @Res() res: Response,
+    @Req() req: Request,
+    @Res() res: Response
   ) {
-    // 从 state 取出用户输入的 clientId / clientSecret
-    const [clientId, clientSecret] = state.split(',');
+    // 拿到 GitHub 登录后的用户信息
+    const profile = req.user as {
+      id: string;
+      email: string;
+      displayName: string;
+      avatar: string;
+      githubAccessToken: string;
+      githubRefreshToken: string;
+    };
 
-    // 手动获取 GitHub token
-    const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({
-        client_id: clientId,
-        client_secret: clientSecret,
-        code,
-        redirect_uri: 'http://localhost:3001/auth/github/callback',
-      }),
-    });
-    const tokenData = await tokenRes.json();
-    const accessToken = tokenData.access_token;
+    // 生成 token
+    const tokens = await this.authService.handleGithubAuth(profile);
 
-    // 获取用户信息
-    const userRes = await fetch('https://api.github.com/user', {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/vnd.github.v3+json',
-      },
-    });
-    const profile = await userRes.json();
-
-    const tokens = await this.authService.handleGithubAuth({
-      id: profile.id.toString(),
-      email: profile.email || `${profile.id}@github.com`,
-      displayName: profile.name || profile.login,
-      avatar: profile.avatar_url || '',
-      githubAccessToken: accessToken,
-      githubRefreshToken: '',
-    });
-
+    // 写入 cookie
     this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
+
+    // 跳转到前端回调页
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     res.redirect(`${frontendUrl}/auth/callback`);
   }

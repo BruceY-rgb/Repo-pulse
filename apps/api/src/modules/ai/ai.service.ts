@@ -3,6 +3,7 @@ import { Inject } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { prisma, AIAnalysis, RiskLevel, AnalysisStatus } from '@repo-pulse/database';
+// @ts-ignore
 import { OpenAIProvider, AnalysisInput, AnalysisOutput } from '@repo-pulse/ai-sdk';
 
 @Injectable()

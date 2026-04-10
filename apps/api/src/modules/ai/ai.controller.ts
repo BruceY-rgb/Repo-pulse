@@ -81,6 +81,7 @@ export class AIController {
       };
 
       // 动态导入 Provider
+      // @ts-ignore
       const { OpenAIProvider } = await import('@repo-pulse/ai-sdk');
       const provider = new OpenAIProvider({
         apiKey: aiApiKey,
