@@ -137,7 +137,7 @@ export function Login() {
                   </ol>
                   <p className="text-xs text-muted-foreground">
                     {t('auth.login.oauthConfig.callbackHint')}
-                    <span className="ml-1 font-mono text-foreground">http://localhost:3000/api/auth/github/callback</span>
+                    <span className="ml-1 font-mono text-foreground">http://localhost:3001/auth/github/callback</span>
                   </p>
                   <a
                     href="https://github.com/settings/apps/new"

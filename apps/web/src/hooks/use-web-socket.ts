@@ -17,10 +17,53 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
   const queryClient = useQueryClient();
   const socketRef = useRef<Socket | null>(null);
   const subscribedRoomsRef = useRef<Set<string>>(new Set());
+  const disconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const socketUrl = useMemo(() => 'http://localhost:3001/events', []);
 
+  const getTargetRepositoryIds = useCallback(() => {
+    if (Array.isArray(repositoryIds)) {
+      return repositoryIds.filter(Boolean);
+    }
+
+    return repositoryIds ? [repositoryIds] : [];
+  }, [repositoryIds]);
+
+  const syncRoomSubscriptions = useCallback(() => {
+    if (!socketRef.current?.connected) {
+      return;
+    }
+
+    const nextRooms = new Set(getTargetRepositoryIds());
+
+    for (const id of nextRooms) {
+      if (!subscribedRoomsRef.current.has(id)) {
+        socketRef.current.emit('join:repository', { repositoryId: id });
+      }
+    }
+
+    for (const id of subscribedRoomsRef.current) {
+      if (!nextRooms.has(id) && socketRef.current?.connected) {
+        socketRef.current.emit('leave:repository', { repositoryId: id });
+      }
+    }
+
+    subscribedRoomsRef.current = nextRooms;
+  }, [getTargetRepositoryIds]);
+
   const connect = useCallback(() => {
+    if (disconnectTimerRef.current) {
+      clearTimeout(disconnectTimerRef.current);
+      disconnectTimerRef.current = null;
+    }
+
+    if (socketRef.current) {
+      if (!socketRef.current.connected) {
+        socketRef.current.connect();
+      }
+      return;
+    }
+
     if (socketRef.current?.connected) {
       return;
     }
@@ -50,14 +93,27 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
       }
     });
 
+    socket.on('connect', () => {
+      syncRoomSubscriptions();
+    });
+
     socketRef.current = socket;
-  }, [queryClient, socketUrl]);
+  }, [queryClient, socketUrl, syncRoomSubscriptions]);
 
   const disconnect = useCallback(() => {
-    if (socketRef.current) {
-      socketRef.current.disconnect();
-      socketRef.current = null;
+    if (disconnectTimerRef.current) {
+      clearTimeout(disconnectTimerRef.current);
     }
+
+    // React.StrictMode 在开发环境会触发一次“挂载-卸载-再挂载”，延迟断开可避免误判为提前关闭。
+    disconnectTimerRef.current = setTimeout(() => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      subscribedRoomsRef.current = new Set();
+      disconnectTimerRef.current = null;
+    }, 300);
   }, []);
 
   useEffect(() => {
@@ -68,40 +124,6 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
   }, [connect, disconnect]);
 
   useEffect(() => {
-    if (!socketRef.current?.connected) {
-      return;
-    }
-
-    const targetRepositoryIds = Array.isArray(repositoryIds)
-      ? repositoryIds
-      : repositoryIds
-        ? [repositoryIds]
-        : [];
-    const nextRooms = new Set(targetRepositoryIds.filter(Boolean));
-
-    for (const id of nextRooms) {
-      if (!subscribedRoomsRef.current.has(id)) {
-        socketRef.current.emit('join:repository', { repositoryId: id });
-      }
-    }
-
-    for (const id of subscribedRoomsRef.current) {
-      if (!nextRooms.has(id) && socketRef.current?.connected) {
-        socketRef.current.emit('leave:repository', { repositoryId: id });
-      }
-    }
-
-    subscribedRoomsRef.current = nextRooms;
-
-    return () => {
-      if (!socketRef.current?.connected) {
-        return;
-      }
-
-      for (const id of subscribedRoomsRef.current) {
-        socketRef.current.emit('leave:repository', { repositoryId: id });
-      }
-      subscribedRoomsRef.current = new Set();
-    };
-  }, [repositoryIds]);
+    syncRoomSubscriptions();
+  }, [syncRoomSubscriptions]);
 }

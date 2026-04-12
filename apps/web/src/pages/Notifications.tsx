@@ -47,6 +47,13 @@ import type { NotificationChannel } from '@/services/notification.service';
 
 type NotificationTab = 'all' | 'unread';
 
+const defaultNotificationEvents = {
+  highRisk: true,
+  prUpdates: true,
+  analysisComplete: true,
+  weeklyReport: false,
+};
+
 function NotificationSkeletonList() {
   return (
     <div className="rounded-lg border border-border bg-card p-8">
@@ -112,6 +119,8 @@ export function Notifications() {
   const total = notificationsQuery.data?.total ?? 0;
   const unreadCount = unreadCountQuery.data?.count ?? 0;
   const prefs = preferencesQuery.data;
+  const channels = prefs?.channels ?? [];
+  const events = prefs?.events ?? defaultNotificationEvents;
 
   useEffect(() => {
     setEmailDraft(prefs?.email ?? '');
@@ -162,14 +171,15 @@ export function Notifications() {
       return;
     }
 
-    const exists = prefs.channels.includes(channel);
-    const channels = exists
-      ? prefs.channels.filter((item) => item !== channel)
-      : [...prefs.channels, channel];
+    const exists = channels.includes(channel);
+    const nextChannels = exists
+      ? channels.filter((item) => item !== channel)
+      : [...channels, channel];
 
     await updatePrefsMutation.mutateAsync({
       ...prefs,
-      channels,
+      channels: nextChannels,
+      events,
     });
   };
 
@@ -180,9 +190,10 @@ export function Notifications() {
 
     await updatePrefsMutation.mutateAsync({
       ...prefs,
+      channels,
       events: {
-        ...prefs.events,
-        [eventKey]: !prefs.events[eventKey],
+        ...events,
+        [eventKey]: !events[eventKey],
       },
     });
   };
@@ -194,6 +205,8 @@ export function Notifications() {
 
     await updatePrefsMutation.mutateAsync({
       ...prefs,
+      channels,
+      events,
       email: emailDraft,
       webhookUrl: webhookDraft,
     });
@@ -387,7 +400,7 @@ export function Notifications() {
               </p>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 {channelOptions.map((option) => {
-                  const enabled = prefs?.channels.includes(option.key) ?? false;
+                  const enabled = prefs?.channels?.includes(option.key) ?? false;
                   const Icon = option.icon;
 
                   return (
@@ -423,7 +436,7 @@ export function Notifications() {
                   </Label>
                   <Switch
                     id="notify-high-risk"
-                    checked={prefs?.events.highRisk ?? false}
+                    checked={prefs?.events?.highRisk ?? false}
                     onCheckedChange={() => toggleEvent('highRisk')}
                     disabled={updatePrefsMutation.isPending}
                   />
@@ -434,7 +447,7 @@ export function Notifications() {
                   </Label>
                   <Switch
                     id="notify-pr-updates"
-                    checked={prefs?.events.prUpdates ?? false}
+                    checked={prefs?.events?.prUpdates ?? false}
                     onCheckedChange={() => toggleEvent('prUpdates')}
                     disabled={updatePrefsMutation.isPending}
                   />
@@ -445,7 +458,7 @@ export function Notifications() {
                   </Label>
                   <Switch
                     id="notify-analysis-complete"
-                    checked={prefs?.events.analysisComplete ?? false}
+                    checked={prefs?.events?.analysisComplete ?? false}
                     onCheckedChange={() => toggleEvent('analysisComplete')}
                     disabled={updatePrefsMutation.isPending}
                   />
@@ -456,7 +469,7 @@ export function Notifications() {
                   </Label>
                   <Switch
                     id="notify-weekly-report"
-                    checked={prefs?.events.weeklyReport ?? false}
+                    checked={prefs?.events?.weeklyReport ?? false}
                     onCheckedChange={() => toggleEvent('weeklyReport')}
                     disabled={updatePrefsMutation.isPending}
                   />
