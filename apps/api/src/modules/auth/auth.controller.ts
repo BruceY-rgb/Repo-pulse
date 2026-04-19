@@ -10,12 +10,12 @@ import {
   HttpStatus,
   UnauthorizedException,
 } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiCookieAuth } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { GithubAuthGuard } from './guards/github-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { UserService } from '../user/user.service';
@@ -99,7 +99,7 @@ export class AuthController {
    */
   @Get('github')
   @Public()
-  @UseGuards(AuthGuard('github'))
+  @UseGuards(GithubAuthGuard)
   @ApiOperation({ summary: 'GitHub OAuth 跳转' })
   githubAuth() {
     // Passport 会自动重定向到 GitHub，无需实现
@@ -132,7 +132,7 @@ export class AuthController {
    */
   @Get('github/callback')
   @Public()
-  @UseGuards(AuthGuard('github'))
+  @UseGuards(GithubAuthGuard)
   @ApiOperation({ summary: 'GitHub OAuth 回调' })
   async githubCallback(
     @Req() req: Request,

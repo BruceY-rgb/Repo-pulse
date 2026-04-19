@@ -7,20 +7,23 @@ import { ConfigService } from '@nestjs/config';
 export class GithubStrategy extends PassportStrategy(Strategy, 'github') {
   private clientID: string;
   private clientSecret: string;
+  private callbackURL: string;
 
   constructor(configService: ConfigService) {
     const clientID = configService.get<string>('GITHUB_CLIENT_ID') || '';
     const clientSecret = configService.get<string>('GITHUB_CLIENT_SECRET') || '';
+    const callbackURL = configService.get<string>('GITHUB_CALLBACK_URL') || '';
 
     super({
-      clientID,
-      clientSecret,
-      callbackURL: configService.get<string>('GITHUB_CALLBACK_URL') || '',
+      clientID: clientID || 'disabled-github-client-id',
+      clientSecret: clientSecret || 'disabled-github-client-secret',
+      callbackURL: callbackURL || 'http://localhost:3001/auth/github/callback',
       scope: ['user:email', 'repo'],
     });
 
     this.clientID = clientID;
     this.clientSecret = clientSecret;
+    this.callbackURL = callbackURL;
   }
 
   updateCredentials(clientID: string, clientSecret: string) {
@@ -30,6 +33,10 @@ export class GithubStrategy extends PassportStrategy(Strategy, 'github') {
     // passport-github2 stores credentials in oauth2 internals.
     (this as unknown as { _oauth2: { _clientId: string; _clientSecret: string } })._oauth2._clientId = clientID;
     (this as unknown as { _oauth2: { _clientId: string; _clientSecret: string } })._oauth2._clientSecret = clientSecret;
+  }
+
+  isConfigured() {
+    return Boolean(this.clientID && this.clientSecret && this.callbackURL);
   }
 
   async validate(
