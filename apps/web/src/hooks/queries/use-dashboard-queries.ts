@@ -31,32 +31,7 @@ export function useDashboardRepositoriesQuery() {
 export function useDashboardStatsQuery(repositoryId?: string) {
   return useApiQuery({
     queryKey: dashboardQueryKeys.stats(repositoryId ?? 'none'),
-    queryFn: async () => {
-      try {
-        const result = await eventService.getAll(repositoryId ?? '', {
-          page: 1,
-          pageSize: 200,
-        });
-
-        const byTypeMap = result.items.reduce<Record<string, number>>((acc, item) => {
-          acc[item.type] = (acc[item.type] ?? 0) + 1;
-          return acc;
-        }, {});
-
-        return {
-          total: result.total,
-          byType: Object.entries(byTypeMap).map(([type, count]) => ({
-            type,
-            count,
-          })),
-        };
-      } catch {
-        return {
-          total: 0,
-          byType: [],
-        };
-      }
-    },
+    queryFn: () => eventService.getStats(repositoryId ?? ''),
     enabled: Boolean(repositoryId),
     staleTime: 60 * 1000,
   });
@@ -65,22 +40,11 @@ export function useDashboardStatsQuery(repositoryId?: string) {
 export function useDashboardRecentEventsQuery(repositoryId?: string) {
   return useApiQuery({
     queryKey: dashboardQueryKeys.recentEvents(repositoryId ?? 'none'),
-    queryFn: async () => {
-      try {
-        return await repositoryService.getEvents(repositoryId ?? '', {
-          page: 1,
-          pageSize: 6,
-        });
-      } catch {
-        return {
-          items: [],
-          total: 0,
-          page: 1,
-          pageSize: 6,
-          totalPages: 0,
-        };
-      }
-    },
+    queryFn: () =>
+      repositoryService.getEvents(repositoryId ?? '', {
+        page: 1,
+        pageSize: 6,
+      }),
     enabled: Boolean(repositoryId),
     staleTime: 30 * 1000,
   });

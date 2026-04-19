@@ -67,6 +67,8 @@ export class EventService {
   }
 
   async findAll(repositoryId: string, query: PaginationQueryDto): Promise<any> {
+    await this.ensureRepositoryExists(repositoryId);
+
     const { page = 1, pageSize = 20, sortBy = 'createdAt', sortOrder = 'desc' } = query;
 
     const [items, total] = await Promise.all([
@@ -127,7 +129,7 @@ export class EventService {
     });
 
     if (!event) {
-      throw new NotFoundException('事件不存在');
+      throw new NotFoundException('Event not found');
     }
 
     return event;
@@ -143,6 +145,8 @@ export class EventService {
   }
 
   async getEventStats(repositoryId: string, dateFrom?: Date, dateTo?: Date) {
+    await this.ensureRepositoryExists(repositoryId);
+
     const where: Record<string, unknown> = { repositoryId };
 
     if (dateFrom || dateTo) {
@@ -188,5 +192,16 @@ export class EventService {
 
     this.logger.log(`Deleted ${result.count} old events for repository ${repositoryId}`);
     return result;
+  }
+
+  private async ensureRepositoryExists(repositoryId: string) {
+    const repository = await this.prisma.repository.findUnique({
+      where: { id: repositoryId },
+      select: { id: true },
+    });
+
+    if (!repository) {
+      throw new NotFoundException('Repository not found');
+    }
   }
 }

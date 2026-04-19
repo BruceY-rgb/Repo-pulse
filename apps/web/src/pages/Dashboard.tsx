@@ -36,6 +36,7 @@ import {
 } from 'recharts';
 import gsap from 'gsap';
 import { useLanguage } from '@/contexts/LanguageContext';
+import type { ApiClientError } from '@/lib/query-hooks';
 import {
   useDashboardRecentEventsQuery,
   useDashboardRepositoriesQuery,
@@ -98,6 +99,17 @@ function getRiskByType(type: string): 'low' | 'medium' | 'high' {
   return 'low';
 }
 
+function getDashboardErrorMessage(
+  error: ApiClientError | null | undefined,
+  fallbackMessage: string,
+) {
+  if (!error?.message) {
+    return fallbackMessage;
+  }
+
+  return error.message;
+}
+
 export function Dashboard() {
   const cardsRef = useRef<HTMLDivElement>(null);
   const { t, language } = useLanguage();
@@ -118,6 +130,10 @@ export function Dashboard() {
   const totalEvents = statsQuery.data?.total ?? 0;
   const pendingApprovals = pendingApprovalsQuery.data?.count ?? 0;
   const unreadNotifications = unreadNotificationsQuery.data?.count ?? 0;
+  const dashboardErrorMessage = getDashboardErrorMessage(
+    statsQuery.error ?? recentEventsQuery.error ?? repositoriesQuery.error,
+    t('dashboard.error.partialLoadFailed'),
+  );
 
   const statsCards = useMemo(
     () => [
@@ -437,7 +453,7 @@ export function Dashboard() {
       {repositoriesQuery.isError || (hasRepository && (statsQuery.isError || recentEventsQuery.isError)) ? (
         <Card className="card-github">
           <CardContent className="flex items-center justify-between gap-4 p-4">
-            <div className="text-sm text-red-400">{t('dashboard.error.partialLoadFailed')}</div>
+            <div className="text-sm text-red-400">{dashboardErrorMessage}</div>
             <Button
               variant="outline"
               size="sm"

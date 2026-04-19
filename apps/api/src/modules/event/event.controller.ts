@@ -1,10 +1,8 @@
 import {
   Controller,
   Get,
-  Post,
   Param,
   Query,
-  Body,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -21,21 +19,20 @@ export class EventController {
 
   @Get()
   @ApiOperation({ summary: '获取事件列表' })
-  async findAll(@Query('repositoryId') repositoryId: string, @Query() query: EventQueryDto): Promise<any> {
-    const result = await this.eventService.findAll(repositoryId, query);
+  async findAll(@Query() query: EventQueryDto): Promise<any> {
+    const { repositoryId, ...pagination } = query;
+    const result = await this.eventService.findAll(repositoryId, pagination);
     return result;
   }
 
   @Get('stats')
   @ApiOperation({ summary: '获取事件统计' })
-  async getStats(
-    @Query('repositoryId') repositoryId: string,
-    @Query() query: EventStatsQueryDto,
-  ) {
+  async getStats(@Query() query: EventStatsQueryDto) {
+    const { repositoryId, dateFrom, dateTo } = query;
     const result = await this.eventService.getEventStats(
       repositoryId,
-      query.dateFrom ? new Date(query.dateFrom) : undefined,
-      query.dateTo ? new Date(query.dateTo) : undefined,
+      dateFrom ? new Date(dateFrom) : undefined,
+      dateTo ? new Date(dateTo) : undefined,
     );
     return result;
   }
