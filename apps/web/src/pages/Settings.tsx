@@ -14,6 +14,9 @@ import {
   AlertTriangle,
   Brain,
   Link,
+  Wifi,
+  Download,
+  Loader2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -28,9 +31,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Spinner } from '@/components/ui/spinner';
 import {
   settingsService,
+  PROVIDER_LABELS,
+  PROVIDER_DEFAULT_MODELS,
+  PROVIDER_DEFAULT_URLS,
+  PROVIDER_CHAT_PATHS,
   type AIProvider,
   type AIConfig,
+  type ConnectionTestResult,
+  type ModelInfo,
 } from '@/services/settings.service';
+import { getProviderLogo } from '@/lib/provider-logo';
 import { notificationService } from '@/services/notification.service';
 import type {
   NotificationChannel,
@@ -56,6 +66,15 @@ export function Settings() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSaving, setAiSaving] = useState(false);
   const [aiSaved, setAiSaved] = useState(false);
+
+  // 连接测试状态
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<ConnectionTestResult | null>(null);
+
+  // 模型拉取状态
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [modelFetchResult, setModelFetchResult] = useState<{ success: boolean; message: string; models: ModelInfo[] } | null>(null);
+  const [models, setModels] = useState<ModelInfo[]>([]);
 
   // 通知配置状态
   const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>({
@@ -114,6 +133,62 @@ export function Settings() {
     } finally {
       setAiSaving(false);
     }
+  };
+
+  const handleTestConnection = async () => {
+    if (!aiConfig.aiProvider) return;
+
+    setTestingConnection(true);
+    setConnectionTestResult(null);
+
+    try {
+      const result = await settingsService.testConnection(
+        aiConfig.aiProvider,
+        aiConfig.aiApiKey || '',
+        aiConfig.aiBaseUrl
+      );
+      setConnectionTestResult(result);
+    } catch (error) {
+      setConnectionTestResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Connection test failed',
+      });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const handleFetchModels = async () => {
+    if (!aiConfig.aiProvider) return;
+
+    setFetchingModels(true);
+    setModelFetchResult(null);
+
+    try {
+      const result = await settingsService.fetchModels(
+        aiConfig.aiProvider,
+        aiConfig.aiApiKey || '',
+        aiConfig.aiBaseUrl
+      );
+      setModelFetchResult(result);
+      if (result.success) {
+        setModels(result.models);
+      }
+    } catch (error) {
+      setModelFetchResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to fetch models',
+        models: [],
+      });
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
+  const toggleModelEnabled = (modelId: string) => {
+    setModels(models.map(m =>
+      m.id === modelId ? { ...m, enabled: !m.enabled } : m
+    ));
   };
 
   const handleSaveNotifications = async () => {
@@ -596,7 +671,7 @@ export function Settings() {
                     <Label htmlFor="aiProvider" className="text-sm text-white">AI Provider</Label>
                     <Select
                       value={aiConfig.aiProvider || ''}
-                      onValueChange={(value: AIProvider) => setAiConfig({ ...aiConfig, aiProvider: value })}
+                      onValueChange={(value: AIProvider) => setAiConfig({ ...aiConfig, aiProvider: value, aiBaseUrl: undefined })}
                     >
                       <SelectTrigger className="bg-[var(--github-surface)] border-[var(--github-border)]">
                         <SelectValue placeholder="Select an AI provider" />
@@ -604,30 +679,70 @@ export function Settings() {
                       <SelectContent>
                         <SelectItem value="openai">
                           <div className="flex items-center gap-2">
-                            <span>OpenAI (GPT-4)</span>
+                            <img src={getProviderLogo('openai')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.openai}</span>
                           </div>
                         </SelectItem>
                         <SelectItem value="anthropic">
                           <div className="flex items-center gap-2">
-                            <span>Anthropic (Claude)</span>
+                            <img src={getProviderLogo('anthropic')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.anthropic}</span>
                           </div>
                         </SelectItem>
-                        <SelectItem value="ollama">
+                        <SelectItem value="deepseek">
                           <div className="flex items-center gap-2">
-                            <span>Ollama (Local)</span>
+                            <img src={getProviderLogo('deepseek')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.deepseek}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="google">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('google')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.google}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="moonshot">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('moonshot')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.moonshot}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="zhipu">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('zhipu')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.zhipu}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="minimax">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('minimax')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.minimax}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="doubao">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('doubao')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.doubao}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="qwen">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('qwen')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.qwen}</span>
                           </div>
                         </SelectItem>
                         <SelectItem value="custom">
                           <div className="flex items-center gap-2">
-                            <span>Custom Endpoint</span>
+                            <img src={getProviderLogo('custom')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.custom}</span>
                           </div>
                         </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
-                  {/* API Key - only show for openai and anthropic */}
-                  {(aiConfig.aiProvider === 'openai' || aiConfig.aiProvider === 'anthropic') && (
+                  {/* API Key - show for all providers except custom */}
+                  {(aiConfig.aiProvider && aiConfig.aiProvider !== 'custom') && (
                     <div className="space-y-2">
                       <Label htmlFor="aiApiKey" className="text-sm text-white">API Key</Label>
                       <Input
@@ -644,22 +759,57 @@ export function Settings() {
                     </div>
                   )}
 
-                  {/* Base URL - show for ollama and custom */}
-                  {(aiConfig.aiProvider === 'ollama' || aiConfig.aiProvider === 'custom') && (
+                  {/* Base URL - show for custom */}
+                  {aiConfig.aiProvider === 'custom' && (
                     <div className="space-y-2">
-                      <Label htmlFor="aiBaseUrl" className="text-sm text-white">
-                        {aiConfig.aiProvider === 'ollama' ? 'Ollama URL' : 'Base URL'}
-                      </Label>
+                      <Label htmlFor="aiBaseUrl" className="text-sm text-white">Base URL</Label>
                       <Input
                         id="aiBaseUrl"
                         type="url"
-                        placeholder={aiConfig.aiProvider === 'ollama' ? 'http://localhost:11434' : 'https://api.example.com/v1'}
+                        placeholder="https://api.example.com/v1"
                         value={aiConfig.aiBaseUrl || ''}
                         onChange={(e) => setAiConfig({ ...aiConfig, aiBaseUrl: e.target.value })}
                         className="bg-[var(--github-surface)] border-[var(--github-border)]"
                       />
                     </div>
                   )}
+
+                  {/* Endpoint Preview */}
+                  {aiConfig.aiProvider && (
+                    <div className="p-3 rounded-lg bg-white/5 border border-[var(--github-border)]">
+                      <p className="text-xs text-[var(--github-text-secondary)] mb-1">Endpoint Preview</p>
+                      <code className="text-sm text-white break-all">
+                        {getEndpointPreview(aiConfig.aiProvider, aiConfig.aiProvider === 'custom' ? aiConfig.aiBaseUrl : undefined)}
+                      </code>
+                    </div>
+                  )}
+
+                  {/* Test Connection Button */}
+                  <div className="flex items-center gap-3">
+                    <Button
+                      onClick={handleTestConnection}
+                      disabled={testingConnection || !aiConfig.aiProvider}
+                      variant="outline"
+                      className="border-[var(--github-border)] gap-2"
+                    >
+                      {testingConnection ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Wifi className="w-4 h-4" />
+                      )}
+                      {testingConnection ? 'Testing...' : 'Test Connection'}
+                    </Button>
+                    {connectionTestResult && (
+                      <div className={`flex items-center gap-2 text-sm ${connectionTestResult.success ? 'text-green-400' : 'text-red-400'}`}>
+                        {connectionTestResult.success ? (
+                          <CheckCircle className="w-4 h-4" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4" />
+                        )}
+                        {connectionTestResult.message}
+                      </div>
+                    )}
+                  </div>
 
                   {/* Model */}
                   <div className="space-y-2">
@@ -675,6 +825,65 @@ export function Settings() {
                       {getModelHint(aiConfig.aiProvider)}
                     </p>
                   </div>
+
+                  {/* Fetch Models Button */}
+                  {aiConfig.aiProvider && aiConfig.aiProvider !== 'custom' && (
+                    <div className="space-y-3">
+                      <Button
+                        onClick={handleFetchModels}
+                        disabled={fetchingModels}
+                        variant="outline"
+                        className="border-[var(--github-border)] gap-2"
+                      >
+                        {fetchingModels ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Download className="w-4 h-4" />
+                        )}
+                        {fetchingModels ? 'Fetching...' : 'Fetch Models from Provider'}
+                      </Button>
+
+                      {modelFetchResult && !modelFetchResult.success && (
+                        <div className="flex items-center gap-2 text-sm text-red-400">
+                          <AlertTriangle className="w-4 h-4" />
+                          {modelFetchResult.message}
+                        </div>
+                      )}
+
+                      {/* Model List */}
+                      {models.length > 0 && (
+                        <div className="space-y-2">
+                          <Label className="text-sm text-white">Available Models</Label>
+                          <div className="max-h-48 overflow-y-auto space-y-1 border border-[var(--github-border)] rounded-lg">
+                            {models.map((model) => (
+                              <div
+                                key={model.id}
+                                className="flex items-center justify-between p-2 hover:bg-white/5"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Switch
+                                    checked={model.enabled}
+                                    onCheckedChange={() => toggleModelEnabled(model.id)}
+                                  />
+                                  <span className="text-sm text-white">{model.name}</span>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    setAiConfig({ ...aiConfig, aiModel: model.id });
+                                  }}
+                                  className="text-xs text-[var(--github-accent)] hover:underline"
+                                >
+                                  Use
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <Separator className="bg-[var(--github-border)]" />
 
                   <Button
                     onClick={handleSaveAI}
@@ -697,31 +906,50 @@ export function Settings() {
 
 // Helper functions
 function getDefaultModel(provider?: string): string {
-  switch (provider) {
-    case 'openai':
-      return 'gpt-4';
-    case 'anthropic':
-      return 'claude-sonnet-4-20250514';
-    case 'ollama':
-      return 'llama3';
-    case 'custom':
-      return 'gpt-4';
-    default:
-      return '';
-  }
+  if (!provider || !(provider in PROVIDER_DEFAULT_MODELS)) return '';
+  return PROVIDER_DEFAULT_MODELS[provider as AIProvider] || '';
 }
 
 function getModelHint(provider?: string): string {
+  if (!provider) return 'Select a provider first';
   switch (provider) {
     case 'openai':
-      return 'e.g., gpt-4, gpt-4-turbo, gpt-3.5-turbo';
+      return 'e.g., gpt-4o, gpt-4-turbo, gpt-3.5-turbo';
     case 'anthropic':
-      return 'e.g., claude-sonnet-4-20250514, claude-opus-4-20250514, claude-3-5-sonnet-20241022';
-    case 'ollama':
-      return 'e.g., llama3, mistral, codellama';
+      return 'e.g., claude-sonnet-4-20250514, claude-opus-4-20250514';
+    case 'deepseek':
+      return 'e.g., deepseek-chat, deepseek-coder';
+    case 'google':
+      return 'e.g., gemini-2.0-flash-exp, gemini-1.5-pro';
+    case 'moonshot':
+      return 'e.g., kimi-longtext-chat, kimi-math';
+    case 'zhipu':
+      return 'e.g., glm-4-flash, glm-4';
+    case 'minimax':
+      return 'e.g., MiniMax-M2.1';
+    case 'doubao':
+      return 'e.g., doubao-pro-32k';
+    case 'qwen':
+      return 'e.g., qwen-turbo, qwen-plus';
     case 'custom':
       return 'Enter the model name supported by your custom endpoint';
     default:
       return 'Select a provider first';
   }
+}
+
+function getEndpointPreview(provider?: string, customBaseUrl?: string): string {
+  if (!provider) return '';
+
+  if (customBaseUrl?.trim()) {
+    const normalizedBaseUrl = customBaseUrl.replace(/\/$/, '');
+    const path = PROVIDER_CHAT_PATHS[provider as AIProvider] || '/chat/completions';
+    return normalizedBaseUrl + path;
+  }
+
+  const baseUrl = PROVIDER_DEFAULT_URLS[provider as AIProvider];
+  if (!baseUrl) return '';
+
+  const path = PROVIDER_CHAT_PATHS[provider as AIProvider] || '/chat/completions';
+  return baseUrl + path;
 }

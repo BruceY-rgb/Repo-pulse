@@ -1,36 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { prisma } from '@repo-pulse/database';
+import type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
 
-export type AIProvider =
-  | 'openai'
-  | 'anthropic'
-  | 'ollama'
-  | 'deepseek'
-  | 'google'
-  | 'moonshot'
-  | 'zhipu'
-  | 'minimax'
-  | 'doubao'
-  | 'qwen'
-  | 'custom';
-
-export interface AIConfig {
-  aiProvider?: AIProvider;
-  aiApiKey?: string;
-  aiBaseUrl?: string;
-  aiModel?: string;
-}
-
-export interface ConnectionTestResult {
-  success: boolean;
-  message: string;
-}
-
-export interface ModelInfo {
-  id: string;
-  name: string;
-  enabled: boolean;
-}
+// Re-export for backward compatibility
+export type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
 
 export interface FetchModelsResult {
   success: boolean;

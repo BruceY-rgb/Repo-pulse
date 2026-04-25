@@ -1,56 +1,15 @@
 /**
  * AI 提供商类型定义
+ * Provider 类型/常量的唯一数据源为 @repo-pulse/shared
  */
-export type ProviderType =
-  | 'anthropic'
-  | 'openai'
-  | 'deepseek'
-  | 'google'
-  | 'moonshot'
-  | 'zhipu'
-  | 'minimax'
-  | 'doubao'
-  | 'qwen'
-  | 'ollama'
-  | 'custom';
 
-/**
- * 各提供商的默认 Base URL
- */
-export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
-  anthropic: 'https://api.anthropic.com',
-  openai: 'https://api.openai.com/v1',
-  deepseek: 'https://api.deepseek.com',
-  google: 'https://generativelanguage.googleapis.com',
-  moonshot: 'https://api.moonshot.cn/v1',
-  zhipu: 'https://open.bigmodel.cn/api/paas/v4',
-  minimax: 'https://api.minimax.chat/v1',
-  doubao: 'https://ark.cn-beijing.volces.com/api/v3',
-  qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  ollama: 'http://localhost:11434',
-  custom: '',
-};
-
-/**
- * 提供商显示名称
- */
-export const PROVIDER_LABELS: Record<ProviderType, string> = {
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  deepseek: 'DeepSeek',
-  google: 'Google Gemini',
-  moonshot: 'Moonshot / Kimi',
-  zhipu: '智谱 AI',
-  minimax: 'MiniMax',
-  doubao: '豆包',
-  qwen: '通义千问',
-  ollama: 'Ollama (本地)',
-  custom: 'OpenAI 兼容格式',
-};
+// 重新导出共享类型（保持向后兼容的 ProviderType 别名）
+export type { AIProvider as ProviderType } from '@repo-pulse/shared';
+export { PROVIDER_DEFAULT_URLS, PROVIDER_LABELS } from '@repo-pulse/shared';
 
 /**
  * AI 提供商统一接口
- * 所有模型提供商（OpenAI、Anthropic、Ollama）必须实现此接口
+ * 所有模型提供商（OpenAI、Anthropic、Gemini 等）必须实现此接口
  */
 export interface AIProvider {
   readonly name: string;
@@ -108,7 +67,7 @@ export interface AIProviderConfig {
   apiKey?: string;
   baseUrl?: string;
   model: string;
-  provider?: ProviderType;
+  provider?: import('@repo-pulse/shared').AIProvider;
   timeout?: number;
   maxRetries?: number;
 }

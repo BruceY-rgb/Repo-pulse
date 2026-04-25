@@ -1,76 +1,22 @@
 import { apiClient } from './api-client';
 import type { ApiResponse } from '@/types/api';
+import type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
+import {
+  PROVIDER_LABELS,
+  PROVIDER_DEFAULT_MODELS,
+  PROVIDER_DEFAULT_URLS,
+  PROVIDER_CHAT_PATHS,
+} from '@repo-pulse/shared';
 
-export type AIProvider =
-  | 'openai'
-  | 'anthropic'
-  | 'ollama'
-  | 'deepseek'
-  | 'google'
-  | 'moonshot'
-  | 'zhipu'
-  | 'minimax'
-  | 'doubao'
-  | 'qwen'
-  | 'custom';
-
-export interface AIConfig {
-  aiProvider?: AIProvider;
-  aiApiKey?: string;
-  aiBaseUrl?: string;
-  aiModel?: string;
-}
-
-export interface ConnectionTestResult {
-  success: boolean;
-  message: string;
-}
-
-export interface ModelInfo {
-  id: string;
-  name: string;
-  enabled: boolean;
-}
+// Re-export from shared for page-level consumers
+export type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo };
+export { PROVIDER_LABELS, PROVIDER_DEFAULT_MODELS, PROVIDER_DEFAULT_URLS, PROVIDER_CHAT_PATHS };
 
 export interface FetchModelsResult {
   success: boolean;
   message: string;
   models: ModelInfo[];
 }
-
-/**
- * 提供商显示名称
- */
-export const PROVIDER_LABELS: Record<AIProvider, string> = {
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  ollama: 'Ollama (本地)',
-  deepseek: 'DeepSeek',
-  google: 'Google Gemini',
-  moonshot: 'Moonshot / Kimi',
-  zhipu: '智谱 AI',
-  minimax: 'MiniMax',
-  doubao: '豆包',
-  qwen: '通义千问',
-  custom: '自定义端点',
-};
-
-/**
- * 提供商默认模型
- */
-export const PROVIDER_DEFAULT_MODELS: Record<AIProvider, string> = {
-  openai: 'gpt-4o',
-  anthropic: 'claude-sonnet-4-20250514',
-  ollama: 'llama3',
-  deepseek: 'deepseek-chat',
-  google: 'gemini-2.0-flash-exp',
-  moonshot: 'kimi-longtext-chat',
-  zhipu: 'glm-4-flash',
-  minimax: 'MiniMax-M2.1',
-  doubao: 'doubao-pro-32k',
-  qwen: 'qwen-turbo',
-  custom: '',
-};
 
 /**
  * 设置服务 - AI 配置
