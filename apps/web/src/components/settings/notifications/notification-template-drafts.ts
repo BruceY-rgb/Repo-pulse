@@ -6,8 +6,13 @@ export interface NotificationExceptionDraft {
   action: NotificationExceptionAction;
   description: string;
   enabled: boolean;
+  id?: string;
   name: string;
   template: NotificationTemplateValue;
+}
+
+export interface NotificationExceptionRule extends NotificationExceptionDraft {
+  id: string;
 }
 
 type TranslateFn = (key: string) => string;
@@ -22,5 +27,14 @@ export function createExceptionDraftFromTemplate(
     enabled: true,
     name: t(`notifications.settings.templates.items.${template}.draftName`),
     template,
+  };
+}
+
+export function createExceptionRuleFromDraft(
+  draft: NotificationExceptionDraft,
+): NotificationExceptionRule {
+  return {
+    ...draft,
+    id: draft.id ?? `${draft.template}-${Date.now()}`,
   };
 }

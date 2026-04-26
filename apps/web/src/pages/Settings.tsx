@@ -33,6 +33,9 @@ import {
   NotificationExceptionDraftCard,
 } from '@/components/settings/notifications/NotificationExceptionDraftCard';
 import {
+  NotificationExceptionRuleList,
+} from '@/components/settings/notifications/NotificationExceptionRuleList';
+import {
   NotificationLevelSelector,
   type NotificationLevelValue,
 } from '@/components/settings/notifications/NotificationLevelSelector';
@@ -41,9 +44,11 @@ import {
   type NotificationTemplateValue,
 } from '@/components/settings/notifications/NotificationTemplateGallery';
 import {
+  createExceptionRuleFromDraft,
   createExceptionDraftFromTemplate,
   type NotificationExceptionAction,
   type NotificationExceptionDraft,
+  type NotificationExceptionRule,
 } from '@/components/settings/notifications/notification-template-drafts';
 import {
   settingsService,
@@ -110,6 +115,7 @@ export function Settings() {
   const [notificationLevel, setNotificationLevel] = useState<NotificationLevelValue>('important');
   const [selectedTemplate, setSelectedTemplate] = useState<NotificationTemplateValue | null>(null);
   const [exceptionDraft, setExceptionDraft] = useState<NotificationExceptionDraft | null>(null);
+  const [exceptionRules, setExceptionRules] = useState<NotificationExceptionRule[]>([]);
 
   // 加载 AI 配置
   useEffect(() => {
@@ -240,6 +246,41 @@ export function Settings() {
   const handleSelectTemplate = (template: NotificationTemplateValue) => {
     setSelectedTemplate(template);
     setExceptionDraft(createExceptionDraftFromTemplate(template, t));
+  };
+
+  const handleSaveExceptionDraft = () => {
+    if (!exceptionDraft) {
+      return;
+    }
+
+    const nextRule = createExceptionRuleFromDraft(exceptionDraft);
+
+    setExceptionRules((current) => {
+      const hasExistingRule = current.some((rule) => rule.id === nextRule.id);
+
+      if (hasExistingRule) {
+        return current.map((rule) => (rule.id === nextRule.id ? nextRule : rule));
+      }
+
+      return [nextRule, ...current];
+    });
+
+    setSelectedTemplate(null);
+    setExceptionDraft(null);
+  };
+
+  const handleEditExceptionRule = (rule: NotificationExceptionRule) => {
+    setSelectedTemplate(rule.template);
+    setExceptionDraft(rule);
+  };
+
+  const handleRemoveExceptionRule = (ruleId: string) => {
+    setExceptionRules((current) => current.filter((rule) => rule.id !== ruleId));
+
+    setExceptionDraft((current) => (current?.id === ruleId ? null : current));
+    setSelectedTemplate((current) =>
+      exceptionDraft?.id === ruleId ? null : current,
+    );
   };
 
   return (
@@ -700,8 +741,15 @@ export function Settings() {
                             : current,
                         )
                       }
+                      onSave={handleSaveExceptionDraft}
                     />
                   ) : null}
+
+                  <NotificationExceptionRuleList
+                    onEdit={handleEditExceptionRule}
+                    onRemove={handleRemoveExceptionRule}
+                    rules={exceptionRules}
+                  />
                 </CardContent>
               </Card>
 

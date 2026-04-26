@@ -25,6 +25,7 @@ interface NotificationExceptionDraftCardProps {
   onDescriptionChange: (value: string) => void;
   onEnabledChange: (value: boolean) => void;
   onNameChange: (value: string) => void;
+  onSave: () => void;
 }
 
 export function NotificationExceptionDraftCard({
@@ -34,6 +35,7 @@ export function NotificationExceptionDraftCard({
   onDescriptionChange,
   onEnabledChange,
   onNameChange,
+  onSave,
 }: NotificationExceptionDraftCardProps) {
   const { t } = useLanguage();
 
@@ -145,8 +147,10 @@ export function NotificationExceptionDraftCard({
         <Button onClick={onClear} size="sm" variant="outline">
           {t('notifications.settings.draft.actions.clear')}
         </Button>
-        <Button size="sm">
-          {t('notifications.settings.draft.actions.next')}
+        <Button onClick={onSave} size="sm">
+          {draft.id
+            ? t('notifications.settings.draft.actions.update')
+            : t('notifications.settings.draft.actions.next')}
         </Button>
       </div>
     </div>
