@@ -30,6 +30,9 @@ import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import {
+  NotificationExceptionDraftCard,
+} from '@/components/settings/notifications/NotificationExceptionDraftCard';
+import {
   NotificationLevelSelector,
   type NotificationLevelValue,
 } from '@/components/settings/notifications/NotificationLevelSelector';
@@ -37,6 +40,11 @@ import {
   NotificationTemplateGallery,
   type NotificationTemplateValue,
 } from '@/components/settings/notifications/NotificationTemplateGallery';
+import {
+  createExceptionDraftFromTemplate,
+  type NotificationExceptionAction,
+  type NotificationExceptionDraft,
+} from '@/components/settings/notifications/notification-template-drafts';
 import {
   settingsService,
   PROVIDER_LABELS,
@@ -101,6 +109,7 @@ export function Settings() {
   const [notifSaved, setNotifSaved] = useState(false);
   const [notificationLevel, setNotificationLevel] = useState<NotificationLevelValue>('important');
   const [selectedTemplate, setSelectedTemplate] = useState<NotificationTemplateValue | null>(null);
+  const [exceptionDraft, setExceptionDraft] = useState<NotificationExceptionDraft | null>(null);
 
   // 加载 AI 配置
   useEffect(() => {
@@ -226,6 +235,11 @@ export function Settings() {
       ? notifPrefs.channels.filter((c) => c !== channel)
       : [...notifPrefs.channels, channel];
     setNotifPrefs({ ...notifPrefs, channels });
+  };
+
+  const handleSelectTemplate = (template: NotificationTemplateValue) => {
+    setSelectedTemplate(template);
+    setExceptionDraft(createExceptionDraftFromTemplate(template, t));
   };
 
   return (
@@ -628,7 +642,7 @@ export function Settings() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <NotificationTemplateGallery
-                    onSelectTemplate={setSelectedTemplate}
+                    onSelectTemplate={handleSelectTemplate}
                     selectedTemplate={selectedTemplate}
                   />
 
@@ -640,20 +654,53 @@ export function Settings() {
                   </div>
 
                   {selectedTemplate ? (
-                    <div className="rounded-lg border border-primary/40 bg-primary/10 p-4">
-                      <p className="text-sm font-medium text-white">
-                        {t('notifications.settings.templates.selectedReady.title')}
-                      </p>
-                      <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
-                        {selectedTemplate === 'ignoreBots'
-                          ? t('notifications.settings.templates.items.ignoreBots.title')
-                          : selectedTemplate === 'ignorePushes'
-                            ? t('notifications.settings.templates.items.ignorePushes.title')
-                            : selectedTemplate === 'ignoreLowRisk'
-                              ? t('notifications.settings.templates.items.ignoreLowRisk.title')
-                              : t('notifications.settings.templates.items.ignoreComments.title')}
-                      </p>
-                    </div>
+                    <NotificationExceptionDraftCard
+                      draft={exceptionDraft}
+                      onActionChange={(value: NotificationExceptionAction) =>
+                        setExceptionDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                action: value,
+                              }
+                            : current,
+                        )
+                      }
+                      onClear={() => {
+                        setSelectedTemplate(null);
+                        setExceptionDraft(null);
+                      }}
+                      onDescriptionChange={(value: string) =>
+                        setExceptionDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                description: value,
+                              }
+                            : current,
+                        )
+                      }
+                      onEnabledChange={(value: boolean) =>
+                        setExceptionDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                enabled: value,
+                              }
+                            : current,
+                        )
+                      }
+                      onNameChange={(value: string) =>
+                        setExceptionDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                name: value,
+                              }
+                            : current,
+                        )
+                      }
+                    />
                   ) : null}
                 </CardContent>
               </Card>
