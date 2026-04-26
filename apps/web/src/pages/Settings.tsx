@@ -357,6 +357,76 @@ export function Settings() {
             <>
               <Card className="card-github">
                 <CardHeader>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className="bg-[var(--github-accent)]/15 text-[var(--github-accent)]">
+                      Notification Controls
+                    </Badge>
+                  </div>
+                  <CardTitle className="text-base font-semibold text-white">
+                    Reduce noise without missing important updates
+                  </CardTitle>
+                  <CardDescription className="text-[var(--github-text-secondary)]">
+                    Notification settings now combine delivery channels, default focus, and exception
+                    rules in one place. We will move the filtering controls into this tab step by
+                    step.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-3">
+                  <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--github-surface)]">
+                        <Bell className="h-5 w-5 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-white">Delivery channels</p>
+                        <p className="text-xs text-[var(--github-text-secondary)]">
+                          Choose where alerts should arrive.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--github-surface)]">
+                        <Shield className="h-5 w-5 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-white">Default notification focus</p>
+                        <p className="text-xs text-[var(--github-text-secondary)]">
+                          This area will host the default level selector next.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--github-surface)]">
+                        <Link className="h-5 w-5 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-white">Exception rules</p>
+                        <p className="text-xs text-[var(--github-text-secondary)]">
+                          Templates and advanced filters will live here after the focus selector.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
+                  Delivery
+                </p>
+                <p className="text-sm text-[var(--github-text-secondary)]">
+                  First decide which channels are allowed to reach you.
+                </p>
+              </div>
+
+              <Card className="card-github">
+                <CardHeader>
                   <CardTitle className="text-base font-semibold text-white">Notification Channels</CardTitle>
                   <CardDescription className="text-[var(--github-text-secondary)]">
                     Configure how you want to receive notifications
@@ -450,9 +520,22 @@ export function Settings() {
                 </CardContent>
               </Card>
 
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
+                  Focus
+                </p>
+                <p className="text-sm text-[var(--github-text-secondary)]">
+                  Then decide which kinds of repository activity should still get through by default.
+                </p>
+              </div>
+
               <Card className="card-github">
                 <CardHeader>
-                  <CardTitle className="text-base font-semibold text-white">Event Types</CardTitle>
+                  <CardTitle className="text-base font-semibold text-white">Notification Focus</CardTitle>
+                  <CardDescription className="text-[var(--github-text-secondary)]">
+                    These toggles are the current baseline. Default levels and rule-based filtering will
+                    be added into this section next.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
@@ -502,6 +585,36 @@ export function Settings() {
                         setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, weeklyReport: checked } })
                       }
                     />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
+                  Exceptions
+                </p>
+                <p className="text-sm text-[var(--github-text-secondary)]">
+                  This is where quick templates and exception rules will be merged in, so users can fine-tune
+                  noisy cases without leaving Settings.
+                </p>
+              </div>
+
+              <Card className="card-github border-dashed">
+                <CardHeader>
+                  <CardTitle className="text-base font-semibold text-white">
+                    Notification filtering is moving here
+                  </CardTitle>
+                  <CardDescription className="text-[var(--github-text-secondary)]">
+                    Next we will embed default focus levels, quick templates, and exception rules directly into
+                    this tab.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
+                    <p className="text-sm font-medium text-white">Planned modules</p>
+                    <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
+                      Default notification level, template shortcuts, readable exception rules, and advanced preview.
+                    </p>
                   </div>
                 </CardContent>
               </Card>
