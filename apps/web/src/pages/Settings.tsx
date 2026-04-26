@@ -30,6 +30,10 @@ import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import {
+  NotificationLevelSelector,
+  type NotificationLevelValue,
+} from '@/components/settings/notifications/NotificationLevelSelector';
+import {
   settingsService,
   PROVIDER_LABELS,
   PROVIDER_DEFAULT_MODELS,
@@ -89,6 +93,7 @@ export function Settings() {
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifSaving, setNotifSaving] = useState(false);
   const [notifSaved, setNotifSaved] = useState(false);
+  const [notificationLevel, setNotificationLevel] = useState<NotificationLevelValue>('important');
 
   // 加载 AI 配置
   useEffect(() => {
@@ -538,6 +543,11 @@ export function Settings() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  <NotificationLevelSelector
+                    onValueChange={setNotificationLevel}
+                    value={notificationLevel}
+                  />
+
                   <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
                     <div>
                       <p className="text-sm text-white">High Risk Alerts</p>
