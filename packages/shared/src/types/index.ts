@@ -205,3 +205,69 @@ export interface ModelInfo {
   name: string;
   enabled: boolean;
 }
+
+// ===== Filter Rule Types =====
+
+export type FilterConditionField =
+  | 'eventType'
+  | 'repository'
+  | 'author'
+  | 'riskLevel'
+  | 'customRegex';
+
+export type FilterConditionOperator = 'eq' | 'contains' | 'regex' | 'in';
+
+export type FilterActionValue = 'INCLUDE' | 'EXCLUDE' | 'TAG';
+
+export interface FilterCondition {
+  field: FilterConditionField;
+  operator: FilterConditionOperator;
+  value: string | string[];
+}
+
+export interface FilterRuleDto {
+  id: string;
+  userId: string;
+  name: string;
+  description: string | null;
+  conditions: FilterCondition[];
+  action: FilterActionValue;
+  isActive: boolean;
+  priority: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateFilterRulePayload {
+  name: string;
+  description?: string;
+  conditions: FilterCondition[];
+  action: FilterActionValue;
+  isActive?: boolean;
+  priority?: number;
+}
+
+export interface UpdateFilterRulePayload {
+  name?: string;
+  description?: string;
+  conditions?: FilterCondition[];
+  action?: FilterActionValue;
+  isActive?: boolean;
+  priority?: number;
+}
+
+export interface TestFilterPayload {
+  conditions: FilterCondition[];
+  event: {
+    type: string;
+    repository: string;
+    author: string;
+    riskLevel?: string;
+    body?: string;
+  };
+}
+
+export interface TestFilterResult {
+  matched: boolean;
+  action: FilterActionValue | null;
+}

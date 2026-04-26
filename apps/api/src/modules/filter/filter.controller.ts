@@ -6,7 +6,6 @@ import {
   Delete,
   Body,
   Param,
-  ParseUUIDPipe,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -49,7 +48,7 @@ export class FilterController {
   @Put(':id')
   async updateRule(
     @CurrentUser() user: { userId: string },
-    @Param('id', ParseUUIDPipe) ruleId: string,
+    @Param('id') ruleId: string,
     @Body() dto: UpdateFilterRuleDto,
   ): Promise<FilterRule> {
     return this.filterService.updateRule(user.userId, ruleId, dto);
@@ -61,7 +60,7 @@ export class FilterController {
   @Delete(':id')
   async deleteRule(
     @CurrentUser() user: { userId: string },
-    @Param('id', ParseUUIDPipe) ruleId: string,
+    @Param('id') ruleId: string,
   ): Promise<{ success: boolean }> {
     await this.filterService.deleteRule(user.userId, ruleId);
     return { success: true };

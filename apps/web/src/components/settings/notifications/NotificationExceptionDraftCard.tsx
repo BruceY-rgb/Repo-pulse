@@ -20,6 +20,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 
 interface NotificationExceptionDraftCardProps {
   draft: NotificationExceptionDraft | null;
+  isSaving?: boolean;
   onActionChange: (value: NotificationExceptionAction) => void;
   onClear: () => void;
   onDescriptionChange: (value: string) => void;
@@ -30,6 +31,7 @@ interface NotificationExceptionDraftCardProps {
 
 export function NotificationExceptionDraftCard({
   draft,
+  isSaving = false,
   onActionChange,
   onClear,
   onDescriptionChange,
@@ -119,7 +121,7 @@ export function NotificationExceptionDraftCard({
           {t('notifications.settings.draft.previewLabel')}
         </p>
         <p className="mt-2 text-sm text-white">
-          {t(`notifications.settings.templates.items.${draft.template}.summary`)}
+          {draft.summary}
         </p>
         <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
           {draft.action === 'exclude'
@@ -144,10 +146,10 @@ export function NotificationExceptionDraftCard({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Button onClick={onClear} size="sm" variant="outline">
+        <Button disabled={isSaving} onClick={onClear} size="sm" variant="outline">
           {t('notifications.settings.draft.actions.clear')}
         </Button>
-        <Button onClick={onSave} size="sm">
+        <Button disabled={isSaving} onClick={onSave} size="sm">
           {draft.id
             ? t('notifications.settings.draft.actions.update')
             : t('notifications.settings.draft.actions.next')}

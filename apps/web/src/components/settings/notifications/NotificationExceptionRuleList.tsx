@@ -6,12 +6,16 @@ import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 interface NotificationExceptionRuleListProps {
+  isDeleting?: boolean;
+  isLoading?: boolean;
   onEdit: (rule: NotificationExceptionRule) => void;
   onRemove: (ruleId: string) => void;
   rules: NotificationExceptionRule[];
 }
 
 export function NotificationExceptionRuleList({
+  isDeleting = false,
+  isLoading = false,
   onEdit,
   onRemove,
   rules,
@@ -34,7 +38,13 @@ export function NotificationExceptionRuleList({
         </p>
       </div>
 
-      {rules.length === 0 ? (
+      {isLoading ? (
+        <div className="rounded-lg border border-[var(--github-border)] bg-[var(--github-surface)]/80 p-6 text-center">
+          <p className="text-sm font-medium text-white">
+            {t('notifications.settings.rules.loading')}
+          </p>
+        </div>
+      ) : rules.length === 0 ? (
         <div className="rounded-lg border border-dashed border-[var(--github-border)] bg-[var(--github-surface)]/80 p-6 text-center">
           <BellOff className="mx-auto h-8 w-8 text-[var(--github-text-secondary)]" />
           <p className="mt-3 text-sm font-medium text-white">
@@ -76,13 +86,14 @@ export function NotificationExceptionRuleList({
                     {rule.description}
                   </p>
                   <p className="text-xs text-[var(--github-text-secondary)]">
-                    {t(`notifications.settings.templates.items.${rule.template}.summary`)}
+                    {rule.summary}
                   </p>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
                   <Button
                     className="gap-2"
+                    disabled={isDeleting}
                     onClick={() => onEdit(rule)}
                     size="sm"
                     variant="outline"
@@ -92,6 +103,7 @@ export function NotificationExceptionRuleList({
                   </Button>
                   <Button
                     className="gap-2 text-destructive hover:text-destructive"
+                    disabled={isDeleting}
                     onClick={() => onRemove(rule.id)}
                     size="sm"
                     variant="outline"

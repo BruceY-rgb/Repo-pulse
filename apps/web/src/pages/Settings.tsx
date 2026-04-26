@@ -18,6 +18,7 @@ import {
   Download,
   Loader2,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,6 +30,7 @@ import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   NotificationExceptionDraftCard,
 } from '@/components/settings/notifications/NotificationExceptionDraftCard';
@@ -44,12 +46,20 @@ import {
   type NotificationTemplateValue,
 } from '@/components/settings/notifications/NotificationTemplateGallery';
 import {
-  createExceptionRuleFromDraft,
+  createExceptionRuleFromFilterRule,
+  createFilterRulePayloadFromDraft,
+  createFilterRuleUpdatePayloadFromDraft,
   createExceptionDraftFromTemplate,
   type NotificationExceptionAction,
   type NotificationExceptionDraft,
   type NotificationExceptionRule,
 } from '@/components/settings/notifications/notification-template-drafts';
+import {
+  useCreateFilterRuleMutation,
+  useDeleteFilterRuleMutation,
+  useFilterRulesQuery,
+  useUpdateFilterRuleMutation,
+} from '@/hooks/queries/use-filter-queries';
 import {
   settingsService,
   PROVIDER_LABELS,
@@ -115,7 +125,14 @@ export function Settings() {
   const [notificationLevel, setNotificationLevel] = useState<NotificationLevelValue>('important');
   const [selectedTemplate, setSelectedTemplate] = useState<NotificationTemplateValue | null>(null);
   const [exceptionDraft, setExceptionDraft] = useState<NotificationExceptionDraft | null>(null);
-  const [exceptionRules, setExceptionRules] = useState<NotificationExceptionRule[]>([]);
+  const filterRulesQuery = useFilterRulesQuery();
+  const createFilterRuleMutation = useCreateFilterRuleMutation();
+  const updateFilterRuleMutation = useUpdateFilterRuleMutation();
+  const deleteFilterRuleMutation = useDeleteFilterRuleMutation();
+
+  const exceptionRules = (filterRulesQuery.data ?? []).map((rule) =>
+    createExceptionRuleFromFilterRule(rule, t),
+  );
 
   // 加载 AI 配置
   useEffect(() => {
@@ -248,25 +265,30 @@ export function Settings() {
     setExceptionDraft(createExceptionDraftFromTemplate(template, t));
   };
 
-  const handleSaveExceptionDraft = () => {
+  const handleSaveExceptionDraft = async () => {
     if (!exceptionDraft) {
       return;
     }
 
-    const nextRule = createExceptionRuleFromDraft(exceptionDraft);
-
-    setExceptionRules((current) => {
-      const hasExistingRule = current.some((rule) => rule.id === nextRule.id);
-
-      if (hasExistingRule) {
-        return current.map((rule) => (rule.id === nextRule.id ? nextRule : rule));
+    try {
+      if (exceptionDraft.id) {
+        await updateFilterRuleMutation.mutateAsync({
+          payload: createFilterRuleUpdatePayloadFromDraft(exceptionDraft),
+          ruleId: exceptionDraft.id,
+        });
+      } else {
+        await createFilterRuleMutation.mutateAsync(
+          createFilterRulePayloadFromDraft(exceptionDraft),
+        );
       }
 
-      return [nextRule, ...current];
-    });
-
-    setSelectedTemplate(null);
-    setExceptionDraft(null);
+      setSelectedTemplate(null);
+      setExceptionDraft(null);
+      toast.success(t('notifications.settings.rules.saveSuccess'));
+    } catch (error) {
+      console.error('Failed to save filter rule:', error);
+      toast.error(t('notifications.settings.rules.saveError'));
+    }
   };
 
   const handleEditExceptionRule = (rule: NotificationExceptionRule) => {
@@ -274,13 +296,18 @@ export function Settings() {
     setExceptionDraft(rule);
   };
 
-  const handleRemoveExceptionRule = (ruleId: string) => {
-    setExceptionRules((current) => current.filter((rule) => rule.id !== ruleId));
-
-    setExceptionDraft((current) => (current?.id === ruleId ? null : current));
-    setSelectedTemplate((current) =>
-      exceptionDraft?.id === ruleId ? null : current,
-    );
+  const handleRemoveExceptionRule = async (ruleId: string) => {
+    try {
+      await deleteFilterRuleMutation.mutateAsync(ruleId);
+      setExceptionDraft((current) => (current?.id === ruleId ? null : current));
+      setSelectedTemplate((current) =>
+        exceptionDraft?.id === ruleId ? null : current,
+      );
+      toast.success(t('notifications.settings.rules.removeSuccess'));
+    } catch (error) {
+      console.error('Failed to delete filter rule:', error);
+      toast.error(t('notifications.settings.rules.removeError'));
+    }
   };
 
   return (
@@ -694,9 +721,12 @@ export function Settings() {
                     </p>
                   </div>
 
-                  {selectedTemplate ? (
+                  {exceptionDraft ? (
                     <NotificationExceptionDraftCard
                       draft={exceptionDraft}
+                      isSaving={
+                        createFilterRuleMutation.isPending || updateFilterRuleMutation.isPending
+                      }
                       onActionChange={(value: NotificationExceptionAction) =>
                         setExceptionDraft((current) =>
                           current
@@ -745,7 +775,19 @@ export function Settings() {
                     />
                   ) : null}
 
+                  {filterRulesQuery.error ? (
+                    <Alert className="border-destructive/40 bg-destructive/10 text-white">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTitle>{t('notifications.settings.rules.errorTitle')}</AlertTitle>
+                      <AlertDescription>
+                        {filterRulesQuery.error.message || t('notifications.settings.rules.errorDescription')}
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+
                   <NotificationExceptionRuleList
+                    isDeleting={deleteFilterRuleMutation.isPending}
+                    isLoading={filterRulesQuery.isLoading}
                     onEdit={handleEditExceptionRule}
                     onRemove={handleRemoveExceptionRule}
                     rules={exceptionRules}
