@@ -19,7 +19,6 @@ import ZhipuLogo from '@/assets/models/zhipu.png';
 import MiniMaxLogo from '@/assets/models/minimax.png';
 import DoubaoLogo from '@/assets/models/doubao.png';
 import QwenLogo from '@/assets/models/qwen.png';
-import OllamaLogo from '@/assets/models/llama.png';
 
 /**
  * 提供商 Logo 映射
@@ -34,7 +33,6 @@ export const PROVIDER_LOGO_MAP: Record<AIProvider, string> = {
   minimax: MiniMaxLogo,
   doubao: DoubaoLogo,
   qwen: QwenLogo,
-  ollama: OllamaLogo,
   custom: DefaultLogo,
 };
 

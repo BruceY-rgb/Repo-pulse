@@ -12,7 +12,8 @@
   "compilerOptions": {
     "baseUrl": ".", // 基础路径：以当前tsconfig.json所在目录为根
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@repo-pulse/shared": ["../../packages/shared/dist/index.d.ts"]
     }
   }
 }
