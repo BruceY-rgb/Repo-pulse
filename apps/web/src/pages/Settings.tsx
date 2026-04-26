@@ -34,6 +34,10 @@ import {
   type NotificationLevelValue,
 } from '@/components/settings/notifications/NotificationLevelSelector';
 import {
+  NotificationTemplateGallery,
+  type NotificationTemplateValue,
+} from '@/components/settings/notifications/NotificationTemplateGallery';
+import {
   settingsService,
   PROVIDER_LABELS,
   PROVIDER_DEFAULT_MODELS,
@@ -44,6 +48,7 @@ import {
   type ConnectionTestResult,
   type ModelInfo,
 } from '@/services/settings.service';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { getProviderLogo } from '@/lib/provider-logo';
 import { notificationService } from '@/services/notification.service';
 import type {
@@ -63,6 +68,7 @@ const apiKeys = [
 ];
 
 export function Settings() {
+  const { t } = useLanguage();
   const [saved, setSaved] = useState(false);
 
   // AI 配置状态
@@ -94,6 +100,7 @@ export function Settings() {
   const [notifSaving, setNotifSaving] = useState(false);
   const [notifSaved, setNotifSaved] = useState(false);
   const [notificationLevel, setNotificationLevel] = useState<NotificationLevelValue>('important');
+  const [selectedTemplate, setSelectedTemplate] = useState<NotificationTemplateValue | null>(null);
 
   // 加载 AI 配置
   useEffect(() => {
@@ -620,12 +627,34 @@ export function Settings() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  <NotificationTemplateGallery
+                    onSelectTemplate={setSelectedTemplate}
+                    selectedTemplate={selectedTemplate}
+                  />
+
                   <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
                     <p className="text-sm font-medium text-white">Planned modules</p>
                     <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
                       Default notification level, template shortcuts, readable exception rules, and advanced preview.
                     </p>
                   </div>
+
+                  {selectedTemplate ? (
+                    <div className="rounded-lg border border-primary/40 bg-primary/10 p-4">
+                      <p className="text-sm font-medium text-white">
+                        {t('notifications.settings.templates.selectedReady.title')}
+                      </p>
+                      <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
+                        {selectedTemplate === 'ignoreBots'
+                          ? t('notifications.settings.templates.items.ignoreBots.title')
+                          : selectedTemplate === 'ignorePushes'
+                            ? t('notifications.settings.templates.items.ignorePushes.title')
+                            : selectedTemplate === 'ignoreLowRisk'
+                              ? t('notifications.settings.templates.items.ignoreLowRisk.title')
+                              : t('notifications.settings.templates.items.ignoreComments.title')}
+                      </p>
+                    </div>
+                  ) : null}
                 </CardContent>
               </Card>
 
