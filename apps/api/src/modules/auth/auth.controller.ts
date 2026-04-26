@@ -20,6 +20,7 @@ import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { UserService } from '../user/user.service';
 import { GithubStrategy } from './strategies/github.strategy';
+import { ConfigService } from '@nestjs/config';
 
 // Cookie 配置常量
 const COOKIE_OPTIONS = {
@@ -39,6 +40,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly userService: UserService,
     private readonly githubStrategy: GithubStrategy,
+    private readonly configService: ConfigService,
   ) { }
 
   /**
@@ -106,6 +108,19 @@ export class AuthController {
   }
 
   /**
+   * 获取当前运行时 OAuth 配置（仅暴露安全的公共信息）
+   */
+  @Get('github/config')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '获取 GitHub OAuth 运行时配置' })
+  getGithubOAuthRuntimeConfig() {
+    return {
+      callbackUrl: this.configService.get<string>('GITHUB_CALLBACK_URL') || '',
+    };
+  }
+
+  /**
    * 运行时配置 GitHub OAuth 客户端参数（仅内存生效，重启后失效）
    */
   @Post('github/config')
@@ -155,7 +170,8 @@ export class AuthController {
     this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
 
     // 跳转到前端回调页
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
     res.redirect(`${frontendUrl}/auth/callback`);
   }
 

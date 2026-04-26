@@ -6,6 +6,7 @@ import { useApiMutation, useApiQuery } from '@/lib/query-hooks';
 export const authQueryKeys = {
   all: ['auth'] as const,
   currentUser: () => [...authQueryKeys.all, 'current-user'] as const,
+  githubOAuthRuntimeConfig: () => [...authQueryKeys.all, 'github-oauth-runtime-config'] as const,
 };
 
 export function useCurrentUserQuery(enabled = true) {
@@ -15,6 +16,15 @@ export function useCurrentUserQuery(enabled = true) {
     enabled,
     retry: false,
     staleTime: 60 * 1000,
+  });
+}
+
+export function useGithubOAuthRuntimeConfigQuery() {
+  return useApiQuery({
+    queryKey: authQueryKeys.githubOAuthRuntimeConfig(),
+    queryFn: authService.getGithubOAuthRuntimeConfig,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
   });
 }
 

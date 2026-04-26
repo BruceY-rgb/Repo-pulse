@@ -27,6 +27,14 @@ export const authService = {
   },
 
   /**
+   * 获取 GitHub OAuth 运行时配置
+   */
+  async getGithubOAuthRuntimeConfig(): Promise<{ callbackUrl: string }> {
+    const { data } = await apiClient.get<ApiResponse<{ callbackUrl: string }>>('/auth/github/config');
+    return data.data;
+  },
+
+  /**
    * 获取 GitHub OAuth 登录 URL
    */
   getGithubAuthUrl(): string {

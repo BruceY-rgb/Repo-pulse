@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/dialog';
 import {
   useGithubOAuthConfigMutation,
+  useGithubOAuthRuntimeConfigQuery,
   useGithubOAuthLogin,
   useLoginMutation,
 } from '@/hooks/queries/use-auth-queries';
@@ -49,8 +50,12 @@ export function Login() {
   const loginWithGithub = useGithubOAuthLogin();
   const loginMutation = useLoginMutation();
   const oauthConfigMutation = useGithubOAuthConfigMutation();
+  const oauthRuntimeConfigQuery = useGithubOAuthRuntimeConfigQuery();
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
+  const callbackUrl =
+    oauthRuntimeConfigQuery.data?.callbackUrl ||
+    'http://localhost:3001/auth/github/callback';
 
   const loginSchema = useMemo(
     () =>
@@ -137,7 +142,7 @@ export function Login() {
                   </ol>
                   <p className="text-xs text-muted-foreground">
                     {t('auth.login.oauthConfig.callbackHint')}
-                    <span className="ml-1 font-mono text-foreground">http://localhost:3000/api/auth/github/callback</span>
+                    <span className="ml-1 font-mono text-foreground">{callbackUrl}</span>
                   </p>
                   <a
                     href="https://github.com/settings/apps/new"
