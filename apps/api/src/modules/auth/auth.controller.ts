@@ -9,13 +9,14 @@ import {
   HttpCode,
   HttpStatus,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiCookieAuth } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { GithubAuthGuard } from './guards/github-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { UserService } from '../user/user.service';
@@ -36,6 +37,8 @@ const REFRESH_TOKEN_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 天
 @ApiTags('认证')
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private readonly authService: AuthService,
     private readonly userService: UserService,
@@ -101,9 +104,10 @@ export class AuthController {
    */
   @Get('github')
   @Public()
-  @UseGuards(AuthGuard('github'))
+  @UseGuards(GithubAuthGuard)
   @ApiOperation({ summary: 'GitHub OAuth 跳转' })
   githubAuth() {
+    this.logger.log('github_oauth_authorize_redirect_started');
     // Passport 会自动重定向到 GitHub，无需实现
   }
 
@@ -138,6 +142,7 @@ export class AuthController {
     }
 
     this.githubStrategy.updateCredentials(clientId, clientSecret);
+    this.logger.log(`github_oauth_config_updated clientIdSuffix=${clientId.slice(-6)}`);
 
     return { message: 'GitHub OAuth 配置已更新（重启后需重新配置）' };
   }
@@ -147,12 +152,16 @@ export class AuthController {
    */
   @Get('github/callback')
   @Public()
-  @UseGuards(AuthGuard('github'))
+  @UseGuards(GithubAuthGuard)
   @ApiOperation({ summary: 'GitHub OAuth 回调' })
   async githubCallback(
     @Req() req: Request,
     @Res() res: Response
   ) {
+    this.logger.log(
+      `github_oauth_callback_entered codePresent=${req.query?.code ? 'true' : 'false'} error=${typeof req.query?.error === 'string' ? req.query.error : 'none'}`,
+    );
+
     // 拿到 GitHub 登录后的用户信息
     const profile = req.user as {
       id: string;
@@ -165,13 +174,20 @@ export class AuthController {
 
     // 生成 token
     const tokens = await this.authService.handleGithubAuth(profile);
+    this.logger.log(
+      `github_oauth_tokens_generated githubId=${profile.id} accessTokenPresent=${tokens.accessToken ? 'true' : 'false'} refreshTokenPresent=${tokens.refreshToken ? 'true' : 'false'}`,
+    );
 
     // 写入 cookie
     this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
+    this.logger.log(`github_oauth_cookies_set githubId=${profile.id}`);
 
     // 跳转到前端回调页
     const frontendUrl =
       this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+    this.logger.log(
+      `github_oauth_callback_success email=${profile.email} githubId=${profile.id} redirect=${frontendUrl}/auth/callback`,
+    );
     res.redirect(`${frontendUrl}/auth/callback`);
   }
 
@@ -184,6 +200,7 @@ export class AuthController {
   @ApiCookieAuth('access_token')
   @ApiOperation({ summary: '获取当前用户信息' })
   async me(@CurrentUser() user: { sub: string }) {
+    this.logger.log(`auth_me_requested userId=${user.sub}`);
     return this.userService.findById(user.sub);
   }
 

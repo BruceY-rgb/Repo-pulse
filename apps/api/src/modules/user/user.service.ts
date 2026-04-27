@@ -48,6 +48,7 @@ export class UserService {
   async update(
     id: string,
     data: {
+      githubId?: string;
       githubAccessToken?: string;
       githubRefreshToken?: string;
       name?: string;
@@ -55,6 +56,9 @@ export class UserService {
     },
   ): Promise<User> {
     const updateData: any = {};
+    if (data.githubId !== undefined) {
+      updateData.githubId = data.githubId;
+    }
     if (data.githubAccessToken !== undefined) {
       updateData.githubAccessToken = data.githubAccessToken;
     }

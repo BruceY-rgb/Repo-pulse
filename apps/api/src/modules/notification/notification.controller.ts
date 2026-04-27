@@ -11,12 +11,9 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import {
-  NotificationService,
-  NotificationPreferences,
-  SendNotificationDto,
-} from './notification.service';
-import type { Notification, NotificationStatus, NotificationChannel } from '@repo-pulse/database';
+import { NotificationService, NotificationPreferences } from './notification.service';
+import { SendNotificationDto, UpdateNotificationPreferencesDto } from './dto/notification.dto';
+import type { Notification, NotificationStatus } from '@repo-pulse/database';
 
 @Controller('notifications')
 @UseGuards(AuthGuard('jwt'))
@@ -39,7 +36,7 @@ export class NotificationController {
   @Post('preferences')
   async updatePreferences(
     @CurrentUser() user: { sub: string },
-    @Body() prefs: Partial<NotificationPreferences>,
+    @Body() prefs: UpdateNotificationPreferencesDto,
   ): Promise<NotificationPreferences> {
     return this.notificationService.updatePreferences(user.sub, prefs);
   }

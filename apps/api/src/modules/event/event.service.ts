@@ -1,14 +1,23 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { PrismaClient, EventType, Prisma, Event } from '@repo-pulse/database';
+import { PrismaClient, EventType, Prisma, Event, NotificationChannel, FilterAction } from '@repo-pulse/database';
 import { PaginationQueryDto } from './dto/event.dto';
 import { EventGateway } from './event.gateway';
+import { AIService } from '../ai/ai.service';
+import { FilterService } from '../filter/filter.service';
+import { NotificationService, NotificationPreferences } from '../notification/notification.service';
+import { SendNotificationDto } from '../notification/dto/notification.dto';
 
 @Injectable()
 export class EventService {
   private readonly logger = new Logger(EventService.name);
   private prisma: PrismaClient;
 
-  constructor(private readonly eventGateway: EventGateway) {
+  constructor(
+    private readonly eventGateway: EventGateway,
+    private readonly aiService: AIService,
+    private readonly filterService: FilterService,
+    private readonly notificationService: NotificationService,
+  ) {
     this.prisma = new PrismaClient();
   }
 
@@ -41,11 +50,114 @@ export class EventService {
       },
     });
 
-    this.logger.log(`Event ${event.id} created for repository ${data.repositoryId}`);
+    this.logger.log(
+      `event_created eventId=${event.id} repositoryId=${data.repositoryId} type=${data.type}`,
+    );
 
-    this.broadcastEvent(data.repositoryId, event);
+    this.runPostCreateTasks(event).catch((error) => {
+      const message = error instanceof Error ? error.message : 'unknown_error';
+      this.logger.error(
+        `event_post_create_failed eventId=${event.id} repositoryId=${data.repositoryId} reason=${message}`,
+      );
+    });
 
     return event;
+  }
+
+  private async runPostCreateTasks(event: Event): Promise<void> {
+    this.broadcastEvent(event.repositoryId, event);
+    await this.notifyRepositoryUsers(event);
+    await this.enqueueAnalysis(event.id);
+  }
+
+  private async notifyRepositoryUsers(event: Event): Promise<void> {
+    const repository = await this.prisma.repository.findUnique({
+      where: { id: event.repositoryId },
+      select: { fullName: true },
+    });
+
+    const userRepositories = await this.prisma.userRepository.findMany({
+      where: { repositoryId: event.repositoryId },
+    });
+
+    for (const entry of userRepositories) {
+      const userId = entry.userId;
+      try {
+        const filterResult = await this.filterService.applyRules(userId, {
+          type: event.type,
+          repository: repository?.fullName || event.repositoryId,
+          author: event.author,
+          body: event.body || undefined,
+        });
+
+        if (filterResult.action === FilterAction.EXCLUDE) {
+          this.logger.log(
+            `event_filtered eventId=${event.id} userId=${userId} ruleId=${filterResult.matchedRule?.id || 'none'}`,
+          );
+          continue;
+        }
+
+        const preferences = await this.notificationService.getPreferences(userId);
+        const channels = this.resolveChannelsForEvent(event, preferences);
+        if (channels.length === 0) {
+          continue;
+        }
+
+        for (const channel of channels) {
+          const dto: SendNotificationDto = {
+            userId,
+            eventId: event.id,
+            channel,
+            title: event.title,
+            content: event.body || event.title,
+            metadata: {
+              repositoryId: event.repositoryId,
+              eventType: event.type,
+              source: 'event_pipeline',
+            },
+          };
+          await this.notificationService.send(dto);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown_error';
+        this.logger.error(
+          `notification_failed eventId=${event.id} userId=${userId} stage=notify_repository_users reason=${message}`,
+        );
+      }
+    }
+  }
+
+  private resolveChannelsForEvent(
+    event: Event,
+    preferences: NotificationPreferences,
+  ): NotificationChannel[] {
+    if (
+      this.isPullRequestEvent(event.type) &&
+      preferences.events.prUpdates === false
+    ) {
+      return [];
+    }
+
+    return preferences.channels;
+  }
+
+  private async enqueueAnalysis(eventId: string): Promise<void> {
+    try {
+      await this.aiService.triggerAnalysis(eventId);
+      this.logger.log(`ai_enqueued eventId=${eventId}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown_error';
+      this.logger.error(`ai_enqueue_failed eventId=${eventId} reason=${message}`);
+    }
+  }
+
+  private isPullRequestEvent(type: EventType): boolean {
+    return ([
+      EventType.PR_OPENED,
+      EventType.PR_MERGED,
+      EventType.PR_CLOSED,
+      EventType.PR_REVIEW,
+    ] as EventType[]).includes(type);
   }
 
   private broadcastEvent(repositoryId: string, event: Event) {
@@ -62,7 +174,8 @@ export class EventService {
         createdAt: event.createdAt,
       });
     } catch (error) {
-      this.logger.warn(`Failed to broadcast event ${event.id}: ${error}`);
+      const message = error instanceof Error ? error.message : 'unknown_error';
+      this.logger.warn(`event_broadcast_failed eventId=${event.id} reason=${message}`);
     }
   }
 
@@ -127,7 +240,7 @@ export class EventService {
     });
 
     if (!event) {
-      throw new NotFoundException('事件不存在');
+      throw new NotFoundException('Event not found');
     }
 
     return event;

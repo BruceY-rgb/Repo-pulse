@@ -31,17 +31,16 @@ export class AuthService {
   async validateUser(email: string, password: string): Promise<User> {
     const user = await this.userService.findByEmail(email);
     if (!user) {
-      throw new UnauthorizedException('用户不存在');
+      throw new UnauthorizedException('User not found');
     }
 
-    // 如果用户通过 OAuth 注册，没有密码
     if (!user.passwordHash) {
-      throw new UnauthorizedException('请使用 OAuth 方式登录');
+      throw new UnauthorizedException('Please sign in with OAuth');
     }
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isMatch) {
-      throw new UnauthorizedException('密码错误');
+      throw new UnauthorizedException('Invalid password');
     }
 
     return user;
@@ -69,7 +68,7 @@ export class AuthService {
         role: payload.role,
       });
     } catch {
-      throw new UnauthorizedException('Refresh token 无效或已过期');
+      throw new UnauthorizedException('Refresh token is invalid or expired');
     }
   }
 
@@ -81,34 +80,56 @@ export class AuthService {
     githubAccessToken: string;
     githubRefreshToken: string;
   }) {
-    // 如果 email 为空，抛出错误
+    this.logger.log(
+      `github_oauth_handle_start githubId=${profile.id} email=${profile.email ?? 'missing'} displayName=${profile.displayName || 'unknown'}`,
+    );
+
     if (!profile.email) {
       this.logger.error('GitHub OAuth failed: email not available');
-      throw new UnauthorizedException('无法获取 GitHub 邮箱，请确保您的邮箱已公开');
+      throw new UnauthorizedException(
+        'Unable to read GitHub email, please make sure your email is available',
+      );
     }
 
     let user = await this.userService.findByGithubId(profile.id);
 
     if (!user) {
-      user = await this.userService.create({
-        email: profile.email,
-        name: profile.displayName || 'GitHub User',
-        avatar: profile.avatar,
+      this.logger.log(`github_oauth_lookup_by_github_id_miss githubId=${profile.id}`);
+      const existingUserByEmail = await this.userService.findByEmail(profile.email);
+
+      if (existingUserByEmail) {
+        user = await this.userService.update(existingUserByEmail.id, {
+          githubId: profile.id,
+          githubAccessToken: profile.githubAccessToken,
+          githubRefreshToken: profile.githubRefreshToken,
+          name: profile.displayName || existingUserByEmail.name,
+          avatar: profile.avatar || existingUserByEmail.avatar || undefined,
+        });
+        this.logger.log(`Existing user linked via GitHub OAuth: ${profile.email}`);
+      } else {
+        user = await this.userService.create({
+          email: profile.email,
+          name: profile.displayName || 'GitHub User',
+          avatar: profile.avatar,
+          githubId: profile.id,
+          githubAccessToken: profile.githubAccessToken,
+          githubRefreshToken: profile.githubRefreshToken,
+        });
+        this.logger.log(`New user created via GitHub OAuth: ${profile.email}`);
+      }
+    } else {
+      this.logger.log(`github_oauth_lookup_by_github_id_hit githubId=${profile.id} userId=${user.id}`);
+      user = await this.userService.update(user.id, {
         githubId: profile.id,
         githubAccessToken: profile.githubAccessToken,
         githubRefreshToken: profile.githubRefreshToken,
-      });
-      this.logger.log(`New user created via GitHub OAuth: ${profile.email}`);
-    } else {
-      // 更新已存在用户的 token
-      user = await this.userService.update(user.id, {
-        githubAccessToken: profile.githubAccessToken,
-        githubRefreshToken: profile.githubRefreshToken,
+        name: profile.displayName || user.name,
+        avatar: profile.avatar || user.avatar || undefined,
       });
     }
 
-    // 登录成功后触发后台同步（不 await，避免阻塞登录响应）
-    // 使用 setTimeout 延迟一下，确保用户记录已提交到数据库
+    this.logger.log(`github_oauth_handle_success userId=${user.id} email=${user.email}`);
+
     setTimeout(() => {
       this.syncService.syncUserRepositories(user.id).catch((err) => {
         this.logger.error(`Failed to sync user repositories for ${user.id}`, err);
