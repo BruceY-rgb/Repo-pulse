@@ -19,6 +19,7 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
   const { data: currentUser, isLoading: isAuthLoading } = useCurrentUserQuery();
   const socketRef = useRef<Socket | null>(null);
   const subscribedRoomsRef = useRef<Set<string>>(new Set());
+  const connectTimeoutRef = useRef<number | null>(null);
 
   const socketNamespace = useMemo(() => '/events', []);
 
@@ -53,51 +54,62 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
   }, [getTargetRepositoryIds]);
 
   const connect = useCallback(() => {
-    if (!currentUser || isAuthLoading || socketRef.current) {
+    if (!currentUser || isAuthLoading || socketRef.current || connectTimeoutRef.current !== null) {
       return;
     }
 
-    const socket = io(socketNamespace, {
-      path: '/socket.io',
-      withCredentials: true,
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-    });
+    connectTimeoutRef.current = window.setTimeout(() => {
+      connectTimeoutRef.current = null;
 
-    socket.on('connect', () => {
-      syncRoomSubscriptions();
-    });
+      const socket = io(socketNamespace, {
+        path: '/socket.io',
+        withCredentials: true,
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+      });
 
-    socket.on('connect_error', (error) => {
-      console.warn('[socket] connect_error', error.message);
-    });
+      socket.on('connect', () => {
+        syncRoomSubscriptions();
+      });
 
-    socket.on('disconnect', (reason) => {
-      console.warn('[socket] disconnect', reason);
-    });
+      socket.on('connect_error', (error) => {
+        console.warn('[socket] connect_error', error.message);
+      });
 
-    socket.on('event:new', (payload: EventPayload) => {
-      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
-      queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
-      queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
-      queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
-      queryClient.invalidateQueries({ queryKey: notificationQueryKeys.preferences() });
+      socket.on('disconnect', (reason) => {
+        if (reason !== 'io client disconnect') {
+          console.warn('[socket] disconnect', reason);
+        }
+      });
 
-      if (payload.repositoryId) {
-        queryClient.invalidateQueries({
-          queryKey: dashboardQueryKeys.stats(payload.repositoryId),
-        });
-        queryClient.invalidateQueries({
-          queryKey: dashboardQueryKeys.recentEvents(payload.repositoryId),
-        });
-      }
-    });
+      socket.on('event:new', (payload: EventPayload) => {
+        queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
+        queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
+        queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
+        queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
+        queryClient.invalidateQueries({ queryKey: notificationQueryKeys.preferences() });
 
-    socketRef.current = socket;
+        if (payload.repositoryId) {
+          queryClient.invalidateQueries({
+            queryKey: dashboardQueryKeys.stats(payload.repositoryId),
+          });
+          queryClient.invalidateQueries({
+            queryKey: dashboardQueryKeys.recentEvents(payload.repositoryId),
+          });
+        }
+      });
+
+      socketRef.current = socket;
+    }, 0);
   }, [currentUser, isAuthLoading, queryClient, socketNamespace, syncRoomSubscriptions]);
 
   const disconnect = useCallback(() => {
+    if (connectTimeoutRef.current !== null) {
+      window.clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
+    }
+
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current = null;
