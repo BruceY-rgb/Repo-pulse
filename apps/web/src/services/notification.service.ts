@@ -69,8 +69,13 @@ export const notificationService = {
   /**
    * 获取未读数量
    */
-  async getUnreadCount(): Promise<{ count: number }> {
-    const { data } = await apiClient.get<ApiResponse<{ count: number }>>('/notifications/unread-count');
+  async getUnreadCount(repositoryIds?: string[]): Promise<{ count: number }> {
+    const { data } = await apiClient.get<ApiResponse<{ count: number }>>('/notifications/unread-count', {
+      params:
+        repositoryIds && repositoryIds.length > 0
+          ? { repositoryIds: [...repositoryIds].sort().join(',') }
+          : undefined,
+    });
     return data.data;
   },
 

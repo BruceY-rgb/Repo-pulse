@@ -26,6 +26,13 @@ export const authService = {
     return data.data;
   },
 
+  async updatePreferences(preferences: Record<string, unknown>): Promise<User> {
+    const { data } = await apiClient.patch<ApiResponse<User>>('/users/preferences', {
+      preferences,
+    });
+    return data.data;
+  },
+
   /**
    * 获取 GitHub OAuth 运行时配置
    */

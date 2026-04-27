@@ -53,11 +53,28 @@ interface GithubOAuthConfigPayload {
   clientSecret: string;
 }
 
+interface UpdatePreferencesPayload {
+  preferences: Record<string, unknown>;
+}
+
 export function useGithubOAuthConfigMutation() {
   return useApiMutation({
     mutationKey: [...authQueryKeys.all, 'github-oauth-config'],
     mutationFn: async ({ clientId, clientSecret }: GithubOAuthConfigPayload) =>
       authService.configureGithubOAuth(clientId, clientSecret),
+  });
+}
+
+export function useUpdateUserPreferencesMutation() {
+  const queryClient = useQueryClient();
+
+  return useApiMutation({
+    mutationKey: [...authQueryKeys.all, 'update-preferences'],
+    mutationFn: ({ preferences }: UpdatePreferencesPayload) =>
+      authService.updatePreferences(preferences),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });
+    },
   });
 }
 

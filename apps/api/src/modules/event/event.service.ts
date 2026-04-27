@@ -21,6 +21,37 @@ export class EventService {
     this.prisma = new PrismaClient();
   }
 
+  private async resolveRepositoryIds(
+    userId: string,
+    repositoryId?: string,
+    repositoryIdsParam?: string,
+  ): Promise<string[]> {
+    const userRepos = await this.prisma.userRepository.findMany({
+      where: { userId },
+      select: { repositoryId: true },
+    });
+
+    const accessibleRepositoryIds = userRepos.map(
+      (repository: { repositoryId: string }) => repository.repositoryId,
+    );
+
+    const requestedRepositoryIds = repositoryIdsParam
+      ? repositoryIdsParam
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean)
+      : repositoryId
+        ? [repositoryId]
+        : [];
+
+    if (requestedRepositoryIds.length === 0) {
+      return accessibleRepositoryIds;
+    }
+
+    const accessibleRepositoryIdSet = new Set(accessibleRepositoryIds);
+    return requestedRepositoryIds.filter((value) => accessibleRepositoryIdSet.has(value));
+  }
+
   async create(data: {
     repositoryId: string;
     type: EventType;
@@ -179,12 +210,31 @@ export class EventService {
     }
   }
 
-  async findAll(repositoryId: string, query: PaginationQueryDto): Promise<any> {
+  async findAll(userId: string, query: PaginationQueryDto): Promise<any> {
     const { page = 1, pageSize = 20, sortBy = 'createdAt', sortOrder = 'desc' } = query;
+    const repositoryIds = await this.resolveRepositoryIds(
+      userId,
+      query.repositoryId,
+      query.repositoryIds,
+    );
+
+    if (repositoryIds.length === 0) {
+      return {
+        items: [],
+        total: 0,
+        page,
+        pageSize,
+        totalPages: 0,
+      };
+    }
+
+    const where = {
+      repositoryId: repositoryIds.length === 1 ? repositoryIds[0] : { in: repositoryIds },
+    };
 
     const [items, total] = await Promise.all([
       this.prisma.event.findMany({
-        where: { repositoryId },
+        where,
         orderBy: {
           [sortBy]: sortOrder,
         },
@@ -208,7 +258,7 @@ export class EventService {
         },
       }),
       this.prisma.event.count({
-        where: { repositoryId },
+        where,
       }),
     ]);
 
@@ -255,8 +305,25 @@ export class EventService {
     });
   }
 
-  async getEventStats(repositoryId: string, dateFrom?: Date, dateTo?: Date) {
-    const where: Record<string, unknown> = { repositoryId };
+  async getEventStats(
+    userId: string,
+    repositoryId?: string,
+    repositoryIdsParam?: string,
+    dateFrom?: Date,
+    dateTo?: Date,
+  ) {
+    const repositoryIds = await this.resolveRepositoryIds(userId, repositoryId, repositoryIdsParam);
+
+    if (repositoryIds.length === 0) {
+      return {
+        total: 0,
+        byType: [],
+      };
+    }
+
+    const where: Record<string, unknown> = {
+      repositoryId: repositoryIds.length === 1 ? repositoryIds[0] : { in: repositoryIds },
+    };
 
     if (dateFrom || dateTo) {
       where.createdAt = {};

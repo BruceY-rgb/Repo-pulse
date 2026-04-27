@@ -16,6 +16,36 @@ export interface UpdateApprovalDto {
 export class ApprovalService {
   private readonly logger = new Logger(ApprovalService.name);
 
+  private async resolveRepositoryIds(
+    userId: string,
+    repositoryIdsParam?: string,
+  ): Promise<string[]> {
+    const userRepos = await prisma.userRepository.findMany({
+      where: { userId },
+      select: { repositoryId: true },
+    });
+
+    const accessibleRepositoryIds = userRepos.map(
+      (repository: { repositoryId: string }) => repository.repositoryId,
+    );
+
+    if (!repositoryIdsParam) {
+      return accessibleRepositoryIds;
+    }
+
+    const requestedRepositoryIds = repositoryIdsParam
+      .split(',')
+      .map((repositoryId) => repositoryId.trim())
+      .filter(Boolean);
+
+    if (requestedRepositoryIds.length === 0) {
+      return [];
+    }
+
+    const accessibleRepositoryIdSet = new Set(accessibleRepositoryIds);
+    return requestedRepositoryIds.filter((repositoryId) => accessibleRepositoryIdSet.has(repositoryId));
+  }
+
   /**
    * 获取用户的审批列表
    */
@@ -84,13 +114,8 @@ export class ApprovalService {
   /**
    * 获取待审批数量
    */
-  async getPendingCount(userId: string): Promise<number> {
-    const userRepos = await prisma.userRepository.findMany({
-      where: { userId },
-      select: { repositoryId: true },
-    });
-
-    const repoIds = userRepos.map((r: { repositoryId: string }) => r.repositoryId);
+  async getPendingCount(userId: string, repositoryIdsParam?: string): Promise<number> {
+    const repoIds = await this.resolveRepositoryIds(userId, repositoryIdsParam);
 
     // 如果用户没有任何仓库，返回 0
     if (repoIds.length === 0) {

@@ -42,6 +42,36 @@ export class NotificationService {
     private readonly webhookChannel: WebhookChannel,
   ) {}
 
+  private async resolveRepositoryIds(
+    userId: string,
+    repositoryIdsParam?: string,
+  ): Promise<string[]> {
+    const userRepos = await prisma.userRepository.findMany({
+      where: { userId },
+      select: { repositoryId: true },
+    });
+
+    const accessibleRepositoryIds = userRepos.map(
+      (repository: { repositoryId: string }) => repository.repositoryId,
+    );
+
+    if (!repositoryIdsParam) {
+      return accessibleRepositoryIds;
+    }
+
+    const requestedRepositoryIds = repositoryIdsParam
+      .split(',')
+      .map((repositoryId) => repositoryId.trim())
+      .filter(Boolean);
+
+    if (requestedRepositoryIds.length === 0) {
+      return [];
+    }
+
+    const accessibleRepositoryIdSet = new Set(accessibleRepositoryIds);
+    return requestedRepositoryIds.filter((repositoryId) => accessibleRepositoryIdSet.has(repositoryId));
+  }
+
   async getPreferences(userId: string): Promise<NotificationPreferences> {
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -228,7 +258,7 @@ export class NotificationService {
       offset?: number;
     },
   ): Promise<{ notifications: Notification[]; total: number }> {
-    const where: Record<string, unknown> = { userId };
+    const where: Record<string, unknown> = { userId, channel: NotificationChannel.IN_APP };
 
     if (options?.status) {
       where.status = options.status;
@@ -290,11 +320,23 @@ export class NotificationService {
     });
   }
 
-  async getUnreadCount(userId: string): Promise<number> {
+  async getUnreadCount(userId: string, repositoryIdsParam?: string): Promise<number> {
+    const repositoryIds = await this.resolveRepositoryIds(userId, repositoryIdsParam);
+
+    if (repositoryIds.length === 0) {
+      return 0;
+    }
+
     return prisma.notification.count({
       where: {
         userId,
+        channel: NotificationChannel.IN_APP,
         readAt: null,
+        event: {
+          repositoryId: {
+            in: repositoryIds,
+          },
+        },
       },
     });
   }

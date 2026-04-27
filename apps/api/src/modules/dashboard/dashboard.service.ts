@@ -5,11 +5,10 @@ import { prisma, EventType } from '@repo-pulse/database';
 export class DashboardService {
   private readonly logger = new Logger(DashboardService.name);
 
-  /**
-   * 获取概览统计数据
-   */
-  async getOverview(userId: string) {
-    // 获取用户的所有仓库
+  private async resolveRepositoryIds(
+    userId: string,
+    repositoryIdsParam?: string,
+  ): Promise<string[]> {
     const repositories = await prisma.repository.findMany({
       where: {
         users: { some: { userId } },
@@ -17,7 +16,30 @@ export class DashboardService {
       select: { id: true },
     });
 
-    const repositoryIds = repositories.map((r: { id: string }) => r.id);
+    const accessibleRepositoryIds = repositories.map((repository: { id: string }) => repository.id);
+
+    if (!repositoryIdsParam) {
+      return accessibleRepositoryIds;
+    }
+
+    const requestedRepositoryIds = repositoryIdsParam
+      .split(',')
+      .map((repositoryId) => repositoryId.trim())
+      .filter(Boolean);
+
+    if (requestedRepositoryIds.length === 0) {
+      return [];
+    }
+
+    const accessibleRepositoryIdSet = new Set(accessibleRepositoryIds);
+    return requestedRepositoryIds.filter((repositoryId) => accessibleRepositoryIdSet.has(repositoryId));
+  }
+
+  /**
+   * 获取概览统计数据
+   */
+  async getOverview(userId: string, repositoryIdsParam?: string) {
+    const repositoryIds = await this.resolveRepositoryIds(userId, repositoryIdsParam);
 
     if (repositoryIds.length === 0) {
       return {
@@ -66,15 +88,8 @@ export class DashboardService {
   /**
    * 获取活动图表数据
    */
-  async getActivity(userId: string, days: number = 7) {
-    const repositories = await prisma.repository.findMany({
-      where: {
-        users: { some: { userId } },
-      },
-      select: { id: true },
-    });
-
-    const repositoryIds = repositories.map((r: { id: string }) => r.id);
+  async getActivity(userId: string, days: number = 7, repositoryIdsParam?: string) {
+    const repositoryIds = await this.resolveRepositoryIds(userId, repositoryIdsParam);
 
     if (repositoryIds.length === 0) {
       // 返回空数据
@@ -146,16 +161,27 @@ export class DashboardService {
   /**
    * 获取最近活动
    */
-  async getRecentActivity(userId: string, limit: number = 10) {
+  async getRecentActivity(userId: string, limit: number = 10, repositoryIdsParam?: string) {
     const repositories = await prisma.repository.findMany({
       where: {
         users: { some: { userId } },
       },
-      select: { id: true, name: true },
+      select: { id: true, name: true, fullName: true },
     });
 
-    const repositoryIds = repositories.map((r: { id: string; name: string }) => r.id);
-    const repoMap = new Map(repositories.map((r: { id: string; name: string }) => [r.id, r.name]));
+    const accessibleRepositoryIdSet = new Set(
+      await this.resolveRepositoryIds(userId, repositoryIdsParam),
+    );
+    const repositoriesInScope = repositories.filter((repository) =>
+      accessibleRepositoryIdSet.has(repository.id),
+    );
+    const repositoryIds = repositoriesInScope.map((repository) => repository.id);
+    const repoMap = new Map(
+      repositoriesInScope.map((repository) => [
+        repository.id,
+        repository.fullName || repository.name,
+      ]),
+    );
 
     if (repositoryIds.length === 0) {
       return [];

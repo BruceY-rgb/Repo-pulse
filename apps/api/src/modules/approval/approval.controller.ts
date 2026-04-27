@@ -41,8 +41,9 @@ export class ApprovalController {
   @Get('pending-count')
   async getPendingCount(
     @CurrentUser() user: { userId: string },
+    @Query('repositoryIds') repositoryIds?: string,
   ): Promise<{ count: number }> {
-    const count = await this.approvalService.getPendingCount(user.userId);
+    const count = await this.approvalService.getPendingCount(user.userId, repositoryIds);
     return { count };
   }
 

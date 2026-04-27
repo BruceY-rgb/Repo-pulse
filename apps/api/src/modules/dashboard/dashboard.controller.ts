@@ -16,8 +16,11 @@ export class DashboardController {
    */
   @Get('overview')
   @ApiOperation({ summary: '获取概览统计' })
-  async getOverview(@CurrentUser() user: { sub: string }) {
-    return this.dashboardService.getOverview(user.sub);
+  async getOverview(
+    @CurrentUser() user: { sub: string },
+    @Query('repositoryIds') repositoryIds?: string,
+  ) {
+    return this.dashboardService.getOverview(user.sub, repositoryIds);
   }
 
   /**
@@ -28,8 +31,9 @@ export class DashboardController {
   async getActivity(
     @CurrentUser() user: { sub: string },
     @Query('days') days?: number,
+    @Query('repositoryIds') repositoryIds?: string,
   ) {
-    return this.dashboardService.getActivity(user.sub, days);
+    return this.dashboardService.getActivity(user.sub, days, repositoryIds);
   }
 
   /**
@@ -40,7 +44,8 @@ export class DashboardController {
   async getRecentActivity(
     @CurrentUser() user: { sub: string },
     @Query('limit') limit?: number,
+    @Query('repositoryIds') repositoryIds?: string,
   ) {
-    return this.dashboardService.getRecentActivity(user.sub, limit);
+    return this.dashboardService.getRecentActivity(user.sub, limit, repositoryIds);
   }
 }

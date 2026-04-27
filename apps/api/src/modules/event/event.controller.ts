@@ -9,6 +9,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { EventService } from './event.service';
 import { EventQueryDto, EventStatsQueryDto } from './dto/event.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @ApiTags('Event Management')
 @ApiBearerAuth()
@@ -19,15 +20,23 @@ export class EventController {
 
   @Get()
   @ApiOperation({ summary: 'List events' })
-  async findAll(@Query() query: EventQueryDto): Promise<any> {
-    return this.eventService.findAll(query.repositoryId, query);
+  async findAll(
+    @CurrentUser() user: { sub: string },
+    @Query() query: EventQueryDto,
+  ): Promise<any> {
+    return this.eventService.findAll(user.sub, query);
   }
 
   @Get('stats')
   @ApiOperation({ summary: 'Get event stats' })
-  async getStats(@Query() query: EventStatsQueryDto) {
+  async getStats(
+    @CurrentUser() user: { sub: string },
+    @Query() query: EventStatsQueryDto,
+  ) {
     return this.eventService.getEventStats(
+      user.sub,
       query.repositoryId,
+      query.repositoryIds,
       query.dateFrom ? new Date(query.dateFrom) : undefined,
       query.dateTo ? new Date(query.dateTo) : undefined,
     );

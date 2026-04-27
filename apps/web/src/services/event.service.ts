@@ -9,9 +9,13 @@ export interface EventStats {
   }>;
 }
 
+function serializeRepositoryIds(repositoryIds: string[]) {
+  return [...repositoryIds].sort().join(',');
+}
+
 export const eventService = {
   async getAll(
-    repositoryId: string,
+    repositoryIds: string[],
     options?: {
       page?: number;
       pageSize?: number;
@@ -22,7 +26,7 @@ export const eventService = {
   ): Promise<PaginatedResponse<Event>> {
     const { data } = await apiClient.get<ApiResponse<PaginatedResponse<Event>>>('/events', {
       params: {
-        repositoryId,
+        repositoryIds: serializeRepositoryIds(repositoryIds),
         ...options,
       },
     });
@@ -35,13 +39,13 @@ export const eventService = {
   },
 
   async getStats(
-    repositoryId: string,
+    repositoryIds: string[],
     dateFrom?: string,
     dateTo?: string,
   ): Promise<EventStats> {
     const { data } = await apiClient.get<ApiResponse<EventStats>>('/events/stats', {
       params: {
-        repositoryId,
+        repositoryIds: serializeRepositoryIds(repositoryIds),
         dateFrom,
         dateTo,
       },
