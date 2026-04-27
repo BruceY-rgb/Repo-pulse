@@ -13,11 +13,16 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { RepositoryService } from './repository.service';
 import { UserService } from '../user/user.service';
-import { CreateRepositoryDto, UpdateRepositoryDto, RepositoryQueryDto } from './dto/repository.dto';
+import {
+  CreateRepositoryDto,
+  UpdateRepositoryDto,
+  RepositoryQueryDto,
+  RepositorySyncSummaryDto,
+} from './dto/repository.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Request } from 'express';
 
-@ApiTags('仓库管理')
+@ApiTags('Repository Management')
 @ApiBearerAuth()
 @UseGuards(AuthGuard('jwt'))
 @Controller('repositories')
@@ -28,88 +33,80 @@ export class RepositoryController {
   ) {}
 
   @Post()
-  @ApiOperation({ summary: '添加仓库' })
+  @ApiOperation({ summary: 'Create repository' })
   async create(@Req() req: Request, @Body() dto: CreateRepositoryDto) {
     const userId = (req.user as { sub: string }).sub;
-    const repository = await this.repositoryService.create(userId, dto);
-    return repository;
+    return this.repositoryService.create(userId, dto);
   }
 
   @Get()
-  @ApiOperation({ summary: '获取仓库列表' })
+  @ApiOperation({ summary: 'List repositories' })
   async findAll(@Req() req: Request, @Query() query: RepositoryQueryDto) {
     const userId = (req.user as { sub: string }).sub;
-    const repositories = await this.repositoryService.findAll(userId, {
+    return this.repositoryService.findAll(userId, {
       isActive: query.isActive,
     });
-    return repositories;
   }
 
   @Get('search')
-  @ApiOperation({ summary: '搜索公开仓库' })
+  @ApiOperation({ summary: 'Search public repositories' })
   async search(@Query('q') query: string, @Query('page') page?: number) {
     if (!query) {
       return [];
     }
-    const results = await this.repositoryService.searchRepositories(query, page);
-    return results;
+    return this.repositoryService.searchRepositories(query, page);
   }
 
   @Get('my-repos')
-  @ApiOperation({ summary: '获取用户作为 contributor 的仓库' })
+  @ApiOperation({ summary: 'List my contributor repositories' })
   async getMyRepos(@Req() req: Request) {
     const userId = (req.user as { sub: string }).sub;
     const user = await this.userService.findById(userId);
     if (!user?.githubAccessToken) {
-      return { error: '未绑定 GitHub 账号，请重新登录' };
+      return { error: 'GitHub account not connected, please log in again' };
     }
-    const results = await this.repositoryService.searchUserRepositories(
+    return this.repositoryService.searchUserRepositories(
       user.githubAccessToken,
       user.githubRefreshToken,
     );
-    return results;
   }
 
   @Get('starred')
-  @ApiOperation({ summary: '获取用户 star 的仓库' })
+  @ApiOperation({ summary: 'List my starred repositories' })
   async getStarred(@Req() req: Request) {
     const userId = (req.user as { sub: string }).sub;
     const user = await this.userService.findById(userId);
     if (!user?.githubAccessToken) {
-      return { error: '未绑定 GitHub 账号，请重新登录' };
+      return { error: 'GitHub account not connected, please log in again' };
     }
-    const results = await this.repositoryService.searchStarredRepositories(
+    return this.repositoryService.searchStarredRepositories(
       user.githubAccessToken,
       user.githubRefreshToken,
     );
-    return results;
   }
 
   @Get(':id')
-  @ApiOperation({ summary: '获取仓库详情' })
+  @ApiOperation({ summary: 'Get repository details' })
   async findById(@Param('id') id: string): Promise<any> {
-    const repository = await this.repositoryService.findById(id);
-    return repository;
+    return this.repositoryService.findById(id);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: '更新仓库' })
+  @ApiOperation({ summary: 'Update repository' })
   async update(@Param('id') id: string, @Body() dto: UpdateRepositoryDto) {
-    const repository = await this.repositoryService.update(id, dto);
-    return repository;
+    return this.repositoryService.update(id, dto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: '删除仓库' })
+  @ApiOperation({ summary: 'Delete repository' })
   async delete(@Param('id') id: string) {
     await this.repositoryService.delete(id);
     return { success: true };
   }
 
   @Post(':id/sync')
-  @ApiOperation({ summary: '同步仓库事件' })
-  async sync(@Param('id') id: string): Promise<any> {
-    const repository = await this.repositoryService.sync(id);
-    return repository;
+  @ApiOperation({ summary: 'Sync repository history' })
+  async sync(@Param('id') id: string): Promise<RepositorySyncSummaryDto> {
+    return this.repositoryService.sync(id);
   }
 }

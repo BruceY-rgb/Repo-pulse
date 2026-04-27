@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { dashboardQueryKeys } from '@/hooks/queries/use-dashboard-queries';
 import { notificationQueryKeys } from '@/hooks/queries/use-notification-queries';
 import { repositoryQueryKeys } from '@/hooks/queries/use-repository-queries';
+import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
 
 interface EventPayload {
   type: 'event:new';
@@ -15,22 +16,65 @@ interface EventPayload {
 
 export function useRepositoryRealtimeSubscription(repositoryIds?: string | string[]) {
   const queryClient = useQueryClient();
+  const { data: currentUser, isLoading: isAuthLoading } = useCurrentUserQuery();
   const socketRef = useRef<Socket | null>(null);
   const subscribedRoomsRef = useRef<Set<string>>(new Set());
 
-  const socketUrl = useMemo(() => 'http://localhost:3001/events', []);
+  const socketNamespace = useMemo(() => '/events', []);
 
-  const connect = useCallback(() => {
-    if (socketRef.current?.connected) {
+  const getTargetRepositoryIds = useCallback(() => {
+    if (Array.isArray(repositoryIds)) {
+      return repositoryIds.filter(Boolean);
+    }
+
+    return repositoryIds ? [repositoryIds] : [];
+  }, [repositoryIds]);
+
+  const syncRoomSubscriptions = useCallback(() => {
+    if (!socketRef.current?.connected) {
       return;
     }
 
-    const socket = io(socketUrl, {
-      transports: ['websocket'],
+    const nextRooms = new Set(getTargetRepositoryIds());
+
+    for (const id of nextRooms) {
+      if (!subscribedRoomsRef.current.has(id)) {
+        socketRef.current.emit('join:repository', { repositoryId: id });
+      }
+    }
+
+    for (const id of subscribedRoomsRef.current) {
+      if (!nextRooms.has(id)) {
+        socketRef.current.emit('leave:repository', { repositoryId: id });
+      }
+    }
+
+    subscribedRoomsRef.current = nextRooms;
+  }, [getTargetRepositoryIds]);
+
+  const connect = useCallback(() => {
+    if (!currentUser || isAuthLoading || socketRef.current) {
+      return;
+    }
+
+    const socket = io(socketNamespace, {
+      path: '/socket.io',
       withCredentials: true,
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
+    });
+
+    socket.on('connect', () => {
+      syncRoomSubscriptions();
+    });
+
+    socket.on('connect_error', (error) => {
+      console.warn('[socket] connect_error', error.message);
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.warn('[socket] disconnect', reason);
     });
 
     socket.on('event:new', (payload: EventPayload) => {
@@ -51,47 +95,30 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
     });
 
     socketRef.current = socket;
-  }, [queryClient, socketUrl]);
+  }, [currentUser, isAuthLoading, queryClient, socketNamespace, syncRoomSubscriptions]);
 
   const disconnect = useCallback(() => {
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current = null;
     }
+    subscribedRoomsRef.current = new Set();
   }, []);
 
   useEffect(() => {
+    if (!currentUser || isAuthLoading) {
+      disconnect();
+      return;
+    }
+
     connect();
     return () => {
       disconnect();
     };
-  }, [connect, disconnect]);
+  }, [connect, currentUser, disconnect, isAuthLoading]);
 
   useEffect(() => {
-    if (!socketRef.current?.connected) {
-      return;
-    }
-
-    const targetRepositoryIds = Array.isArray(repositoryIds)
-      ? repositoryIds
-      : repositoryIds
-        ? [repositoryIds]
-        : [];
-    const nextRooms = new Set(targetRepositoryIds.filter(Boolean));
-
-    for (const id of nextRooms) {
-      if (!subscribedRoomsRef.current.has(id)) {
-        socketRef.current.emit('join:repository', { repositoryId: id });
-      }
-    }
-
-    for (const id of subscribedRoomsRef.current) {
-      if (!nextRooms.has(id) && socketRef.current?.connected) {
-        socketRef.current.emit('leave:repository', { repositoryId: id });
-      }
-    }
-
-    subscribedRoomsRef.current = nextRooms;
+    syncRoomSubscriptions();
 
     return () => {
       if (!socketRef.current?.connected) {
@@ -103,5 +130,5 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
       }
       subscribedRoomsRef.current = new Set();
     };
-  }, [repositoryIds]);
+  }, [syncRoomSubscriptions]);
 }

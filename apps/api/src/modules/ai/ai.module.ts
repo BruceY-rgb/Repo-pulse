@@ -4,6 +4,8 @@ import { AIProcessor } from './ai-analysis.processor';
 import { AIService } from './ai.service';
 import { AIController } from './ai.controller';
 import { UserModule } from '../user/user.module';
+import { ApprovalModule } from '../approval/approval.module';
+import { NotificationModule } from '../notification/notification.module';
 
 @Module({
   imports: [
@@ -11,6 +13,8 @@ import { UserModule } from '../user/user.module';
       name: 'ai-analysis',
     }),
     UserModule,
+    ApprovalModule,
+    NotificationModule,
   ],
   controllers: [AIController],
   providers: [AIProcessor, AIService],
