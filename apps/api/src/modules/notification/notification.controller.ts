@@ -28,9 +28,9 @@ export class NotificationController {
    */
   @Get('preferences')
   async getPreferences(
-    @CurrentUser() user: { userId: string },
+    @CurrentUser() user: { sub: string },
   ): Promise<NotificationPreferences> {
-    return this.notificationService.getPreferences(user.userId);
+    return this.notificationService.getPreferences(user.sub);
   }
 
   /**
@@ -38,10 +38,10 @@ export class NotificationController {
    */
   @Post('preferences')
   async updatePreferences(
-    @CurrentUser() user: { userId: string },
+    @CurrentUser() user: { sub: string },
     @Body() prefs: Partial<NotificationPreferences>,
   ): Promise<NotificationPreferences> {
-    return this.notificationService.updatePreferences(user.userId, prefs);
+    return this.notificationService.updatePreferences(user.sub, prefs);
   }
 
   /**
@@ -49,12 +49,12 @@ export class NotificationController {
    */
   @Get()
   async getNotifications(
-    @CurrentUser() user: { userId: string },
+    @CurrentUser() user: { sub: string },
     @Query('status') status?: NotificationStatus,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ): Promise<{ notifications: Notification[]; total: number }> {
-    return this.notificationService.getUserNotifications(user.userId, {
+    return this.notificationService.getUserNotifications(user.sub, {
       status,
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
@@ -66,9 +66,9 @@ export class NotificationController {
    */
   @Get('unread-count')
   async getUnreadCount(
-    @CurrentUser() user: { userId: string },
+    @CurrentUser() user: { sub: string },
   ): Promise<{ count: number }> {
-    const count = await this.notificationService.getUnreadCount(user.userId);
+    const count = await this.notificationService.getUnreadCount(user.sub);
     return { count };
   }
 
@@ -77,10 +77,10 @@ export class NotificationController {
    */
   @Post(':id/read')
   async markAsRead(
-    @CurrentUser() user: { userId: string },
+    @CurrentUser() user: { sub: string },
     @Param('id', ParseUUIDPipe) notificationId: string,
   ): Promise<{ success: boolean }> {
-    await this.notificationService.markAsRead(notificationId, user.userId);
+    await this.notificationService.markAsRead(notificationId, user.sub);
     return { success: true };
   }
 
@@ -89,9 +89,9 @@ export class NotificationController {
    */
   @Post('read-all')
   async markAllAsRead(
-    @CurrentUser() user: { userId: string },
+    @CurrentUser() user: { sub: string },
   ): Promise<{ success: boolean }> {
-    await this.notificationService.markAllAsRead(user.userId);
+    await this.notificationService.markAllAsRead(user.sub);
     return { success: true };
   }
 
@@ -100,10 +100,10 @@ export class NotificationController {
    */
   @Delete(':id')
   async deleteNotification(
-    @CurrentUser() user: { userId: string },
+    @CurrentUser() user: { sub: string },
     @Param('id', ParseUUIDPipe) notificationId: string,
   ): Promise<{ success: boolean }> {
-    await this.notificationService.deleteNotification(notificationId, user.userId);
+    await this.notificationService.deleteNotification(notificationId, user.sub);
     return { success: true };
   }
 

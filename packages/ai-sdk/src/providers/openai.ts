@@ -10,6 +10,9 @@ import { buildSystemPrompt, buildUserPrompt } from '../prompts';
 
 export class OpenAIProvider implements AIProvider {
   readonly name = 'openai';
+  readonly channelId = 'openai';
+  readonly displayName = 'OpenAI';
+
   private client: OpenAI;
   private model: string;
 

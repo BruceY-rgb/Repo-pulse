@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { AIProcessor } from './ai-analysis.processor';
 import { AIService } from './ai.service';
+import { AIController } from './ai.controller';
 import { UserModule } from '../user/user.module';
 
 @Module({
@@ -11,7 +12,7 @@ import { UserModule } from '../user/user.module';
     }),
     UserModule,
   ],
-  controllers: [],
+  controllers: [AIController],
   providers: [AIProcessor, AIService],
   exports: [AIService],
 })

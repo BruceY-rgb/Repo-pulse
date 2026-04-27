@@ -7,6 +7,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "@repo-pulse/shared": path.resolve(__dirname, "../../packages/shared/src/index.ts"),
     },
   },
   server: {

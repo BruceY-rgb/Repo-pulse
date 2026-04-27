@@ -16,6 +16,9 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@repo-pulse/shared": [
+        "../../packages/shared/dist/index.d.ts"
       ]
     },
     /* Bundler mode */

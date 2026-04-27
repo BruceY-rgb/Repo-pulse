@@ -5,14 +5,12 @@ import {
   XCircle,
   Clock,
   AlertTriangle,
-  Loader2,
-  Search,
-  Filter,
   MessageSquare,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { approvalService, type Approval, type ApprovalStatus } from '@/services/approval.service';
@@ -150,7 +148,7 @@ export function Approvals() {
         <TabsContent value={activeTab} className="mt-4">
           {loading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="w-8 h-8 animate-spin text-[var(--github-accent)]" />
+              <Spinner className="h-8 w-8 text-[var(--github-accent)]" />
             </div>
           ) : approvals.length === 0 ? (
             <div className="text-center py-16">
@@ -252,7 +250,7 @@ export function Approvals() {
                             className="flex-1 gap-2 bg-green-600 hover:bg-green-700"
                           >
                             {actionLoading ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <Spinner className="h-4 w-4" />
                             ) : (
                               <CheckCircle className="w-4 h-4" />
                             )}
@@ -265,7 +263,7 @@ export function Approvals() {
                             className="flex-1 gap-2 border-red-400 text-red-400 hover:bg-red-400/10"
                           >
                             {actionLoading ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <Spinner className="h-4 w-4" />
                             ) : (
                               <XCircle className="w-4 h-4" />
                             )}
@@ -281,7 +279,7 @@ export function Approvals() {
                             className="w-full gap-2"
                           >
                             {actionLoading ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <Spinner className="h-4 w-4" />
                             ) : (
                               <MessageSquare className="w-4 h-4" />
                             )}

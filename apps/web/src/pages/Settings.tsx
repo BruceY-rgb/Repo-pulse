@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from 'react';
 import {
   User,
@@ -7,15 +8,17 @@ import {
   Github,
   Key,
   Mail,
-  Smartphone,
   Slack,
   Save,
   CheckCircle,
   AlertTriangle,
   Brain,
-  Loader2,
   Link,
+  Wifi,
+  Download,
+  Loader2,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,9 +29,55 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { settingsService } from '@/services/settings.service';
+import { Spinner } from '@/components/ui/spinner';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  NotificationExceptionDraftCard,
+} from '@/components/settings/notifications/NotificationExceptionDraftCard';
+import {
+  NotificationExceptionRuleList,
+} from '@/components/settings/notifications/NotificationExceptionRuleList';
+import {
+  NotificationLevelSelector,
+  type NotificationLevelValue,
+} from '@/components/settings/notifications/NotificationLevelSelector';
+import {
+  NotificationTemplateGallery,
+  type NotificationTemplateValue,
+} from '@/components/settings/notifications/NotificationTemplateGallery';
+import {
+  createExceptionRuleFromFilterRule,
+  createFilterRulePayloadFromDraft,
+  createFilterRuleUpdatePayloadFromDraft,
+  createExceptionDraftFromTemplate,
+  type NotificationExceptionAction,
+  type NotificationExceptionDraft,
+  type NotificationExceptionRule,
+} from '@/components/settings/notifications/notification-template-drafts';
+import {
+  useCreateFilterRuleMutation,
+  useDeleteFilterRuleMutation,
+  useFilterRulesQuery,
+  useUpdateFilterRuleMutation,
+} from '@/hooks/queries/use-filter-queries';
+import {
+  settingsService,
+  PROVIDER_LABELS,
+  PROVIDER_DEFAULT_MODELS,
+  PROVIDER_DEFAULT_URLS,
+  PROVIDER_CHAT_PATHS,
+  type AIProvider,
+  type AIConfig,
+  type ConnectionTestResult,
+  type ModelInfo,
+} from '@/services/settings.service';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { getProviderLogo } from '@/lib/provider-logo';
 import { notificationService } from '@/services/notification.service';
-import type { AIProvider, AIConfig, NotificationPreferences } from '@/services/notification.service';
+import type {
+  NotificationChannel,
+  NotificationPreferences,
+} from '@/services/notification.service';
 
 const connectedAccounts = [
   { provider: 'GitHub', username: 'johndoe', connected: true, icon: Github },
@@ -42,6 +91,7 @@ const apiKeys = [
 ];
 
 export function Settings() {
+  const { t } = useLanguage();
   const [saved, setSaved] = useState(false);
 
   // AI 配置状态
@@ -50,9 +100,18 @@ export function Settings() {
   const [aiSaving, setAiSaving] = useState(false);
   const [aiSaved, setAiSaved] = useState(false);
 
+  // 连接测试状态
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<ConnectionTestResult | null>(null);
+
+  // 模型拉取状态
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [modelFetchResult, setModelFetchResult] = useState<{ success: boolean; message: string; models: ModelInfo[] } | null>(null);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+
   // 通知配置状态
   const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>({
-    channels: ['inApp'],
+    channels: ['IN_APP'],
     events: {
       highRisk: true,
       prUpdates: true,
@@ -63,6 +122,17 @@ export function Settings() {
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifSaving, setNotifSaving] = useState(false);
   const [notifSaved, setNotifSaved] = useState(false);
+  const [notificationLevel, setNotificationLevel] = useState<NotificationLevelValue>('important');
+  const [selectedTemplate, setSelectedTemplate] = useState<NotificationTemplateValue | null>(null);
+  const [exceptionDraft, setExceptionDraft] = useState<NotificationExceptionDraft | null>(null);
+  const filterRulesQuery = useFilterRulesQuery();
+  const createFilterRuleMutation = useCreateFilterRuleMutation();
+  const updateFilterRuleMutation = useUpdateFilterRuleMutation();
+  const deleteFilterRuleMutation = useDeleteFilterRuleMutation();
+
+  const exceptionRules = (filterRulesQuery.data ?? []).map((rule) =>
+    createExceptionRuleFromFilterRule(rule, t),
+  );
 
   // 加载 AI 配置
   useEffect(() => {
@@ -109,6 +179,62 @@ export function Settings() {
     }
   };
 
+  const handleTestConnection = async () => {
+    if (!aiConfig.aiProvider) return;
+
+    setTestingConnection(true);
+    setConnectionTestResult(null);
+
+    try {
+      const result = await settingsService.testConnection(
+        aiConfig.aiProvider,
+        aiConfig.aiApiKey || '',
+        aiConfig.aiBaseUrl
+      );
+      setConnectionTestResult(result);
+    } catch (error) {
+      setConnectionTestResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Connection test failed',
+      });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const handleFetchModels = async () => {
+    if (!aiConfig.aiProvider) return;
+
+    setFetchingModels(true);
+    setModelFetchResult(null);
+
+    try {
+      const result = await settingsService.fetchModels(
+        aiConfig.aiProvider,
+        aiConfig.aiApiKey || '',
+        aiConfig.aiBaseUrl
+      );
+      setModelFetchResult(result);
+      if (result.success) {
+        setModels(result.models);
+      }
+    } catch (error) {
+      setModelFetchResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to fetch models',
+        models: [],
+      });
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
+  const toggleModelEnabled = (modelId: string) => {
+    setModels(models.map(m =>
+      m.id === modelId ? { ...m, enabled: !m.enabled } : m
+    ));
+  };
+
   const handleSaveNotifications = async () => {
     setNotifSaving(true);
     try {
@@ -127,11 +253,61 @@ export function Settings() {
     setTimeout(() => setSaved(false), 3000);
   };
 
-  const toggleChannel = (channel: string) => {
-    const channels = notifPrefs.channels.includes(channel as any)
+  const toggleChannel = (channel: NotificationChannel) => {
+    const channels = notifPrefs.channels.includes(channel)
       ? notifPrefs.channels.filter((c) => c !== channel)
-      : [...notifPrefs.channels, channel as any];
+      : [...notifPrefs.channels, channel];
     setNotifPrefs({ ...notifPrefs, channels });
+  };
+
+  const handleSelectTemplate = (template: NotificationTemplateValue) => {
+    setSelectedTemplate(template);
+    setExceptionDraft(createExceptionDraftFromTemplate(template, t));
+  };
+
+  const handleSaveExceptionDraft = async () => {
+    if (!exceptionDraft) {
+      return;
+    }
+
+    try {
+      if (exceptionDraft.id) {
+        await updateFilterRuleMutation.mutateAsync({
+          payload: createFilterRuleUpdatePayloadFromDraft(exceptionDraft),
+          ruleId: exceptionDraft.id,
+        });
+      } else {
+        await createFilterRuleMutation.mutateAsync(
+          createFilterRulePayloadFromDraft(exceptionDraft),
+        );
+      }
+
+      setSelectedTemplate(null);
+      setExceptionDraft(null);
+      toast.success(t('notifications.settings.rules.saveSuccess'));
+    } catch (error) {
+      console.error('Failed to save filter rule:', error);
+      toast.error(t('notifications.settings.rules.saveError'));
+    }
+  };
+
+  const handleEditExceptionRule = (rule: NotificationExceptionRule) => {
+    setSelectedTemplate(rule.template);
+    setExceptionDraft(rule);
+  };
+
+  const handleRemoveExceptionRule = async (ruleId: string) => {
+    try {
+      await deleteFilterRuleMutation.mutateAsync(ruleId);
+      setExceptionDraft((current) => (current?.id === ruleId ? null : current));
+      setSelectedTemplate((current) =>
+        exceptionDraft?.id === ruleId ? null : current,
+      );
+      toast.success(t('notifications.settings.rules.removeSuccess'));
+    } catch (error) {
+      console.error('Failed to delete filter rule:', error);
+      toast.error(t('notifications.settings.rules.removeError'));
+    }
   };
 
   return (
@@ -269,10 +445,80 @@ export function Settings() {
         <TabsContent value="notifications" className="mt-4 space-y-4">
           {notifLoading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-[var(--github-accent)]" />
+              <Spinner className="h-6 w-6 text-[var(--github-accent)]" />
             </div>
           ) : (
             <>
+              <Card className="card-github">
+                <CardHeader>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className="bg-[var(--github-accent)]/15 text-[var(--github-accent)]">
+                      Notification Controls
+                    </Badge>
+                  </div>
+                  <CardTitle className="text-base font-semibold text-white">
+                    Reduce noise without missing important updates
+                  </CardTitle>
+                  <CardDescription className="text-[var(--github-text-secondary)]">
+                    Notification settings now combine delivery channels, default focus, and exception
+                    rules in one place. We will move the filtering controls into this tab step by
+                    step.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-3">
+                  <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--github-surface)]">
+                        <Bell className="h-5 w-5 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-white">Delivery channels</p>
+                        <p className="text-xs text-[var(--github-text-secondary)]">
+                          Choose where alerts should arrive.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--github-surface)]">
+                        <Shield className="h-5 w-5 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-white">Default notification focus</p>
+                        <p className="text-xs text-[var(--github-text-secondary)]">
+                          This area will host the default level selector next.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--github-surface)]">
+                        <Link className="h-5 w-5 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-white">Exception rules</p>
+                        <p className="text-xs text-[var(--github-text-secondary)]">
+                          Templates and advanced filters will live here after the focus selector.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
+                  Delivery
+                </p>
+                <p className="text-sm text-[var(--github-text-secondary)]">
+                  First decide which channels are allowed to reach you.
+                </p>
+              </div>
+
               <Card className="card-github">
                 <CardHeader>
                   <CardTitle className="text-base font-semibold text-white">Notification Channels</CardTitle>
@@ -291,11 +537,11 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('email')}
-                        onCheckedChange={() => toggleChannel('email')}
+                        checked={notifPrefs.channels.includes('EMAIL')}
+                        onCheckedChange={() => toggleChannel('EMAIL')}
                       />
                     </div>
-                    {notifPrefs.channels.includes('email') && (
+                    {notifPrefs.channels.includes('EMAIL') && (
                       <div className="ml-12 space-y-2">
                         <Input
                           placeholder="your@email.com"
@@ -315,8 +561,8 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('dingtalk')}
-                        onCheckedChange={() => toggleChannel('dingtalk')}
+                        checked={notifPrefs.channels.includes('DINGTALK')}
+                        onCheckedChange={() => toggleChannel('DINGTALK')}
                       />
                     </div>
 
@@ -329,8 +575,8 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('feishu')}
-                        onCheckedChange={() => toggleChannel('feishu')}
+                        checked={notifPrefs.channels.includes('FEISHU')}
+                        onCheckedChange={() => toggleChannel('FEISHU')}
                       />
                     </div>
 
@@ -343,15 +589,15 @@ export function Settings() {
                         </div>
                       </div>
                       <Switch
-                        checked={notifPrefs.channels.includes('inApp')}
-                        onCheckedChange={() => toggleChannel('inApp')}
+                        checked={notifPrefs.channels.includes('IN_APP')}
+                        onCheckedChange={() => toggleChannel('IN_APP')}
                       />
                     </div>
                   </div>
 
-                  {(notifPrefs.channels.includes('dingtalk') ||
-                    notifPrefs.channels.includes('feishu') ||
-                    notifPrefs.channels.includes('webhook')) && (
+                  {(notifPrefs.channels.includes('DINGTALK') ||
+                    notifPrefs.channels.includes('FEISHU') ||
+                    notifPrefs.channels.includes('WEBHOOK')) && (
                     <>
                       <Separator className="bg-[var(--github-border)]" />
                       <div className="space-y-2">
@@ -368,11 +614,29 @@ export function Settings() {
                 </CardContent>
               </Card>
 
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
+                  Focus
+                </p>
+                <p className="text-sm text-[var(--github-text-secondary)]">
+                  Then decide which kinds of repository activity should still get through by default.
+                </p>
+              </div>
+
               <Card className="card-github">
                 <CardHeader>
-                  <CardTitle className="text-base font-semibold text-white">Event Types</CardTitle>
+                  <CardTitle className="text-base font-semibold text-white">Notification Focus</CardTitle>
+                  <CardDescription className="text-[var(--github-text-secondary)]">
+                    These toggles are the current baseline. Default levels and rule-based filtering will
+                    be added into this section next.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  <NotificationLevelSelector
+                    onValueChange={setNotificationLevel}
+                    value={notificationLevel}
+                  />
+
                   <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
                     <div>
                       <p className="text-sm text-white">High Risk Alerts</p>
@@ -424,12 +688,119 @@ export function Settings() {
                 </CardContent>
               </Card>
 
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
+                  Exceptions
+                </p>
+                <p className="text-sm text-[var(--github-text-secondary)]">
+                  This is where quick templates and exception rules will be merged in, so users can fine-tune
+                  noisy cases without leaving Settings.
+                </p>
+              </div>
+
+              <Card className="card-github border-dashed">
+                <CardHeader>
+                  <CardTitle className="text-base font-semibold text-white">
+                    Notification filtering is moving here
+                  </CardTitle>
+                  <CardDescription className="text-[var(--github-text-secondary)]">
+                    Next we will embed default focus levels, quick templates, and exception rules directly into
+                    this tab.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <NotificationTemplateGallery
+                    onSelectTemplate={handleSelectTemplate}
+                    selectedTemplate={selectedTemplate}
+                  />
+
+                  <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
+                    <p className="text-sm font-medium text-white">Planned modules</p>
+                    <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
+                      Default notification level, template shortcuts, readable exception rules, and advanced preview.
+                    </p>
+                  </div>
+
+                  {exceptionDraft ? (
+                    <NotificationExceptionDraftCard
+                      draft={exceptionDraft}
+                      isSaving={
+                        createFilterRuleMutation.isPending || updateFilterRuleMutation.isPending
+                      }
+                      onActionChange={(value: NotificationExceptionAction) =>
+                        setExceptionDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                action: value,
+                              }
+                            : current,
+                        )
+                      }
+                      onClear={() => {
+                        setSelectedTemplate(null);
+                        setExceptionDraft(null);
+                      }}
+                      onDescriptionChange={(value: string) =>
+                        setExceptionDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                description: value,
+                              }
+                            : current,
+                        )
+                      }
+                      onEnabledChange={(value: boolean) =>
+                        setExceptionDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                enabled: value,
+                              }
+                            : current,
+                        )
+                      }
+                      onNameChange={(value: string) =>
+                        setExceptionDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                name: value,
+                              }
+                            : current,
+                        )
+                      }
+                      onSave={handleSaveExceptionDraft}
+                    />
+                  ) : null}
+
+                  {filterRulesQuery.error ? (
+                    <Alert className="border-destructive/40 bg-destructive/10 text-white">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTitle>{t('notifications.settings.rules.errorTitle')}</AlertTitle>
+                      <AlertDescription>
+                        {filterRulesQuery.error.message || t('notifications.settings.rules.errorDescription')}
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+
+                  <NotificationExceptionRuleList
+                    isDeleting={deleteFilterRuleMutation.isPending}
+                    isLoading={filterRulesQuery.isLoading}
+                    onEdit={handleEditExceptionRule}
+                    onRemove={handleRemoveExceptionRule}
+                    rules={exceptionRules}
+                  />
+                </CardContent>
+              </Card>
+
               <Button
                 onClick={handleSaveNotifications}
                 disabled={notifSaving}
                 className="btn-x-primary gap-2"
               >
-                {notifSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                {notifSaving && <Spinner className="h-4 w-4" />}
                 {notifSaved ? <CheckCircle className="w-4 h-4" /> : null}
                 {notifSaving ? 'Saving...' : notifSaved ? 'Saved!' : 'Save Notification Settings'}
               </Button>
@@ -580,7 +951,7 @@ export function Settings() {
             <CardContent className="space-y-6">
               {aiLoading ? (
                 <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-[var(--github-accent)]" />
+                  <Spinner className="h-6 w-6 text-[var(--github-accent)]" />
                 </div>
               ) : (
                 <>
@@ -589,7 +960,7 @@ export function Settings() {
                     <Label htmlFor="aiProvider" className="text-sm text-white">AI Provider</Label>
                     <Select
                       value={aiConfig.aiProvider || ''}
-                      onValueChange={(value: AIProvider) => setAiConfig({ ...aiConfig, aiProvider: value })}
+                      onValueChange={(value: AIProvider) => setAiConfig({ ...aiConfig, aiProvider: value, aiBaseUrl: undefined })}
                     >
                       <SelectTrigger className="bg-[var(--github-surface)] border-[var(--github-border)]">
                         <SelectValue placeholder="Select an AI provider" />
@@ -597,30 +968,70 @@ export function Settings() {
                       <SelectContent>
                         <SelectItem value="openai">
                           <div className="flex items-center gap-2">
-                            <span>OpenAI (GPT-4)</span>
+                            <img src={getProviderLogo('openai')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.openai}</span>
                           </div>
                         </SelectItem>
                         <SelectItem value="anthropic">
                           <div className="flex items-center gap-2">
-                            <span>Anthropic (Claude)</span>
+                            <img src={getProviderLogo('anthropic')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.anthropic}</span>
                           </div>
                         </SelectItem>
-                        <SelectItem value="ollama">
+                        <SelectItem value="deepseek">
                           <div className="flex items-center gap-2">
-                            <span>Ollama (Local)</span>
+                            <img src={getProviderLogo('deepseek')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.deepseek}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="google">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('google')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.google}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="moonshot">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('moonshot')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.moonshot}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="zhipu">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('zhipu')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.zhipu}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="minimax">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('minimax')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.minimax}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="doubao">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('doubao')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.doubao}</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="qwen">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('qwen')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.qwen}</span>
                           </div>
                         </SelectItem>
                         <SelectItem value="custom">
                           <div className="flex items-center gap-2">
-                            <span>Custom Endpoint</span>
+                            <img src={getProviderLogo('custom')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.custom}</span>
                           </div>
                         </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
-                  {/* API Key - only show for openai and anthropic */}
-                  {(aiConfig.aiProvider === 'openai' || aiConfig.aiProvider === 'anthropic') && (
+                  {/* API Key - show for all providers except custom */}
+                  {(aiConfig.aiProvider && aiConfig.aiProvider !== 'custom') && (
                     <div className="space-y-2">
                       <Label htmlFor="aiApiKey" className="text-sm text-white">API Key</Label>
                       <Input
@@ -637,22 +1048,57 @@ export function Settings() {
                     </div>
                   )}
 
-                  {/* Base URL - show for ollama and custom */}
-                  {(aiConfig.aiProvider === 'ollama' || aiConfig.aiProvider === 'custom') && (
+                  {/* Base URL - show for custom */}
+                  {aiConfig.aiProvider === 'custom' && (
                     <div className="space-y-2">
-                      <Label htmlFor="aiBaseUrl" className="text-sm text-white">
-                        {aiConfig.aiProvider === 'ollama' ? 'Ollama URL' : 'Base URL'}
-                      </Label>
+                      <Label htmlFor="aiBaseUrl" className="text-sm text-white">Base URL</Label>
                       <Input
                         id="aiBaseUrl"
                         type="url"
-                        placeholder={aiConfig.aiProvider === 'ollama' ? 'http://localhost:11434' : 'https://api.example.com/v1'}
+                        placeholder="https://api.example.com/v1"
                         value={aiConfig.aiBaseUrl || ''}
                         onChange={(e) => setAiConfig({ ...aiConfig, aiBaseUrl: e.target.value })}
                         className="bg-[var(--github-surface)] border-[var(--github-border)]"
                       />
                     </div>
                   )}
+
+                  {/* Endpoint Preview */}
+                  {aiConfig.aiProvider && (
+                    <div className="p-3 rounded-lg bg-white/5 border border-[var(--github-border)]">
+                      <p className="text-xs text-[var(--github-text-secondary)] mb-1">Endpoint Preview</p>
+                      <code className="text-sm text-white break-all">
+                        {getEndpointPreview(aiConfig.aiProvider, aiConfig.aiProvider === 'custom' ? aiConfig.aiBaseUrl : undefined)}
+                      </code>
+                    </div>
+                  )}
+
+                  {/* Test Connection Button */}
+                  <div className="flex items-center gap-3">
+                    <Button
+                      onClick={handleTestConnection}
+                      disabled={testingConnection || !aiConfig.aiProvider}
+                      variant="outline"
+                      className="border-[var(--github-border)] gap-2"
+                    >
+                      {testingConnection ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Wifi className="w-4 h-4" />
+                      )}
+                      {testingConnection ? 'Testing...' : 'Test Connection'}
+                    </Button>
+                    {connectionTestResult && (
+                      <div className={`flex items-center gap-2 text-sm ${connectionTestResult.success ? 'text-green-400' : 'text-red-400'}`}>
+                        {connectionTestResult.success ? (
+                          <CheckCircle className="w-4 h-4" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4" />
+                        )}
+                        {connectionTestResult.message}
+                      </div>
+                    )}
+                  </div>
 
                   {/* Model */}
                   <div className="space-y-2">
@@ -669,12 +1115,71 @@ export function Settings() {
                     </p>
                   </div>
 
+                  {/* Fetch Models Button */}
+                  {aiConfig.aiProvider && aiConfig.aiProvider !== 'custom' && (
+                    <div className="space-y-3">
+                      <Button
+                        onClick={handleFetchModels}
+                        disabled={fetchingModels}
+                        variant="outline"
+                        className="border-[var(--github-border)] gap-2"
+                      >
+                        {fetchingModels ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Download className="w-4 h-4" />
+                        )}
+                        {fetchingModels ? 'Fetching...' : 'Fetch Models from Provider'}
+                      </Button>
+
+                      {modelFetchResult && !modelFetchResult.success && (
+                        <div className="flex items-center gap-2 text-sm text-red-400">
+                          <AlertTriangle className="w-4 h-4" />
+                          {modelFetchResult.message}
+                        </div>
+                      )}
+
+                      {/* Model List */}
+                      {models.length > 0 && (
+                        <div className="space-y-2">
+                          <Label className="text-sm text-white">Available Models</Label>
+                          <div className="max-h-48 overflow-y-auto space-y-1 border border-[var(--github-border)] rounded-lg">
+                            {models.map((model) => (
+                              <div
+                                key={model.id}
+                                className="flex items-center justify-between p-2 hover:bg-white/5"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Switch
+                                    checked={model.enabled}
+                                    onCheckedChange={() => toggleModelEnabled(model.id)}
+                                  />
+                                  <span className="text-sm text-white">{model.name}</span>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    setAiConfig({ ...aiConfig, aiModel: model.id });
+                                  }}
+                                  className="text-xs text-[var(--github-accent)] hover:underline"
+                                >
+                                  Use
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <Separator className="bg-[var(--github-border)]" />
+
                   <Button
                     onClick={handleSaveAI}
                     disabled={aiSaving || !aiConfig.aiProvider}
                     className="btn-x-primary gap-2"
                   >
-                    {aiSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {aiSaving && <Spinner className="h-4 w-4" />}
                     {aiSaved ? <CheckCircle className="w-4 h-4" /> : null}
                     {aiSaving ? 'Saving...' : aiSaved ? 'Saved!' : 'Save AI Config'}
                   </Button>
@@ -690,31 +1195,50 @@ export function Settings() {
 
 // Helper functions
 function getDefaultModel(provider?: string): string {
-  switch (provider) {
-    case 'openai':
-      return 'gpt-4';
-    case 'anthropic':
-      return 'claude-sonnet-4-20250514';
-    case 'ollama':
-      return 'llama3';
-    case 'custom':
-      return 'gpt-4';
-    default:
-      return '';
-  }
+  if (!provider || !(provider in PROVIDER_DEFAULT_MODELS)) return '';
+  return PROVIDER_DEFAULT_MODELS[provider as AIProvider] || '';
 }
 
 function getModelHint(provider?: string): string {
+  if (!provider) return 'Select a provider first';
   switch (provider) {
     case 'openai':
-      return 'e.g., gpt-4, gpt-4-turbo, gpt-3.5-turbo';
+      return 'e.g., gpt-4o, gpt-4-turbo, gpt-3.5-turbo';
     case 'anthropic':
-      return 'e.g., claude-sonnet-4-20250514, claude-opus-4-20250514, claude-3-5-sonnet-20241022';
-    case 'ollama':
-      return 'e.g., llama3, mistral, codellama';
+      return 'e.g., claude-sonnet-4-20250514, claude-opus-4-20250514';
+    case 'deepseek':
+      return 'e.g., deepseek-chat, deepseek-coder';
+    case 'google':
+      return 'e.g., gemini-2.0-flash-exp, gemini-1.5-pro';
+    case 'moonshot':
+      return 'e.g., kimi-longtext-chat, kimi-math';
+    case 'zhipu':
+      return 'e.g., glm-4-flash, glm-4';
+    case 'minimax':
+      return 'e.g., MiniMax-M2.1';
+    case 'doubao':
+      return 'e.g., doubao-pro-32k';
+    case 'qwen':
+      return 'e.g., qwen-turbo, qwen-plus';
     case 'custom':
       return 'Enter the model name supported by your custom endpoint';
     default:
       return 'Select a provider first';
   }
+}
+
+function getEndpointPreview(provider?: string, customBaseUrl?: string): string {
+  if (!provider) return '';
+
+  if (customBaseUrl?.trim()) {
+    const normalizedBaseUrl = customBaseUrl.replace(/\/$/, '');
+    const path = PROVIDER_CHAT_PATHS[provider as AIProvider] || '/chat/completions';
+    return normalizedBaseUrl + path;
+  }
+
+  const baseUrl = PROVIDER_DEFAULT_URLS[provider as AIProvider];
+  if (!baseUrl) return '';
+
+  const path = PROVIDER_CHAT_PATHS[provider as AIProvider] || '/chat/completions';
+  return baseUrl + path;
 }

@@ -64,3 +64,51 @@ Repo-Pulse 是一个 AI 驱动的代码仓库监控与管理平台，采用 Mono
 在进行任何实际开发前，你**必须**阅读以下文档以获取具体的业务目标和规范：
 1. `/docs/project-plan-v2.md` - **当前最高优先级的迭代计划**。包含了详细的阶段划分、当前架构缺陷的修复方案以及具体的验收标准。**你必须严格按照该文档的 Phase 顺序执行，不可跳跃。**
 2. `/docs/frontend-style-guide.md` - 前端样式红线和交互规范。
+
+## 6. 项目开发进度
+
+> **最后更新**：2025-04-02
+
+### 已完成阶段
+
+| 阶段 | 状态 | 完成内容 |
+| :--- | :--- | :--- |
+| **Phase 1** 基础设施加固 | ✅ 已完成 | 环境变量分离、HttpOnly Cookie 认证、Webhook 验签、样式基座清理 |
+| **Phase 2** 实时数据流 | ✅ 已完成 | WebSocket Gateway、消息队列联动、React Query 迁移 |
+| **Phase 3** AI 核心引擎 | ✅ 已完成 | AI 抽象层、异步分析工作流、SSE 流式输出 |
+
+### 本次实现功能详情
+
+**WebSocket Gateway (`apps/api/src/modules/event/event.gateway.ts`)**
+- 基于 Socket.io 的实时通信网关
+- JWT 认证支持
+- 按仓库 ID 的 Room 订阅机制
+- 事件广播功能
+
+**React Query Hooks (`apps/web/src/hooks/`)**
+- `use-repositories.ts` - 仓库查询和变更
+- `use-events.ts` - 事件查询
+- `use-settings.ts` - AI 配置管理
+- `use-approvals.ts` - 审批流程
+- `use-notifications.ts` - 通知偏好
+- `use-web-socket.ts` - WebSocket 连接管理
+- `use-sse.ts` - SSE 流式数据接收
+
+**SSE 流式输出 (`apps/api/src/modules/ai/ai.controller.ts`)**
+- `GET /ai/stream/:eventId` - 流式 AI 分析结果
+- `GET /ai/analysis/:eventId` - 获取分析结果
+- `POST /ai/trigger/:eventId` - 触发异步分析
+
+### 待完成阶段
+
+| 阶段 | 状态 | 说明 |
+| :--- | :--- | :--- |
+| **Phase 4** 团队协同与通知 | ⏳ 待开发 | 规则引擎、审批流、多渠道通知 |
+
+### 分支管理规范
+
+- **main** - 生产分支，受保护，只能通过 MR 合并
+- **develop** - 开发主分支，受保护，只能通过 MR 合并
+- **feature/xxx** - 功能分支，基于 develop 创建
+- **release/x.y** - 发布分支
+- **hotfix/x.y.z** - 热修复分支

@@ -6,14 +6,18 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import { ConfigService } from '@nestjs/config';
+import type { Request, Response } from 'express';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
 
+  constructor(private readonly configService: ConfigService) {}
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
+    const request = ctx.getRequest<Request>();
     const response = ctx.getResponse<Response>();
 
     const status =
@@ -31,6 +35,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
         `[${status}] ${message}`,
         exception instanceof Error ? exception.stack : undefined,
       );
+    }
+
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+    const isGithubCallbackRequest =
+      request.method === 'GET' && request.path === '/auth/github/callback';
+
+    if (isGithubCallbackRequest && !response.headersSent) {
+      response.redirect(`${frontendUrl}/login?error=oauth_failed`);
+      return;
     }
 
     response.status(status).json({

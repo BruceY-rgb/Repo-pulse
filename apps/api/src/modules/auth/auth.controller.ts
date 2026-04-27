@@ -19,6 +19,8 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { UserService } from '../user/user.service';
+import { GithubStrategy } from './strategies/github.strategy';
+import { ConfigService } from '@nestjs/config';
 
 // Cookie 配置常量
 const COOKIE_OPTIONS = {
@@ -37,7 +39,9 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly userService: UserService,
-  ) {}
+    private readonly githubStrategy: GithubStrategy,
+    private readonly configService: ConfigService,
+  ) { }
 
   /**
    * 邮箱密码登录 — Token 写入 HttpOnly Cookie
@@ -104,13 +108,52 @@ export class AuthController {
   }
 
   /**
+   * 获取当前运行时 OAuth 配置（仅暴露安全的公共信息）
+   */
+  @Get('github/config')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '获取 GitHub OAuth 运行时配置' })
+  getGithubOAuthRuntimeConfig() {
+    return {
+      callbackUrl: this.configService.get<string>('GITHUB_CALLBACK_URL') || '',
+    };
+  }
+
+  /**
+   * 运行时配置 GitHub OAuth 客户端参数（仅内存生效，重启后失效）
+   */
+  @Post('github/config')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '配置 GitHub OAuth 客户端参数（运行时）' })
+  configureGithubOAuth(
+    @Body() body: { clientId?: string; clientSecret?: string },
+  ) {
+    const clientId = body.clientId?.trim();
+    const clientSecret = body.clientSecret?.trim();
+
+    if (!clientId || !clientSecret) {
+      throw new UnauthorizedException('GitHub Client ID / Client Secret 不能为空');
+    }
+
+    this.githubStrategy.updateCredentials(clientId, clientSecret);
+
+    return { message: 'GitHub OAuth 配置已更新（重启后需重新配置）' };
+  }
+
+  /**
    * GitHub OAuth 回调 — 将 Token 写入 Cookie 后重定向到前端
    */
   @Get('github/callback')
   @Public()
   @UseGuards(AuthGuard('github'))
   @ApiOperation({ summary: 'GitHub OAuth 回调' })
-  async githubCallback(@Req() req: Request, @Res() res: Response) {
+  async githubCallback(
+    @Req() req: Request,
+    @Res() res: Response
+  ) {
+    // 拿到 GitHub 登录后的用户信息
     const profile = req.user as {
       id: string;
       email: string;
@@ -120,13 +163,15 @@ export class AuthController {
       githubRefreshToken: string;
     };
 
+    // 生成 token
     const tokens = await this.authService.handleGithubAuth(profile);
 
-    // 将 Token 写入 HttpOnly Cookie
+    // 写入 cookie
     this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
 
-    // 重定向到前端，不在 URL 中暴露 Token
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    // 跳转到前端回调页
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
     res.redirect(`${frontendUrl}/auth/callback`);
   }
 

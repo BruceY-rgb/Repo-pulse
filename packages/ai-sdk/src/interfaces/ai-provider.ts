@@ -1,9 +1,22 @@
 /**
+ * AI 提供商类型定义
+ * Provider 类型/常量的唯一数据源为 @repo-pulse/shared
+ */
+
+// 重新导出共享类型（保持向后兼容的 ProviderType 别名）
+export type { AIProvider as ProviderType } from '@repo-pulse/shared';
+export { PROVIDER_DEFAULT_URLS, PROVIDER_LABELS } from '@repo-pulse/shared';
+
+/**
  * AI 提供商统一接口
- * 所有模型提供商（OpenAI、Anthropic、Ollama）必须实现此接口
+ * 所有模型提供商（OpenAI、Anthropic、Gemini 等）必须实现此接口
  */
 export interface AIProvider {
   readonly name: string;
+  /** 渠道标识符 */
+  readonly channelId: string;
+  /** 渠道显示名称 */
+  readonly displayName: string;
 
   /** 同步分析（等待完整结果） */
   analyze(input: AnalysisInput): Promise<AnalysisOutput>;
@@ -54,6 +67,7 @@ export interface AIProviderConfig {
   apiKey?: string;
   baseUrl?: string;
   model: string;
+  provider?: import('@repo-pulse/shared').AIProvider;
   timeout?: number;
   maxRetries?: number;
 }

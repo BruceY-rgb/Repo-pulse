@@ -13,6 +13,9 @@ import { buildSystemPrompt, buildUserPrompt } from '../prompts';
  */
 export class OllamaProvider implements AIProvider {
   readonly name = 'ollama';
+  readonly channelId = 'ollama';
+  readonly displayName = 'Ollama';
+
   private baseUrl: string;
   private model: string;
   private timeout: number;

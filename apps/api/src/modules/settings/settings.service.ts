@@ -1,22 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { prisma } from '@repo-pulse/database';
+import type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
 
-export type AIProvider = 'openai' | 'anthropic' | 'ollama' | 'custom';
+// Re-export for backward compatibility
+export type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
 
-export interface AIConfig {
-  aiProvider?: AIProvider;
-  aiApiKey?: string;
-  aiBaseUrl?: string;
-  aiModel?: string;
+export interface FetchModelsResult {
+  success: boolean;
+  message: string;
+  models: ModelInfo[];
 }
 
 @Injectable()
 export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
 
-  /**
-   * 获取当前用户的 AI 配置
-   */
   async getAIConfig(userId: string): Promise<AIConfig> {
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -33,7 +31,6 @@ export class SettingsService {
       return {};
     }
 
-    // 不返回 API Key 的明文
     return {
       aiProvider: user.aiProvider as AIProvider | undefined,
       aiApiKey: user.aiApiKey ? '***' : undefined,
@@ -42,9 +39,6 @@ export class SettingsService {
     };
   }
 
-  /**
-   * 更新当前用户的 AI 配置
-   */
   async updateAIConfig(
     userId: string,
     config: {
@@ -60,10 +54,8 @@ export class SettingsService {
       updateData.aiProvider = config.aiProvider;
     }
 
-    // 如果提供了新的 API Key，则更新；否则保持原值
     if (config.aiApiKey !== undefined) {
       if (config.aiApiKey === '***' || config.aiApiKey === '') {
-        // 保留原 API Key，不更新
       } else {
         updateData.aiApiKey = config.aiApiKey;
       }
@@ -96,5 +88,27 @@ export class SettingsService {
       aiBaseUrl: updatedUser.aiBaseUrl || undefined,
       aiModel: updatedUser.aiModel || undefined,
     };
+  }
+
+  // @ts-ignore
+  async testConnection(
+    provider: AIProvider,
+    apiKey: string,
+    baseUrl?: string,
+  ): Promise<ConnectionTestResult> {
+    // @ts-ignore
+    const { testConnection: test } = await import('@repo-pulse/ai-sdk');
+    return test(provider, apiKey, baseUrl);
+  }
+
+  // @ts-ignore
+  async fetchModels(
+    provider: AIProvider,
+    apiKey: string,
+    baseUrl?: string,
+  ): Promise<FetchModelsResult> {
+    // @ts-ignore
+    const { fetchModels: fetch } = await import('@repo-pulse/ai-sdk');
+    return fetch(provider, apiKey, baseUrl);
   }
 }

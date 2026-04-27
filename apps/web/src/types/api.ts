@@ -57,6 +57,11 @@ export interface CreateRepositoryDto {
   name?: string;
 }
 
+export interface UpdateRepositoryDto {
+  name?: string;
+  isActive?: boolean;
+}
+
 export interface Event {
   id: string;
   repositoryId: string;

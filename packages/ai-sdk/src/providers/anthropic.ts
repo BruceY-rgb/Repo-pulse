@@ -10,6 +10,9 @@ import { buildSystemPrompt, buildUserPrompt } from '../prompts';
 
 export class AnthropicProvider implements AIProvider {
   readonly name = 'anthropic';
+  readonly channelId = 'anthropic';
+  readonly displayName = 'Anthropic';
+
   private client: Anthropic;
   private model: string;
 

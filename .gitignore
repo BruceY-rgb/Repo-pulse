@@ -2,6 +2,8 @@
 node_modules/
 .pnp
 .pnp.js
+.corepack/
+.pnpm-store/
 
 # Build outputs
 dist/
@@ -39,11 +41,12 @@ coverage/
 .nyc_output/
 
 # Prisma
-packages/database/prisma/migrations/
 
 # Misc
 *.tsbuildinfo
 .cache/
+.dev-services/
 
 # claude
 .claude/
+CLAUDE.md
