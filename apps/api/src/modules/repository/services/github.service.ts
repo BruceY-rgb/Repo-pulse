@@ -31,6 +31,10 @@ export interface GithubSearchResult {
   };
 }
 
+interface GithubBranchResponse {
+  name: string;
+}
+
 interface GithubSearchResponse {
   total_count: number;
   incomplete_results: boolean;
@@ -178,6 +182,23 @@ export class GithubService {
       return response.data;
     } catch (error) {
       this.logger.error(`Failed to fetch commits for ${owner}/${repo}`, error);
+      return [];
+    }
+  }
+
+  async getBranches(
+    owner: string,
+    repo: string,
+    userToken?: string,
+  ): Promise<string[]> {
+    try {
+      const client = this.createUserClient(userToken);
+      const response = await client.get<GithubBranchResponse[]>(`/repos/${owner}/${repo}/branches`, {
+        params: { per_page: 100 },
+      });
+      return response.data.map((branch) => branch.name).filter(Boolean);
+    } catch (error) {
+      this.logger.error(`Failed to fetch branches for ${owner}/${repo}`, error);
       return [];
     }
   }

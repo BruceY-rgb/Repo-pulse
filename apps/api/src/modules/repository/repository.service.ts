@@ -242,18 +242,26 @@ export class RepositoryService {
       if (!tokenOwner?.user.githubAccessToken) {
         failedSources.push('github_token_missing');
       } else {
-        const sources = [
-          {
-            name: 'github_commits',
+        const branches = await this.githubService.getBranches(
+          owner,
+          repo,
+          tokenOwner.user.githubAccessToken || undefined,
+        );
+        const commitSources = (branches.length > 0 ? branches : [repository.defaultBranch]).map(
+          (branch) => ({
+            name: `github_commits:${branch}`,
             fetch: () =>
               this.githubService.getCommits(
                 owner,
                 repo,
-                { branch: repository.defaultBranch, since },
+                { branch, since },
                 tokenOwner.user.githubAccessToken || undefined,
               ),
-            normalize: (item: unknown) => this.normalizeGithubCommit(item),
-          },
+            normalize: (item: unknown) => this.normalizeGithubCommit(item, branch),
+          }),
+        );
+        const sources = [
+          ...commitSources,
           {
             name: 'github_pull_requests',
             fetch: () =>
@@ -284,16 +292,20 @@ export class RepositoryService {
         successfulSources += summary.successfulSources;
       }
     } else {
-      const sources = [
-        {
-          name: 'gitlab_commits',
+      const branches = await this.gitlabService.getBranches(owner, repo);
+      const commitSources = (branches.length > 0 ? branches : [repository.defaultBranch]).map(
+        (branch) => ({
+          name: `gitlab_commits:${branch}`,
           fetch: () =>
             this.gitlabService.getCommits(owner, repo, {
-              branch: repository.defaultBranch,
+              branch,
               since,
             }),
-          normalize: (item: unknown) => this.normalizeGitlabCommit(item),
-        },
+          normalize: (item: unknown) => this.normalizeGitlabCommit(item, branch),
+        }),
+      );
+      const sources = [
+        ...commitSources,
         {
           name: 'gitlab_merge_requests',
           fetch: () => this.gitlabService.getMergeRequests(owner, repo, 'all'),
@@ -485,7 +497,7 @@ export class RepositoryService {
     return [fullName.slice(0, separatorIndex), fullName.slice(separatorIndex + 1)];
   }
 
-  private normalizeGithubCommit(item: unknown): NormalizedSyncEvent | null {
+  private normalizeGithubCommit(item: unknown, branch: string): NormalizedSyncEvent | null {
     const commit = item as {
       sha?: string;
       html_url?: string;
@@ -503,13 +515,13 @@ export class RepositoryService {
     return {
       type: EventType.PUSH,
       action: 'sync',
-      title: `Push sync: ${commit.sha.slice(0, 7)}`,
+      title: `Push sync (${branch}): ${commit.sha.slice(0, 7)}`,
       body: commit.commit?.message,
       author: commit.author?.login || commit.commit?.author?.name || 'unknown',
       authorAvatar: commit.author?.avatar_url,
       externalId: commit.sha,
       externalUrl: commit.html_url,
-      metadata: { source: 'repository_sync', provider: 'github' },
+      metadata: { source: 'repository_sync', provider: 'github', branch },
     };
   }
 
@@ -590,7 +602,7 @@ export class RepositoryService {
     };
   }
 
-  private normalizeGitlabCommit(item: unknown): NormalizedSyncEvent | null {
+  private normalizeGitlabCommit(item: unknown, branch: string): NormalizedSyncEvent | null {
     const commit = item as {
       id?: string;
       message?: string;
@@ -605,12 +617,12 @@ export class RepositoryService {
     return {
       type: EventType.PUSH,
       action: 'sync',
-      title: `Push sync: ${commit.id.slice(0, 7)}`,
+      title: `Push sync (${branch}): ${commit.id.slice(0, 7)}`,
       body: commit.message,
       author: commit.author_name || 'unknown',
       externalId: commit.id,
       externalUrl: commit.web_url,
-      metadata: { source: 'repository_sync', provider: 'gitlab' },
+      metadata: { source: 'repository_sync', provider: 'gitlab', branch },
     };
   }
 

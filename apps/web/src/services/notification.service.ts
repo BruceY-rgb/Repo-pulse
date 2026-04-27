@@ -11,8 +11,8 @@ export interface NotificationPreferences {
     analysisComplete: boolean;
     weeklyReport: boolean;
   };
-  webhookUrl?: string;
-  email?: string;
+  webhookUrl?: string | null;
+  email?: string | null;
 }
 
 interface Notification {

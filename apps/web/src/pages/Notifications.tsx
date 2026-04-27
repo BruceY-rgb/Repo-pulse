@@ -192,10 +192,13 @@ export function Notifications() {
       return;
     }
 
+    const normalizedEmail = emailDraft.trim();
+    const normalizedWebhookUrl = webhookDraft.trim();
+
     await updatePrefsMutation.mutateAsync({
       ...prefs,
-      email: emailDraft,
-      webhookUrl: webhookDraft,
+      email: normalizedEmail || null,
+      webhookUrl: normalizedWebhookUrl || null,
     });
   };
 
