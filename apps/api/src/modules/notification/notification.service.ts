@@ -228,7 +228,7 @@ export class NotificationService {
       offset?: number;
     },
   ): Promise<{ notifications: Notification[]; total: number }> {
-    const where: Record<string, unknown> = { userId };
+    const where: Record<string, unknown> = { userId, channel: NotificationChannel.IN_APP };
 
     if (options?.status) {
       where.status = options.status;
@@ -294,6 +294,7 @@ export class NotificationService {
     return prisma.notification.count({
       where: {
         userId,
+        channel: NotificationChannel.IN_APP,
         readAt: null,
       },
     });

@@ -1,15 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { enUS, zhCN } from 'date-fns/locale';
 import {
   Bell,
   Check,
   Loader2,
-  Mail,
-  MessageSquare,
   Settings,
   Trash2,
-  Webhook,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,7 +17,6 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import { Switch } from '@/components/ui/switch';
@@ -84,8 +80,6 @@ function ChannelBadge({ channel }: { channel: NotificationChannel | string }) {
 export function Notifications() {
   const { t, language } = useLanguage();
   const [activeTab, setActiveTab] = useState<NotificationTab>('all');
-  const [emailDraft, setEmailDraft] = useState('');
-  const [webhookDraft, setWebhookDraft] = useState('');
 
   const notificationsQuery = useNotificationsQuery();
   const repositoriesQuery = useRepositoryListQuery();
@@ -113,11 +107,6 @@ export function Notifications() {
   const unreadCount = unreadCountQuery.data?.count ?? 0;
   const prefs = preferencesQuery.data;
 
-  useEffect(() => {
-    setEmailDraft(prefs?.email ?? '');
-    setWebhookDraft(prefs?.webhookUrl ?? '');
-  }, [prefs?.email, prefs?.webhookUrl]);
-
   const locale = language === 'zh' ? zhCN : enUS;
 
   const isBusy =
@@ -128,26 +117,6 @@ export function Notifications() {
 
   const channelOptions = useMemo(
     () => [
-      {
-        key: 'EMAIL' as const,
-        label: t('notifications.channels.email'),
-        icon: Mail,
-      },
-      {
-        key: 'DINGTALK' as const,
-        label: t('notifications.channels.dingtalk'),
-        icon: MessageSquare,
-      },
-      {
-        key: 'FEISHU' as const,
-        label: t('notifications.channels.feishu'),
-        icon: MessageSquare,
-      },
-      {
-        key: 'WEBHOOK' as const,
-        label: t('notifications.channels.webhook'),
-        icon: Webhook,
-      },
       {
         key: 'IN_APP' as const,
         label: t('notifications.channels.inApp'),
@@ -184,21 +153,6 @@ export function Notifications() {
         ...prefs.events,
         [eventKey]: !prefs.events[eventKey],
       },
-    });
-  };
-
-  const saveContactSettings = async () => {
-    if (!prefs) {
-      return;
-    }
-
-    const normalizedEmail = emailDraft.trim();
-    const normalizedWebhookUrl = webhookDraft.trim();
-
-    await updatePrefsMutation.mutateAsync({
-      ...prefs,
-      email: normalizedEmail || null,
-      webhookUrl: normalizedWebhookUrl || null,
     });
   };
 
@@ -467,46 +421,6 @@ export function Notifications() {
               </div>
             </section>
 
-            <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="notify-email">
-                  {t('notifications.settings.email')}
-                </Label>
-                <Input
-                  id="notify-email"
-                  value={emailDraft}
-                  onChange={(event) => setEmailDraft(event.target.value)}
-                  placeholder={t('notifications.settings.emailPlaceholder')}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="notify-webhook">
-                  {t('notifications.settings.webhook')}
-                </Label>
-                <Input
-                  id="notify-webhook"
-                  value={webhookDraft}
-                  onChange={(event) => setWebhookDraft(event.target.value)}
-                  placeholder={t('notifications.settings.webhookPlaceholder')}
-                />
-              </div>
-            </section>
-
-            <div className="flex justify-end">
-              <Button
-                onClick={saveContactSettings}
-                disabled={!prefs || updatePrefsMutation.isPending}
-              >
-                {updatePrefsMutation.isPending ? (
-                  <span className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    {t('notifications.settings.saving')}
-                  </span>
-                ) : (
-                  t('notifications.settings.save')
-                )}
-              </Button>
-            </div>
           </CardContent>
         </Card>
       </div>

@@ -51,29 +51,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-
-const activityData = [
-  { name: 'Mon', commits: 45, prs: 12, issues: 8 },
-  { name: 'Tue', commits: 52, prs: 15, issues: 6 },
-  { name: 'Wed', commits: 38, prs: 10, issues: 12 },
-  { name: 'Thu', commits: 65, prs: 18, issues: 5 },
-  { name: 'Fri', commits: 48, prs: 14, issues: 9 },
-  { name: 'Sat', commits: 25, prs: 5, issues: 3 },
-  { name: 'Sun', commits: 18, prs: 3, issues: 2 },
-];
-
-const riskDistribution = [
-  { name: 'Low', value: 65, color: '#238636' },
-  { name: 'Medium', value: 25, color: '#f0883e' },
-  { name: 'High', value: 10, color: '#f85149' },
-];
-
-const doraMetrics = [
-  { label: 'Deployment Frequency', value: '4.2/day', target: '5/day', progress: 84 },
-  { label: 'Lead Time for Changes', value: '2.1 days', target: '2 days', progress: 95 },
-  { label: 'Change Failure Rate', value: '8.5%', target: '5%', progress: 59 },
-  { label: 'Time to Recovery', value: '45 min', target: '30 min', progress: 67 },
-];
+import { useDashboardActivity } from '@/hooks/use-dashboard';
 
 function toRelativeTime(dateString: string, language: 'en' | 'zh') {
   const now = Date.now();
@@ -129,6 +107,37 @@ export function Dashboard() {
   const recentEventsQuery = useDashboardRecentEventsQuery(repositoryId);
   const pendingApprovalsQuery = usePendingApprovalsCountQuery();
   const unreadNotificationsQuery = useUnreadNotificationsCountQuery();
+
+  // 周活动数据 - 来自后端 /dashboard/activity
+  const activityQuery = useDashboardActivity(7);
+  const activityData = useMemo(() => {
+    const data = activityQuery.data ?? [];
+    return data.map(item => ({ name: item.date, commits: item.commits, prs: item.prs, issues: item.issues }));
+  }, [activityQuery.data]);
+
+  // 风险分布 - 从事件类型动态计算
+  const riskDistribution = useMemo(() => {
+    const byType = statsQuery.data?.byType ?? [];
+    let low = 0, medium = 0, high = 0;
+    for (const item of byType) {
+      if (item.type.includes('PUSH') || item.type.includes('RELEASE')) high += item.count;
+      else if (item.type.includes('PR') || item.type.includes('ISSUE')) medium += item.count;
+      else low += item.count;
+    }
+    return [
+      { name: 'Low', value: low || 1, color: '#238636' },
+      { name: 'Medium', value: medium || 1, color: '#f0883e' },
+      { name: 'High', value: high || 1, color: '#f85149' },
+    ];
+  }, [statsQuery.data?.byType]);
+
+  // DORA 指标 - 后端暂无 API，暂用占位数据
+  const doraMetrics = [
+    { label: 'Deployment Frequency', value: '--', target: '--', progress: 0 },
+    { label: 'Lead Time for Changes', value: '--', target: '--', progress: 0 },
+    { label: 'Change Failure Rate', value: '--', target: '--', progress: 0 },
+    { label: 'Time to Recovery', value: '--', target: '--', progress: 0 },
+  ];
 
   useRepositoryRealtimeSubscription(repositoryId);
 
