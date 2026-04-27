@@ -3,6 +3,9 @@ import { Type } from 'class-transformer';
 import { EventType } from '@repo-pulse/database';
 
 export class PaginationQueryDto {
+  @IsString()
+  repositoryId!: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -29,6 +32,9 @@ export class EventQueryDto extends PaginationQueryDto {
 }
 
 export class EventStatsQueryDto {
+  @IsString()
+  repositoryId!: string;
+
   @IsOptional()
   @IsDateString()
   dateFrom?: string;

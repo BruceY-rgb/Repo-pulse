@@ -25,6 +25,10 @@ interface GitlabWebhookConfig {
   tag_push_events: boolean;
 }
 
+interface GitlabBranchResponse {
+  name: string;
+}
+
 @Injectable()
 export class GitlabService {
   private readonly logger = new Logger(GitlabService.name);
@@ -113,6 +117,22 @@ export class GitlabService {
       return response.data;
     } catch (error) {
       this.logger.error(`Failed to fetch commits for ${owner}/${repo}`, error);
+      return [];
+    }
+  }
+
+  async getBranches(owner: string, repo: string): Promise<string[]> {
+    try {
+      const encodedPath = encodeURIComponent(`${owner}/${repo}`);
+      const response = await this.client.get<GitlabBranchResponse[]>(
+        `/projects/${encodedPath}/repository/branches`,
+        {
+          params: { per_page: 100 },
+        },
+      );
+      return response.data.map((branch) => branch.name).filter(Boolean);
+    } catch (error) {
+      this.logger.error(`Failed to fetch branches for ${owner}/${repo}`, error);
       return [];
     }
   }

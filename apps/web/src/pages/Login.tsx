@@ -43,6 +43,9 @@ interface LoginFormValues {
   password: string;
 }
 
+const GITHUB_OAUTH_CLIENT_ID_KEY = 'repo-pulse.github-oauth-client-id';
+const GITHUB_OAUTH_CLIENT_SECRET_KEY = 'repo-pulse.github-oauth-client-secret';
+
 export function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -51,8 +54,9 @@ export function Login() {
   const loginMutation = useLoginMutation();
   const oauthConfigMutation = useGithubOAuthConfigMutation();
   const oauthRuntimeConfigQuery = useGithubOAuthRuntimeConfigQuery();
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
+  const [clientId, setClientId] = useState(() => readStoredGithubOAuthConfig().clientId);
+  const [clientSecret, setClientSecret] = useState(() => readStoredGithubOAuthConfig().clientSecret);
+  const [githubConfigHint, setGithubConfigHint] = useState<string | null>(null);
   const callbackUrl =
     oauthRuntimeConfigQuery.data?.callbackUrl ||
     'http://localhost:3001/auth/github/callback';
@@ -89,10 +93,41 @@ export function Login() {
     if (!clientId.trim() || !clientSecret.trim()) {
       return;
     }
+
+    setGithubConfigHint(null);
+
+    const nextClientId = clientId.trim();
+    const nextClientSecret = clientSecret.trim();
+
     await oauthConfigMutation.mutateAsync({
-      clientId: clientId.trim(),
-      clientSecret: clientSecret.trim(),
+      clientId: nextClientId,
+      clientSecret: nextClientSecret,
     });
+
+    persistGithubOAuthConfig(nextClientId, nextClientSecret);
+  };
+
+  const onGithubLogin = async () => {
+    setGithubConfigHint(null);
+
+    const currentClientId = clientId.trim();
+    const currentClientSecret = clientSecret.trim();
+    const storedConfig = readStoredGithubOAuthConfig();
+    const resolvedClientId = currentClientId || storedConfig.clientId;
+    const resolvedClientSecret = currentClientSecret || storedConfig.clientSecret;
+
+    if (resolvedClientId && resolvedClientSecret) {
+      await oauthConfigMutation.mutateAsync({
+        clientId: resolvedClientId,
+        clientSecret: resolvedClientSecret,
+      });
+      persistGithubOAuthConfig(resolvedClientId, resolvedClientSecret);
+    } else if (currentClientId || currentClientSecret) {
+      setGithubConfigHint(t('auth.login.oauthConfig.error.invalidInput'));
+      return;
+    }
+
+    loginWithGithub();
   };
 
   const loginErrorMessage = getLoginErrorMessage(loginMutation.error, t);
@@ -159,13 +194,19 @@ export function Login() {
             <div className="grid gap-2">
               <Input
                 value={clientId}
-                onChange={(event) => setClientId(event.target.value)}
+                onChange={(event) => {
+                  setGithubConfigHint(null);
+                  setClientId(event.target.value);
+                }}
                 placeholder={t('auth.login.oauthConfig.clientIdPlaceholder')}
                 autoComplete="off"
               />
               <Input
                 value={clientSecret}
-                onChange={(event) => setClientSecret(event.target.value)}
+                onChange={(event) => {
+                  setGithubConfigHint(null);
+                  setClientSecret(event.target.value);
+                }}
                 placeholder={t('auth.login.oauthConfig.clientSecretPlaceholder')}
                 type="password"
                 autoComplete="off"
@@ -184,9 +225,9 @@ export function Login() {
               </Button>
             </div>
 
-            {(oauthConfigErrorMessage || oauthConfigSuccessMessage) && (
+            {(githubConfigHint || oauthConfigErrorMessage || oauthConfigSuccessMessage) && (
               <p className="text-xs text-muted-foreground">
-                {oauthConfigErrorMessage || oauthConfigSuccessMessage}
+                {githubConfigHint || oauthConfigErrorMessage || oauthConfigSuccessMessage}
               </p>
             )}
           </div>
@@ -258,9 +299,10 @@ export function Login() {
 
           <Button
             type="button"
-            onClick={loginWithGithub}
+            onClick={onGithubLogin}
             className="w-full gap-2"
             size="lg"
+            disabled={oauthConfigMutation.isPending}
           >
             <Github className="h-4 w-4" />
             {t('auth.login.github')}
@@ -273,6 +315,26 @@ export function Login() {
       </Card>
     </div>
   );
+}
+
+function readStoredGithubOAuthConfig() {
+  if (typeof window === 'undefined') {
+    return { clientId: '', clientSecret: '' };
+  }
+
+  return {
+    clientId: window.localStorage.getItem(GITHUB_OAUTH_CLIENT_ID_KEY) || '',
+    clientSecret: window.localStorage.getItem(GITHUB_OAUTH_CLIENT_SECRET_KEY) || '',
+  };
+}
+
+function persistGithubOAuthConfig(clientId: string, clientSecret: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(GITHUB_OAUTH_CLIENT_ID_KEY, clientId);
+  window.localStorage.setItem(GITHUB_OAUTH_CLIENT_SECRET_KEY, clientSecret);
 }
 
 function getOAuthConfigErrorMessage(

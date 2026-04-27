@@ -8,6 +8,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { GithubStrategy } from './strategies/github.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
+import { GithubAuthGuard } from './guards/github-auth.guard';
 import { UserModule } from '../user/user.module';
 import { SyncModule } from '../sync/sync.module';
 
@@ -32,6 +33,7 @@ import { SyncModule } from '../sync/sync.module';
     AuthService,
     JwtStrategy,
     GithubStrategy,
+    GithubAuthGuard,
     JwtAuthGuard,
     RolesGuard,
   ],
