@@ -43,9 +43,6 @@ interface LoginFormValues {
   password: string;
 }
 
-const GITHUB_OAUTH_CLIENT_ID_KEY = 'repo-pulse.github-oauth-client-id';
-const GITHUB_OAUTH_CLIENT_SECRET_KEY = 'repo-pulse.github-oauth-client-secret';
-
 export function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -54,8 +51,8 @@ export function Login() {
   const loginMutation = useLoginMutation();
   const oauthConfigMutation = useGithubOAuthConfigMutation();
   const oauthRuntimeConfigQuery = useGithubOAuthRuntimeConfigQuery();
-  const [clientId, setClientId] = useState(() => readStoredGithubOAuthConfig().clientId);
-  const [clientSecret, setClientSecret] = useState(() => readStoredGithubOAuthConfig().clientSecret);
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
   const [githubConfigHint, setGithubConfigHint] = useState<string | null>(null);
   const callbackUrl =
     oauthRuntimeConfigQuery.data?.callbackUrl ||
@@ -79,6 +76,7 @@ export function Login() {
   });
 
   const oauthError = searchParams.get('error') === 'oauth_failed';
+  const oauthErrorReason = searchParams.get('reason');
 
   const onSubmit = async (values: LoginFormValues) => {
     try {
@@ -90,41 +88,36 @@ export function Login() {
   };
 
   const onSaveGithubOAuthConfig = async () => {
-    if (!clientId.trim() || !clientSecret.trim()) {
+    const nextClientId = clientId.trim();
+    const nextClientSecret = clientSecret.trim();
+    if (!nextClientId || !nextClientSecret) {
+      setGithubConfigHint(t('auth.login.oauthConfig.error.invalidInput'));
       return;
     }
 
     setGithubConfigHint(null);
-
-    const nextClientId = clientId.trim();
-    const nextClientSecret = clientSecret.trim();
-
     await oauthConfigMutation.mutateAsync({
       clientId: nextClientId,
       clientSecret: nextClientSecret,
     });
-
-    persistGithubOAuthConfig(nextClientId, nextClientSecret);
   };
 
   const onGithubLogin = async () => {
+    const nextClientId = clientId.trim();
+    const nextClientSecret = clientSecret.trim();
+
     setGithubConfigHint(null);
 
-    const currentClientId = clientId.trim();
-    const currentClientSecret = clientSecret.trim();
-    const storedConfig = readStoredGithubOAuthConfig();
-    const resolvedClientId = currentClientId || storedConfig.clientId;
-    const resolvedClientSecret = currentClientSecret || storedConfig.clientSecret;
+    if (nextClientId || nextClientSecret) {
+      if (!nextClientId || !nextClientSecret) {
+        setGithubConfigHint(t('auth.login.oauthConfig.error.invalidInput'));
+        return;
+      }
 
-    if (resolvedClientId && resolvedClientSecret) {
       await oauthConfigMutation.mutateAsync({
-        clientId: resolvedClientId,
-        clientSecret: resolvedClientSecret,
+        clientId: nextClientId,
+        clientSecret: nextClientSecret,
       });
-      persistGithubOAuthConfig(resolvedClientId, resolvedClientSecret);
-    } else if (currentClientId || currentClientSecret) {
-      setGithubConfigHint(t('auth.login.oauthConfig.error.invalidInput'));
-      return;
     }
 
     loginWithGithub();
@@ -134,6 +127,9 @@ export function Login() {
   const oauthConfigErrorMessage = getOAuthConfigErrorMessage(oauthConfigMutation.error, t);
   const oauthConfigSuccessMessage = oauthConfigMutation.isSuccess
     ? t('auth.login.oauthConfig.success')
+    : null;
+  const oauthRuntimeConfigError = oauthRuntimeConfigQuery.isError
+    ? t('auth.login.oauthConfig.error.network')
     : null;
 
   return (
@@ -225,10 +221,17 @@ export function Login() {
               </Button>
             </div>
 
+            <p className="text-xs text-muted-foreground">
+              {t('auth.login.oauthConfig.callbackHint')}
+              <span className="ml-1 font-mono text-foreground">{callbackUrl}</span>
+            </p>
             {(githubConfigHint || oauthConfigErrorMessage || oauthConfigSuccessMessage) && (
               <p className="text-xs text-muted-foreground">
                 {githubConfigHint || oauthConfigErrorMessage || oauthConfigSuccessMessage}
               </p>
+            )}
+            {oauthRuntimeConfigError && (
+              <p className="text-xs text-muted-foreground">{oauthRuntimeConfigError}</p>
             )}
           </div>
 
@@ -274,7 +277,9 @@ export function Login() {
 
               {(oauthError || loginErrorMessage) && (
                 <p className="text-sm text-destructive">
-                  {oauthError ? t('auth.login.form.error.oauthFailed') : loginErrorMessage}
+                  {oauthError
+                    ? getOAuthFailureMessage(oauthErrorReason, t)
+                    : loginErrorMessage}
                 </p>
               )}
 
@@ -317,24 +322,44 @@ export function Login() {
   );
 }
 
-function readStoredGithubOAuthConfig() {
-  if (typeof window === 'undefined') {
-    return { clientId: '', clientSecret: '' };
+function getLoginErrorMessage(
+  error: ApiClientError | null,
+  t: (key: string) => string,
+): string | null {
+  if (!error) {
+    return null;
   }
 
-  return {
-    clientId: window.localStorage.getItem(GITHUB_OAUTH_CLIENT_ID_KEY) || '',
-    clientSecret: window.localStorage.getItem(GITHUB_OAUTH_CLIENT_SECRET_KEY) || '',
-  };
+  if (error.statusCode === 401) {
+    return t('auth.login.form.error.invalidCredentials');
+  }
+
+  if (typeof error.statusCode === 'number' && error.statusCode >= 500) {
+    return t('auth.login.form.error.server');
+  }
+
+  if (error.statusCode === undefined) {
+    return t('auth.login.form.error.network');
+  }
+
+  return error.message || t('auth.login.form.error.generic');
 }
 
-function persistGithubOAuthConfig(clientId: string, clientSecret: string) {
-  if (typeof window === 'undefined') {
-    return;
+function getOAuthFailureMessage(
+  reason: string | null,
+  t: (key: string) => string,
+): string {
+  switch (reason) {
+    case 'incorrect_client_credentials':
+    case 'invalid_client':
+      return 'GitHub Client ID 或 Client Secret 不正确，请检查是否填写的是 GitHub OAuth App 凭据。';
+    case 'bad_verification_code':
+      return 'GitHub 授权码已失效，请重新发起一次登录。';
+    case 'redirect_uri_mismatch':
+      return 'GitHub OAuth 回调地址不匹配，请确认 GitHub App 中的 callback URL 与页面提示一致。';
+    default:
+      return t('auth.login.form.error.oauthFailed');
   }
-
-  window.localStorage.setItem(GITHUB_OAUTH_CLIENT_ID_KEY, clientId);
-  window.localStorage.setItem(GITHUB_OAUTH_CLIENT_SECRET_KEY, clientSecret);
 }
 
 function getOAuthConfigErrorMessage(
@@ -358,27 +383,4 @@ function getOAuthConfigErrorMessage(
   }
 
   return error.message || t('auth.login.oauthConfig.error.generic');
-}
-
-function getLoginErrorMessage(
-  error: ApiClientError | null,
-  t: (key: string) => string,
-): string | null {
-  if (!error) {
-    return null;
-  }
-
-  if (error.statusCode === 401) {
-    return t('auth.login.form.error.invalidCredentials');
-  }
-
-  if (typeof error.statusCode === 'number' && error.statusCode >= 500) {
-    return t('auth.login.form.error.server');
-  }
-
-  if (error.statusCode === undefined) {
-    return t('auth.login.form.error.network');
-  }
-
-  return error.message || t('auth.login.form.error.generic');
 }

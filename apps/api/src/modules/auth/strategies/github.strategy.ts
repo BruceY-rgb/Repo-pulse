@@ -37,7 +37,6 @@ export class GithubStrategy extends PassportStrategy(Strategy, 'github') {
     this.clientID = clientID;
     this.clientSecret = clientSecret;
 
-    // passport-github2 stores credentials in oauth2 internals.
     (this as unknown as { _oauth2: { _clientId: string; _clientSecret: string } })._oauth2._clientId = clientID;
     (this as unknown as { _oauth2: { _clientId: string; _clientSecret: string } })._oauth2._clientSecret = clientSecret;
 
