@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   GitPullRequest,
@@ -44,6 +44,13 @@ import {
   useUnreadNotificationsCountQuery,
 } from '@/hooks/queries/use-dashboard-queries';
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 const activityData = [
   { name: 'Mon', commits: 45, prs: 12, issues: 8 },
@@ -103,8 +110,20 @@ export function Dashboard() {
   const { t, language } = useLanguage();
 
   const repositoriesQuery = useDashboardRepositoriesQuery();
-  const selectedRepository = repositoriesQuery.data?.[0];
+  const repos = repositoriesQuery.data ?? [];
+  const [selectedRepositoryId, setSelectedRepositoryId] = useState<string | undefined>(undefined);
+  const selectedRepository = useMemo(
+    () => repos.find((r) => r.id === selectedRepositoryId) ?? repos[0],
+    [repos, selectedRepositoryId],
+  );
   const repositoryId = selectedRepository?.id;
+
+  // Sync initial selection when data loads
+  useEffect(() => {
+    if (!selectedRepositoryId && repos.length > 0) {
+      setSelectedRepositoryId(repos[0].id);
+    }
+  }, [repos, selectedRepositoryId]);
 
   const statsQuery = useDashboardStatsQuery(repositoryId);
   const recentEventsQuery = useDashboardRecentEventsQuery(repositoryId);
@@ -198,10 +217,24 @@ export function Dashboard() {
           <p className="mt-1 text-sm text-[var(--github-text-secondary)]">
             {t('dashboard.hero.description')}
           </p>
-          {hasRepository ? (
-            <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
-              {t('dashboard.scope.label')}: {selectedRepository?.fullName}
-            </p>
+          {hasRepository && repos.length > 0 ? (
+            <div className="mt-1 flex items-center gap-2">
+              <span className="text-xs text-[var(--github-text-secondary)]">
+                {t('dashboard.scope.label')}:
+              </span>
+              <Select value={selectedRepositoryId} onValueChange={setSelectedRepositoryId}>
+                <SelectTrigger className="h-7 w-auto min-w-[160px] border-[var(--github-border)] bg-transparent text-xs text-[var(--github-text-secondary)]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {repos.map((repo) => (
+                    <SelectItem key={repo.id} value={repo.id} className="text-xs">
+                      {repo.fullName ?? repo.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           ) : null}
         </div>
         <div className="flex items-center gap-3">
