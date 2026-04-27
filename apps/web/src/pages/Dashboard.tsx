@@ -14,11 +14,26 @@ import {
   ArrowDownRight,
   MoreHorizontal,
   RefreshCcw,
+  ChevronsUpDown,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { Progress } from '@/components/ui/progress';
 import {
   AreaChart,
@@ -37,6 +52,10 @@ import {
 import gsap from 'gsap';
 import { useLanguage } from '@/contexts/LanguageContext';
 import {
+  useCurrentUserQuery,
+  useUpdateUserPreferencesMutation,
+} from '@/hooks/queries/use-auth-queries';
+import {
   useDashboardRecentEventsQuery,
   useDashboardRepositoriesQuery,
   useDashboardStatsQuery,
@@ -44,14 +63,8 @@ import {
   useUnreadNotificationsCountQuery,
 } from '@/hooks/queries/use-dashboard-queries';
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { useDashboardActivity } from '@/hooks/use-dashboard';
+import type { DashboardPreferences, Repository } from '@/types/api';
 
 function toRelativeTime(dateString: string, language: 'en' | 'zh') {
   const now = Date.now();
@@ -83,33 +96,119 @@ function getRiskByType(type: string): 'low' | 'medium' | 'high' {
   return 'low';
 }
 
+function getSavedMonitoredRepositoryIds(preferences: Record<string, unknown> | undefined) {
+  const dashboardPrefs = preferences?.dashboard;
+
+  if (!dashboardPrefs || typeof dashboardPrefs !== 'object' || Array.isArray(dashboardPrefs)) {
+    return [];
+  }
+
+  const monitoredRepositoryIds = (dashboardPrefs as DashboardPreferences).monitoredRepositoryIds;
+
+  if (!Array.isArray(monitoredRepositoryIds)) {
+    return [];
+  }
+
+  return monitoredRepositoryIds.filter((value): value is string => typeof value === 'string');
+}
+
+function areStringArraysEqual(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function findRepositoriesBySelection(repositories: Repository[], selectedRepositoryIds: string[]) {
+  const repositoryMap = new Map(repositories.map((repository) => [repository.id, repository]));
+
+  return selectedRepositoryIds
+    .map((repositoryId) => repositoryMap.get(repositoryId))
+    .filter((repository): repository is Repository => Boolean(repository));
+}
+
 export function Dashboard() {
   const cardsRef = useRef<HTMLDivElement>(null);
+  const hasInitializedSelectionRef = useRef(false);
   const { t, language } = useLanguage();
 
   const repositoriesQuery = useDashboardRepositoriesQuery();
+  const { data: currentUser, isLoading: isCurrentUserLoading } = useCurrentUserQuery();
+  const updatePreferencesMutation = useUpdateUserPreferencesMutation();
   const repos = repositoriesQuery.data ?? [];
-  const [selectedRepositoryId, setSelectedRepositoryId] = useState<string | undefined>(undefined);
-  const selectedRepository = useMemo(
-    () => repos.find((r) => r.id === selectedRepositoryId) ?? repos[0],
-    [repos, selectedRepositoryId],
+  const [isScopePopoverOpen, setIsScopePopoverOpen] = useState(false);
+  const [selectedRepositoryIds, setSelectedRepositoryIds] = useState<string[]>([]);
+  const availableRepositoryIds = useMemo(() => repos.map((repository) => repository.id), [repos]);
+  const availableRepositoryIdSet = useMemo(
+    () => new Set(availableRepositoryIds),
+    [availableRepositoryIds],
   );
-  const repositoryId = selectedRepository?.id;
+  const savedRepositoryIds = useMemo(
+    () => getSavedMonitoredRepositoryIds(currentUser?.preferences),
+    [currentUser?.preferences],
+  );
+  const selectedRepositories = useMemo(
+    () => findRepositoriesBySelection(repos, selectedRepositoryIds),
+    [repos, selectedRepositoryIds],
+  );
+  const hasAvailableRepositories = repos.length > 0;
+  const hasSelection = selectedRepositoryIds.length > 0;
 
-  // Sync initial selection when data loads
+  const persistMonitoredRepositoryIds = (repositoryIds: string[]) => {
+    updatePreferencesMutation.mutate({
+      preferences: {
+        dashboard: {
+          monitoredRepositoryIds: repositoryIds,
+        },
+      },
+    });
+  };
+
   useEffect(() => {
-    if (!selectedRepositoryId && repos.length > 0) {
-      setSelectedRepositoryId(repos[0].id);
+    if (hasInitializedSelectionRef.current) {
+      return;
     }
-  }, [repos, selectedRepositoryId]);
 
-  const statsQuery = useDashboardStatsQuery(repositoryId);
-  const recentEventsQuery = useDashboardRecentEventsQuery(repositoryId);
-  const pendingApprovalsQuery = usePendingApprovalsCountQuery();
-  const unreadNotificationsQuery = useUnreadNotificationsCountQuery();
+    if (repositoriesQuery.isLoading || isCurrentUserLoading) {
+      return;
+    }
+
+    const sanitizedSavedRepositoryIds = savedRepositoryIds.filter((repositoryId) =>
+      availableRepositoryIdSet.has(repositoryId),
+    );
+
+    setSelectedRepositoryIds(sanitizedSavedRepositoryIds);
+    hasInitializedSelectionRef.current = true;
+
+    if (!areStringArraysEqual(sanitizedSavedRepositoryIds, savedRepositoryIds)) {
+      persistMonitoredRepositoryIds(sanitizedSavedRepositoryIds);
+    }
+  }, [
+    availableRepositoryIdSet,
+    isCurrentUserLoading,
+    repositoriesQuery.isLoading,
+    savedRepositoryIds,
+  ]);
+
+  useEffect(() => {
+    if (!hasInitializedSelectionRef.current) {
+      return;
+    }
+
+    const sanitizedCurrentSelection = selectedRepositoryIds.filter((repositoryId) =>
+      availableRepositoryIdSet.has(repositoryId),
+    );
+
+    if (!areStringArraysEqual(sanitizedCurrentSelection, selectedRepositoryIds)) {
+      setSelectedRepositoryIds(sanitizedCurrentSelection);
+      persistMonitoredRepositoryIds(sanitizedCurrentSelection);
+    }
+  }, [availableRepositoryIdSet, selectedRepositoryIds]);
+
+  const statsQuery = useDashboardStatsQuery(selectedRepositoryIds);
+  const recentEventsQuery = useDashboardRecentEventsQuery(selectedRepositoryIds);
+  const pendingApprovalsQuery = usePendingApprovalsCountQuery(selectedRepositoryIds);
+  const unreadNotificationsQuery = useUnreadNotificationsCountQuery(selectedRepositoryIds);
 
   // 周活动数据 - 来自后端 /dashboard/activity
-  const activityQuery = useDashboardActivity(7);
+  const activityQuery = useDashboardActivity(7, selectedRepositoryIds);
   const activityData = useMemo(() => {
     const data = activityQuery.data ?? [];
     return data.map(item => ({ name: item.date, commits: item.commits, prs: item.prs, issues: item.issues }));
@@ -139,13 +238,45 @@ export function Dashboard() {
     { label: 'Time to Recovery', value: '--', target: '--', progress: 0 },
   ];
 
-  useRepositoryRealtimeSubscription(repositoryId);
+  useRepositoryRealtimeSubscription(selectedRepositoryIds);
 
-  const hasRepository = Boolean(repositoryId);
-  const totalRepositories = repositoriesQuery.data?.length ?? 0;
+  const totalRepositories = selectedRepositoryIds.length;
   const totalEvents = statsQuery.data?.total ?? 0;
   const pendingApprovals = pendingApprovalsQuery.data?.count ?? 0;
   const unreadNotifications = unreadNotificationsQuery.data?.count ?? 0;
+  const scopeSummary = hasSelection
+    ? selectedRepositories.length === 0
+      ? t('dashboard.scope.placeholder')
+      : selectedRepositories.length === 1
+      ? selectedRepositories[0].fullName
+      : `${selectedRepositories[0]?.fullName ?? t('dashboard.repo.fallback')} +${selectedRepositories.length - 1}`
+    : t('dashboard.scope.placeholder');
+
+  const applySelection = (nextRepositoryIds: string[]) => {
+    const nextRepositoryIdSet = new Set(nextRepositoryIds);
+    const normalizedSelection = availableRepositoryIds.filter((repositoryId) =>
+      nextRepositoryIdSet.has(repositoryId),
+    );
+
+    setSelectedRepositoryIds(normalizedSelection);
+    persistMonitoredRepositoryIds(normalizedSelection);
+  };
+
+  const toggleRepository = (repositoryId: string) => {
+    const nextRepositoryIds = selectedRepositoryIds.includes(repositoryId)
+      ? selectedRepositoryIds.filter((id) => id !== repositoryId)
+      : [...selectedRepositoryIds, repositoryId];
+
+    applySelection(nextRepositoryIds);
+  };
+
+  const selectAllRepositories = () => {
+    applySelection(availableRepositoryIds);
+  };
+
+  const clearSelectedRepositories = () => {
+    applySelection([]);
+  };
 
   const statsCards = useMemo(
     () => [
@@ -195,12 +326,12 @@ export function Dashboard() {
       id: index + 1,
       type: event.type,
       title: event.title,
-      repo: selectedRepository?.fullName ?? t('dashboard.repo.fallback'),
+      repo: event.repository?.fullName ?? t('dashboard.repo.fallback'),
       author: event.author,
       time: toRelativeTime(event.createdAt, language),
       risk: getRiskByType(event.type),
     }));
-  }, [language, recentEventsQuery.data?.items, selectedRepository?.fullName, t]);
+  }, [language, recentEventsQuery.data?.items, t]);
 
   useEffect(() => {
     if (cardsRef.current) {
@@ -226,23 +357,79 @@ export function Dashboard() {
           <p className="mt-1 text-sm text-[var(--github-text-secondary)]">
             {t('dashboard.hero.description')}
           </p>
-          {hasRepository && repos.length > 0 ? (
+          {hasAvailableRepositories ? (
             <div className="mt-1 flex items-center gap-2">
               <span className="text-xs text-[var(--github-text-secondary)]">
                 {t('dashboard.scope.label')}:
               </span>
-              <Select value={selectedRepositoryId} onValueChange={setSelectedRepositoryId}>
-                <SelectTrigger className="h-7 w-auto min-w-[160px] border-[var(--github-border)] bg-transparent text-xs text-[var(--github-text-secondary)]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {repos.map((repo) => (
-                    <SelectItem key={repo.id} value={repo.id} className="text-xs">
-                      {repo.fullName ?? repo.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={isScopePopoverOpen} onOpenChange={setIsScopePopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="h-7 min-w-[220px] justify-between border-[var(--github-border)] bg-transparent px-2 text-xs text-[var(--github-text-secondary)]"
+                  >
+                    <span className="truncate">{scopeSummary}</span>
+                    <ChevronsUpDown className="h-3.5 w-3.5 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  className="w-[340px] overflow-hidden rounded-2xl border-[var(--github-border)] bg-[#151922] p-0 shadow-2xl"
+                >
+                  <Command className="rounded-none bg-transparent">
+                    <div className="border-b border-[var(--github-border)]/80 p-3 pb-2">
+                      <CommandInput
+                        placeholder={t('dashboard.scope.searchPlaceholder')}
+                        wrapperClassName="h-12 rounded-2xl border border-[var(--github-border)] bg-white/[0.03] px-4 text-foreground shadow-inner shadow-black/10 transition-[background-color,box-shadow,border-color] focus-within:border-[var(--github-border)] focus-within:bg-white/[0.05] focus-within:ring-1 focus-within:ring-[var(--github-accent)]/35 focus-within:shadow-[0_0_0_4px_rgba(255,77,0,0.08)]"
+                        className="h-10 border-0 py-0 text-base placeholder:text-[var(--github-text-secondary)] focus-visible:outline-none focus-visible:ring-0"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between border-b border-[var(--github-border)]/80 px-3 py-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 rounded-lg px-2 text-xs text-[var(--github-text-secondary)] hover:bg-white/5 hover:text-white"
+                        onClick={selectAllRepositories}
+                        type="button"
+                      >
+                        {t('dashboard.scope.selectAll')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 rounded-lg px-2 text-xs text-[var(--github-text-secondary)] hover:bg-white/5 hover:text-white"
+                        onClick={clearSelectedRepositories}
+                        type="button"
+                      >
+                        {t('dashboard.scope.clear')}
+                      </Button>
+                    </div>
+                    <CommandList className="max-h-[320px] px-2 py-2">
+                      <CommandEmpty>{t('dashboard.scope.noSearchResult')}</CommandEmpty>
+                      <CommandGroup className="space-y-1 p-0">
+                        {repos.map((repo) => {
+                          const checked = selectedRepositoryIds.includes(repo.id);
+
+                          return (
+                            <CommandItem
+                              key={repo.id}
+                              value={repo.fullName ?? repo.name}
+                              keywords={[repo.name, repo.fullName]}
+                              onSelect={() => toggleRepository(repo.id)}
+                              className="gap-3 rounded-xl px-4 py-3 data-[selected=true]:bg-[var(--github-accent)] data-[selected=true]:text-white"
+                            >
+                              <Checkbox checked={checked} className="pointer-events-none" />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm">{repo.fullName ?? repo.name}</p>
+                              </div>
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
           ) : null}
         </div>
@@ -257,7 +444,26 @@ export function Dashboard() {
         </div>
       </div>
 
-      {!hasRepository && !repositoriesQuery.isLoading ? (
+      {repositoriesQuery.isError ? (
+        <Card className="card-github">
+          <CardContent className="flex items-center justify-between gap-4 p-4">
+            <div className="text-sm text-red-400">{t('dashboard.error.partialLoadFailed')}</div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => {
+                repositoriesQuery.refetch();
+              }}
+            >
+              <RefreshCcw className="h-4 w-4" />
+              {t('dashboard.error.retry')}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!hasAvailableRepositories && !repositoriesQuery.isLoading && !repositoriesQuery.isError ? (
         <Card className="card-github">
           <CardContent className="flex items-center justify-between p-5">
             <p className="text-sm text-[var(--github-text-secondary)]">
@@ -270,7 +476,22 @@ export function Dashboard() {
         </Card>
       ) : null}
 
-      <div ref={cardsRef} className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {hasAvailableRepositories && !hasSelection && !repositoriesQuery.isLoading ? (
+        <Card className="card-github">
+          <CardContent className="flex items-center justify-between gap-4 p-5">
+            <p className="text-sm text-[var(--github-text-secondary)]">
+              {t('dashboard.scope.emptySelection')}
+            </p>
+            <Button className="btn-x-primary" type="button" onClick={selectAllRepositories}>
+              {t('dashboard.scope.selectAll')}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {hasSelection ? (
+        <>
+          <div ref={cardsRef} className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         {statsCards.map((stat) => {
           const Icon = stat.icon;
           return (
@@ -293,9 +514,9 @@ export function Dashboard() {
             </Card>
           );
         })}
-      </div>
+          </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="card-github lg:col-span-2">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
@@ -370,9 +591,9 @@ export function Dashboard() {
             </div>
           </CardContent>
         </Card>
-      </div>
+          </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card className="card-github">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-base font-semibold text-white">
@@ -451,9 +672,9 @@ export function Dashboard() {
             </div>
           </CardContent>
         </Card>
-      </div>
+          </div>
 
-      <Card className="card-github">
+          <Card className="card-github">
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base font-semibold text-white">
             <Users className="h-4 w-4 text-[var(--github-accent)]" />
@@ -474,29 +695,36 @@ export function Dashboard() {
             </ResponsiveContainer>
           </div>
         </CardContent>
-      </Card>
+          </Card>
 
-      {repositoriesQuery.isError || (hasRepository && (statsQuery.isError || recentEventsQuery.isError)) ? (
-        <Card className="card-github">
-          <CardContent className="flex items-center justify-between gap-4 p-4">
-            <div className="text-sm text-red-400">{t('dashboard.error.partialLoadFailed')}</div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              onClick={() => {
-                repositoriesQuery.refetch();
-                statsQuery.refetch();
-                recentEventsQuery.refetch();
-                pendingApprovalsQuery.refetch();
-                unreadNotificationsQuery.refetch();
-              }}
-            >
-              <RefreshCcw className="h-4 w-4" />
-              {t('dashboard.error.retry')}
-            </Button>
-          </CardContent>
-        </Card>
+          {(statsQuery.isError ||
+            recentEventsQuery.isError ||
+            activityQuery.isError ||
+            pendingApprovalsQuery.isError ||
+            unreadNotificationsQuery.isError) ? (
+            <Card className="card-github">
+              <CardContent className="flex items-center justify-between gap-4 p-4">
+                <div className="text-sm text-red-400">{t('dashboard.error.partialLoadFailed')}</div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => {
+                    repositoriesQuery.refetch();
+                    statsQuery.refetch();
+                    recentEventsQuery.refetch();
+                    activityQuery.refetch();
+                    pendingApprovalsQuery.refetch();
+                    unreadNotificationsQuery.refetch();
+                  }}
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                  {t('dashboard.error.retry')}
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
+        </>
       ) : null}
     </div>
   );

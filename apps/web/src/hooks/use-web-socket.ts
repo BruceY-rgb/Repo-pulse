@@ -7,13 +7,6 @@ import { notificationQueryKeys } from '@/hooks/queries/use-notification-queries'
 import { repositoryQueryKeys } from '@/hooks/queries/use-repository-queries';
 import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
 
-interface EventPayload {
-  type: 'event:new';
-  repositoryId: string;
-  data: unknown;
-  timestamp: string;
-}
-
 export function useRepositoryRealtimeSubscription(repositoryIds?: string | string[]) {
   const queryClient = useQueryClient();
   const { data: currentUser, isLoading: isAuthLoading } = useCurrentUserQuery();
@@ -83,21 +76,12 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
         }
       });
 
-      socket.on('event:new', (payload: EventPayload) => {
+      socket.on('event:new', () => {
         queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
         queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
         queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
         queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
         queryClient.invalidateQueries({ queryKey: notificationQueryKeys.preferences() });
-
-        if (payload.repositoryId) {
-          queryClient.invalidateQueries({
-            queryKey: dashboardQueryKeys.stats(payload.repositoryId),
-          });
-          queryClient.invalidateQueries({
-            queryKey: dashboardQueryKeys.recentEvents(payload.repositoryId),
-          });
-        }
       });
 
       socketRef.current = socket;

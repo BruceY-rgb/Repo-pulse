@@ -21,6 +21,10 @@ export interface User {
   updatedAt: string;
 }
 
+export interface DashboardPreferences {
+  monitoredRepositoryIds?: string[];
+}
+
 export interface PaginatedResponse<T> {
   items: T[];
   total: number;
@@ -76,6 +80,12 @@ export interface Event {
   metadata: Record<string, unknown>;
   rawPayload: Record<string, unknown> | null;
   createdAt: string;
+  repository?: {
+    id: string;
+    name: string;
+    fullName: string;
+    platform: Platform;
+  };
 }
 
 /**

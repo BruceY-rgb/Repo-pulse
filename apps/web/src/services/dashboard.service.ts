@@ -1,5 +1,17 @@
 import { apiClient } from './api-client';
 
+function buildDashboardParams(
+  repositoryIds?: string[],
+  params?: Record<string, number | string>,
+) {
+  return {
+    ...params,
+    ...(repositoryIds && repositoryIds.length > 0
+      ? { repositoryIds: [...repositoryIds].sort().join(',') }
+      : {}),
+  };
+}
+
 export interface DashboardOverview {
   totalRepositories: number;
   openPRs: number;
@@ -25,21 +37,23 @@ export interface DashboardRecentActivity {
 }
 
 class DashboardService {
-  async getOverview(): Promise<DashboardOverview> {
-    const response = await apiClient.get<{ data: DashboardOverview }>('/dashboard/overview');
-    return response.data.data;
-  }
-
-  async getActivity(days: number = 7): Promise<DashboardActivity[]> {
-    const response = await apiClient.get<{ data: DashboardActivity[] }>('/dashboard/activity', {
-      params: { days },
+  async getOverview(repositoryIds?: string[]): Promise<DashboardOverview> {
+    const response = await apiClient.get<{ data: DashboardOverview }>('/dashboard/overview', {
+      params: buildDashboardParams(repositoryIds),
     });
     return response.data.data;
   }
 
-  async getRecentActivity(limit: number = 10): Promise<DashboardRecentActivity[]> {
+  async getActivity(days: number = 7, repositoryIds?: string[]): Promise<DashboardActivity[]> {
+    const response = await apiClient.get<{ data: DashboardActivity[] }>('/dashboard/activity', {
+      params: buildDashboardParams(repositoryIds, { days }),
+    });
+    return response.data.data;
+  }
+
+  async getRecentActivity(limit: number = 10, repositoryIds?: string[]): Promise<DashboardRecentActivity[]> {
     const response = await apiClient.get<{ data: DashboardRecentActivity[] }>('/dashboard/recent-activity', {
-      params: { limit },
+      params: buildDashboardParams(repositoryIds, { limit }),
     });
     return response.data.data;
   }

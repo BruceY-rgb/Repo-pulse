@@ -79,10 +79,45 @@ export class UserService {
   }
 
   async updatePreferences(userId: string, preferences: Record<string, unknown>): Promise<User> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { preferences: true },
+    });
+
+    const currentPreferences = (user?.preferences as Record<string, unknown>) || {};
+    const mergedPreferences = this.deepMerge(currentPreferences, preferences);
+
     return prisma.user.update({
       where: { id: userId },
-      data: { preferences: preferences as Prisma.InputJsonValue },
+      data: { preferences: mergedPreferences as Prisma.InputJsonValue },
     });
+  }
+
+  private deepMerge(
+    current: Record<string, unknown>,
+    incoming: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const merged: Record<string, unknown> = { ...current };
+
+    for (const [key, value] of Object.entries(incoming)) {
+      const currentValue = merged[key];
+
+      if (this.isPlainObject(currentValue) && this.isPlainObject(value)) {
+        merged[key] = this.deepMerge(
+          currentValue as Record<string, unknown>,
+          value as Record<string, unknown>,
+        );
+        continue;
+      }
+
+      merged[key] = value;
+    }
+
+    return merged;
+  }
+
+  private isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private excludePassword(user: any) {

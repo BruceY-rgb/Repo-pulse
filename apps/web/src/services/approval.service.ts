@@ -49,8 +49,13 @@ export const approvalService = {
   /**
    * 获取待审批数量
    */
-  async getPendingCount(): Promise<{ count: number }> {
-    const { data } = await apiClient.get<ApiResponse<{ count: number }>>('/approvals/pending-count');
+  async getPendingCount(repositoryIds?: string[]): Promise<{ count: number }> {
+    const { data } = await apiClient.get<ApiResponse<{ count: number }>>('/approvals/pending-count', {
+      params:
+        repositoryIds && repositoryIds.length > 0
+          ? { repositoryIds: [...repositoryIds].sort().join(',') }
+          : undefined,
+    });
     return data.data;
   },
 

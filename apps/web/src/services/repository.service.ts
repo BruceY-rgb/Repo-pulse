@@ -41,7 +41,7 @@ export const repositoryService = {
   },
 
   async getEvents(
-    repositoryId: string,
+    repositoryIds: string[],
     options?: {
       page?: number;
       pageSize?: number;
@@ -50,7 +50,7 @@ export const repositoryService = {
   ): Promise<PaginatedResponse<Event>> {
     const { data } = await apiClient.get<ApiResponse<PaginatedResponse<Event>>>('/events', {
       params: {
-        repositoryId,
+        repositoryIds: [...repositoryIds].sort().join(','),
         ...options,
       },
     });
