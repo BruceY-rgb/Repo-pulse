@@ -47,6 +47,7 @@ enum AnalysisStatus {
   PROCESSING
   COMPLETED
   FAILED
+  SKIPPED
 }
 
 enum FilterAction {
@@ -199,6 +200,19 @@ model AIAnalysis {
   status        AnalysisStatus
   errorMessage  String?
   createdAt     DateTime       @default(now())
+
+  // === 新增 AI Analysis 丰富字段（全部可选，保证迁移安全） ===
+  summaryShort   String?       @db.Text
+  summaryLong    String?       @db.Text
+  category       String?
+  riskScore      Int?
+  riskReasons    String[]      @default([])
+  tags           String[]      @default([])
+  affectedAreas  String[]      @default([])
+  impactSummary  String?       @db.Text
+  suggestedAction String?
+  confidence     Float?
+  promptVersion  String?
 
   event         Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
