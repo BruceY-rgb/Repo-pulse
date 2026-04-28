@@ -8,6 +8,7 @@ import { NotificationService } from '../notification/notification.service';
 
 interface AIAnalysisJob {
   eventId: string;
+  force?: boolean;
 }
 
 @Processor('ai-analysis')
@@ -23,12 +24,12 @@ export class AIProcessor extends WorkerHost {
   }
 
   async process(job: Job<AIAnalysisJob>): Promise<void> {
-    const { eventId } = job.data;
+    const { eventId, force } = job.data;
 
-    this.logger.log(`Processing AI analysis for event: ${eventId}`);
+    this.logger.log(`Processing AI analysis for event: ${eventId}, force=${force ?? false}`);
 
     try {
-      const analysis = await this.aiService.analyzeEvent(eventId);
+      const analysis = await this.aiService.analyzeEvent(eventId, force ?? false);
       this.logger.log(`AI analysis completed for event: ${eventId}`);
 
       const approval = await this.approvalService.createFromAIAnalysis(eventId);
