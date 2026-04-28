@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient, Platform, Repository, EventType } from '@repo-pulse/database';
 import { randomBytes } from 'crypto';
@@ -200,11 +200,60 @@ export class RepositoryService {
     });
   }
 
-  async delete(id: string) {
-    await this.prisma.repository.update({
+  async delete(userId: string, id: string) {
+    const repository = await this.prisma.repository.findUnique({
       where: { id },
-      data: { isActive: false },
+      include: {
+        users: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                githubAccessToken: true,
+              },
+            },
+          },
+        },
+      },
     });
+
+    if (!repository) {
+      throw new NotFoundException('Repository not found');
+    }
+
+    const membership = repository.users.find((entry) => entry.userId === userId);
+    if (!membership) {
+      throw new ForbiddenException('You do not have access to this repository');
+    }
+
+    const [owner, repo] = this.parseRepositoryPath(repository.fullName);
+    const tokenOwner = repository.users.find((entry) => entry.user.githubAccessToken);
+
+    if (repository.webhookId) {
+      try {
+        if (repository.platform === Platform.GITHUB) {
+          await this.githubService.deleteWebhook(
+            owner,
+            repo,
+            repository.webhookId,
+            tokenOwner?.user.githubAccessToken || undefined,
+          );
+        } else {
+          await this.gitlabService.deleteWebhook(owner, repo, Number(repository.webhookId));
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown_error';
+        this.logger.warn(
+          `Failed to clean up webhook for repository ${repository.fullName}: ${message}`,
+        );
+      }
+    }
+
+    await this.prisma.repository.delete({
+      where: { id },
+    });
+
+    this.logger.log(`Repository ${repository.fullName} deleted by user ${userId}`);
     return { success: true };
   }
 

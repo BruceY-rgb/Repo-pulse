@@ -201,4 +201,41 @@ describe('RepositoryModule (e2e)', () => {
       expect(list).toHaveLength(0);
     });
   });
+  describe('DELETE /repositories/:id - remove contract', () => {
+    it('should return 200 and delete the repository with its membership', async () => {
+      const deleteRepo = await prisma.repository.create({
+        data: {
+          name: 'contract-delete-repo',
+          fullName: 'contract-org/contract-delete-repo',
+          platform: Platform.GITHUB,
+          externalId: '777000334',
+          url: 'https://github.com/contract-org/contract-delete-repo',
+        },
+      });
+
+      await prisma.userRepository.create({
+        data: { userId: testUserId, repositoryId: deleteRepo.id, role: 'ADMIN' },
+      });
+
+      await request(app.getHttpServer())
+        .delete(`/repositories/${deleteRepo.id}`)
+        .set('Cookie', authCookie)
+        .expect(200);
+
+      const repository = await prisma.repository.findUnique({
+        where: { id: deleteRepo.id },
+      });
+      const relation = await prisma.userRepository.findUnique({
+        where: {
+          userId_repositoryId: {
+            userId: testUserId,
+            repositoryId: deleteRepo.id,
+          },
+        },
+      });
+
+      expect(repository).toBeNull();
+      expect(relation).toBeNull();
+    });
+  });
 });

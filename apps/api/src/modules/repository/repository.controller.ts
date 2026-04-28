@@ -99,8 +99,9 @@ export class RepositoryController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete repository' })
-  async delete(@Param('id') id: string) {
-    await this.repositoryService.delete(id);
+  async delete(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req.user as { sub: string }).sub;
+    await this.repositoryService.delete(userId, id);
     return { success: true };
   }
 
