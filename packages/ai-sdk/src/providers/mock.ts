@@ -1,10 +1,8 @@
 /**
  * MockProvider
  *
- * 返回预定义的 AnalysisOutput，用于 CI 和单元测试。
+ * 返回预定义/可配置的 AnalysisOutput，用于 CI 和单元测试。
  * 不产生任何网络请求。
- *
- * Note: Step 2 会扩展 AnalysisOutput 接口添加新字段，届时此 MockProvider 会同步更新。
  */
 import type {
   AIProvider,
@@ -23,11 +21,23 @@ export class MockProvider implements AIProvider {
 
   async analyze(_input: AnalysisInput): Promise<AnalysisOutput> {
     return {
-      summary: 'This is a mock analysis summary for testing.',
+      // 新字段
+      summaryShort: 'Mock short summary.',
+      summaryLong: 'This is a mock analysis long summary for testing purposes.',
+      category: 'FEATURE',
       riskLevel: 'LOW',
+      riskScore: 25,
+      riskReasons: ['This is a mock risk reason.'],
+      tags: ['frontend'],
+      affectedAreas: ['UI'],
+      impactSummary: 'Mock impact summary.',
+      suggestedAction: 'SAFE_TO_IGNORE',
+      confidence: 0.95,
+      // 旧字段兼容
+      summary: 'Mock short summary.',
       riskReason: 'This is a mock risk reason.',
-      categories: ['feature'],
-      keyChanges: ['Mock change 1'],
+      categories: ['FEATURE', 'frontend'],
+      keyChanges: ['UI'],
       suggestions: [
         { type: 'info', title: 'Mock suggestion', description: 'Mock description' },
       ],

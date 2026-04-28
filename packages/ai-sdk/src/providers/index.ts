@@ -6,6 +6,7 @@
 
 import type { AIProvider, AIProviderConfig, ProviderType } from '../interfaces/ai-provider';
 import { PROVIDER_PRESETS, type ProviderPreset } from './presets';
+import { AnthropicProvider } from './anthropic';
 import { OpenAICompatibleProvider } from './openai-compatible';
 import { GeminiProvider } from './gemini';
 
@@ -157,6 +158,11 @@ export function createProvider(
   options?: Partial<AIProviderConfig>
 ): GeminiProvider;
 export function createProvider(
+  provider: 'anthropic',
+  apiKey: string,
+  options?: Partial<AIProviderConfig>
+): AnthropicProvider;
+export function createProvider(
   provider: ProviderType,
   apiKey: string,
   options?: Partial<AIProviderConfig>
@@ -167,6 +173,15 @@ export function createProvider(
   options?: Partial<AIProviderConfig>
 ): AIProvider {
   const preset = PROVIDER_PRESETS[provider];
+
+  if (provider === 'anthropic') {
+    return new AnthropicProvider({
+      apiKey,
+      baseUrl: options?.baseUrl ?? preset.baseUrl,
+      model: options?.model ?? preset.defaultModel,
+      ...options,
+    });
+  }
 
   if (provider === 'google') {
     return new GeminiProvider({
