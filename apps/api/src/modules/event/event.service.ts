@@ -173,6 +173,27 @@ export class EventService {
   }
 
   private async enqueueAnalysis(eventId: string): Promise<void> {
+    // 系统级 AI 分析开关
+    const enabled = process.env.AI_ANALYSIS_ENABLED !== 'false';
+    if (!enabled) {
+      this.logger.log(`ai_skipped eventId=${eventId} reason=system_disabled`);
+      return;
+    }
+
+    // MVP 事件类型白名单
+    const MVP_TYPES: EventType[] = [EventType.PUSH, EventType.PR_OPENED, EventType.ISSUE_OPENED];
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { type: true },
+    });
+
+    if (!event || !MVP_TYPES.includes(event.type)) {
+      this.logger.log(
+        `ai_skipped eventId=${eventId} reason=unsupported_event_type type=${event?.type ?? 'unknown'}`,
+      );
+      return;
+    }
+
     try {
       await this.aiService.triggerAnalysis(eventId);
       this.logger.log(`ai_enqueued eventId=${eventId}`);
