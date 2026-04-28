@@ -91,6 +91,40 @@ export interface Event {
 /**
  * 搜索结果仓库（用于添加仓库时的搜索选择）
  */
+// ===== AI Analysis =====
+
+export interface Suggestion {
+  type: 'critical' | 'warning' | 'info';
+  title: string;
+  description: string;
+}
+
+export interface EventAnalysis {
+  id: string;
+  eventId: string;
+  model: string;
+  summary: string;
+  summaryShort: string;
+  summaryLong: string;
+  category: string;
+  riskLevel: string;
+  riskScore: number;
+  riskReasons: string[];
+  tags: string[];
+  affectedAreas: string[];
+  impactSummary: string;
+  suggestedAction: string;
+  confidence: number;
+  keyChanges: string[];
+  suggestions: Suggestion[];
+  tokensUsed: number;
+  latencyMs: number;
+  status: string;
+  errorMessage?: string;
+  promptVersion?: string;
+  createdAt: string;
+}
+
 export interface SearchResult {
   id: number;
   name: string;
