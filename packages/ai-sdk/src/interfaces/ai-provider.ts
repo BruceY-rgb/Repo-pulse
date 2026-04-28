@@ -41,6 +41,7 @@ export interface AnalysisInput {
 }
 
 export interface AnalysisOutput {
+  // 旧字段保留
   summary: string;
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   riskReason?: string;
@@ -49,6 +50,18 @@ export interface AnalysisOutput {
   suggestions: Suggestion[];
   tokensUsed: number;
   latencyMs: number;
+
+  // 新增丰富字段（全部可选，保证向后兼容）
+  summaryShort?: string;
+  summaryLong?: string;
+  category?: string;
+  riskScore?: number;
+  riskReasons?: string[];
+  tags?: string[];
+  affectedAreas?: string[];
+  impactSummary?: string;
+  suggestedAction?: string;
+  confidence?: number;
 }
 
 export interface Suggestion {

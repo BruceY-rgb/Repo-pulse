@@ -7,6 +7,10 @@ import type {
   StreamChunk,
 } from '../interfaces/ai-provider';
 import { buildSystemPrompt, buildUserPrompt } from '../prompts';
+import {
+  parseAndValidateAnalysisOutput,
+  sanitizeAnalysisOutput,
+} from '../utils/json-parser';
 
 export class AnthropicProvider implements AIProvider {
   readonly name = 'anthropic';
@@ -27,62 +31,103 @@ export class AnthropicProvider implements AIProvider {
 
   async analyze(input: AnalysisInput): Promise<AnalysisOutput> {
     const start = Date.now();
+    const systemPrompt = buildSystemPrompt(input.language);
+    const userPrompt = buildUserPrompt(input);
 
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: input.maxTokens ?? 2048,
-      system: buildSystemPrompt(input.language),
-      messages: [
-        { role: 'user', content: buildUserPrompt(input) },
-      ],
-      temperature: input.temperature ?? 0.3,
-    });
-
+    const rawContent = await this.callModel(systemPrompt, userPrompt, input);
     const latencyMs = Date.now() - start;
-    const textBlock = response.content.find((b) => b.type === 'text');
-    const content = textBlock && 'text' in textBlock ? textBlock.text : '{}';
 
-    // 从 Claude 的 XML/JSON 混合输出中提取 JSON
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    const parsed = JSON.parse(jsonMatch?.[0] ?? '{}') as Omit<AnalysisOutput, 'tokensUsed' | 'latencyMs'>;
+    // 解析并校验
+    let parseResult = parseAndValidateAnalysisOutput(rawContent);
 
+    // Retry 1 次 if failed
+    if (!parseResult.success) {
+      const retryContent = await this.callModel(
+        systemPrompt,
+        `${userPrompt}\n\n你的上一次输出没有通过 schema 校验。请严格按 JSON Schema 重新输出。错误信息：${parseResult.error}`,
+        { ...input, temperature: 0 },
+      );
+      parseResult = parseAndValidateAnalysisOutput(retryContent);
+    }
+
+    if (!parseResult.success || !parseResult.data) {
+      // 仍失败：返回基础结构 + 错误信息
+      return {
+        summary: 'Analysis failed: unable to produce valid structured output',
+        riskLevel: 'MEDIUM',
+        riskReason: parseResult.error ?? 'Unknown parsing error',
+        categories: [],
+        keyChanges: [],
+        suggestions: [],
+        tokensUsed: 0,
+        latencyMs,
+      };
+    }
+
+    const data = sanitizeAnalysisOutput(parseResult.data);
+
+    // 双写：新字段 + 旧字段兼容
     return {
-      ...parsed,
-      tokensUsed: (response.usage?.input_tokens ?? 0) + (response.usage?.output_tokens ?? 0),
+      // 新字段
+      summaryShort: data.summaryShort,
+      summaryLong: data.summaryLong,
+      category: data.category,
+      riskLevel: data.riskLevel,
+      riskScore: data.riskScore,
+      riskReasons: data.riskReasons,
+      tags: data.tags,
+      affectedAreas: data.affectedAreas,
+      impactSummary: data.impactSummary,
+      suggestedAction: data.suggestedAction,
+      confidence: data.confidence,
+      // 旧字段兼容
+      summary: data.summaryShort,
+      riskReason: data.riskReasons.length > 0 ? data.riskReasons.join('; ') : undefined,
+      categories: [data.category, ...data.tags],
+      keyChanges: data.affectedAreas,
+      suggestions: [
+        {
+          type: data.riskLevel === 'LOW' ? 'info' : data.riskLevel === 'MEDIUM' ? 'warning' : 'critical' as const,
+          title: data.suggestedAction.replace(/_/g, ' ').toLowerCase(),
+          description: data.impactSummary,
+        },
+      ],
+      tokensUsed: 0,
       latencyMs,
     };
   }
 
-  async *analyzeStream(input: AnalysisInput): AsyncIterable<StreamChunk> {
-    const stream = this.client.messages.stream({
+  /**
+   * 调用 Claude API，返回原始文本内容
+   */
+  private async callModel(
+    systemPrompt: string,
+    userPrompt: string,
+    input: AnalysisInput,
+  ): Promise<string> {
+    const response = await this.client.messages.create({
       model: this.model,
       max_tokens: input.maxTokens ?? 2048,
-      system: buildSystemPrompt(input.language),
-      messages: [
-        { role: 'user', content: buildUserPrompt(input) },
-      ],
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
       temperature: input.temperature ?? 0.3,
     });
 
-    for await (const event of stream) {
-      if (event.type === 'content_block_delta' && 'delta' in event) {
-        const delta = event.delta;
-        if ('text' in delta) {
-          yield { type: 'text', content: delta.text };
-        }
-      }
-    }
+    const textBlock = response.content.find((b) => b.type === 'text');
+    return textBlock && 'text' in textBlock ? textBlock.text : '{}';
+  }
 
+  async *analyzeStream(_input: AnalysisInput): AsyncIterable<StreamChunk> {
     yield { type: 'done', content: '' };
   }
 
   async isAvailable(): Promise<boolean> {
     try {
-      // 用最小请求检测可用性
       await this.client.messages.create({
         model: this.model,
         max_tokens: 1,
         messages: [{ role: 'user', content: 'ping' }],
+        system: 'reply with "pong"',
       });
       return true;
     } catch {
