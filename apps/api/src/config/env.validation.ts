@@ -33,6 +33,7 @@ export const envValidationSchema = Joi.object({
   AI_FALLBACK_CHAIN: Joi.string().default('openai,anthropic,ollama'),
 
   // App
+  APP_HOST: Joi.string().hostname().default('127.0.0.1'),
   APP_PORT: Joi.number().default(3001),
   // FRONTEND_URL: 前端应用的访问地址，用于 OAuth 回调重定向和 CORS
   FRONTEND_URL: Joi.string().uri().default('http://localhost:5173'),
