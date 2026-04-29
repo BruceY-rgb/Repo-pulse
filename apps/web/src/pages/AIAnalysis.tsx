@@ -18,7 +18,37 @@ import {
 } from '@/components/ui/sheet';
 import { useAnalysisList, useTriggerAnalysis } from '@/hooks/use-analysis';
 import type { EventAnalysis } from '@/types/api';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { AlertCircle, Loader2, RefreshCw } from 'lucide-react';
+
+function InitialSkeleton() {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <Skeleton key={i} className="h-24 w-full rounded-xl bg-muted" />
+      ))}
+    </div>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center">
+      <p className="text-foreground font-medium">No analyses yet</p>
+      <p className="text-sm text-muted-foreground mt-1">
+        AI analyses will appear here once events are processed.
+      </p>
+    </div>
+  );
+}
+
+function RefreshingIndicator() {
+  return (
+    <div className="flex items-center justify-center py-2">
+      <Loader2 className="w-4 h-4 text-muted-foreground animate-spin mr-2" />
+      <span className="text-xs text-muted-foreground">Refreshing...</span>
+    </div>
+  );
+}
 
 export function AIAnalysis() {
   const [riskLevel, setRiskLevel] = useState<string>('all');
@@ -27,7 +57,13 @@ export function AIAnalysis() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<EventAnalysis | null>(null);
 
-  const { data, isLoading, error, refetch } = useAnalysisList({
+  const {
+    data,
+    isLoading,
+    isFetching,
+    error,
+    refetch,
+  } = useAnalysisList({
     page,
     pageSize: 20,
     riskLevel: riskLevel !== 'all' ? riskLevel : undefined,
@@ -41,8 +77,11 @@ export function AIAnalysis() {
     triggerMutation.mutate({ eventId, force: true });
   };
 
-  // Loading state
-  if (isLoading) {
+  // 仅首次加载（data 尚未出现）显示 Skeleton
+  const isInitialLoad = isLoading && data === undefined;
+
+  // Error state
+  if (error && data === undefined) {
     return (
       <div className="space-y-6 max-w-5xl mx-auto">
         <div className="flex items-center justify-between">
@@ -53,20 +92,6 @@ export function AIAnalysis() {
             </p>
           </div>
         </div>
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 w-full rounded-lg" />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // Error state
-  if (error) {
-    return (
-      <div className="space-y-6 max-w-5xl mx-auto">
-        <h1 className="text-2xl font-bold text-foreground">AI Analysis</h1>
         <div className="flex flex-col items-center justify-center py-12 text-center">
           <AlertCircle className="w-12 h-12 text-destructive mb-4" />
           <p className="text-foreground font-medium">Failed to load analyses</p>
@@ -82,6 +107,8 @@ export function AIAnalysis() {
 
   const items = data?.items ?? [];
   const totalPages = data?.totalPages ?? 0;
+  // 筛选切换或后台刷新（已有数据时）仅显示轻量刷新指示器
+  const isRefreshing = isFetching && !isLoading;
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -139,56 +166,60 @@ export function AIAnalysis() {
         </Select>
       </div>
 
-      {/* Empty state */}
-      {items.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <p className="text-foreground font-medium">No analyses yet</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            AI analyses will appear here once events are processed.
-          </p>
-        </div>
+      {/* Body */}
+      {isInitialLoad ? (
+        <InitialSkeleton />
       ) : (
         <>
-          {/* List */}
-          <div className="space-y-3">
-            {items.map((analysis) => (
-              <div
-                key={analysis.id}
-                onClick={() => setSelected(analysis)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') setSelected(analysis);
-                }}
-              >
-                <AnalysisCard analysis={analysis} />
-              </div>
-            ))}
-          </div>
+          {/* 筛选切换时的轻量刷新提示（不替换列表主体） */}
+          {isRefreshing && <RefreshingIndicator />}
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                Previous
-              </Button>
-              <span className="text-sm text-muted-foreground">
-                Page {page} of {totalPages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                Next
-              </Button>
-            </div>
+          {items.length === 0 ? (
+            <EmptyState />
+          ) : (
+            <>
+              {/* List */}
+              <div className="space-y-3">
+                {items.map((analysis) => (
+                  <div
+                    key={analysis.id}
+                    onClick={() => setSelected(analysis)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') setSelected(analysis);
+                    }}
+                  >
+                    <AnalysisCard analysis={analysis} />
+                  </div>
+                ))}
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => p - 1)}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-sm text-muted-foreground">
+                    Page {page} of {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </>
       )}

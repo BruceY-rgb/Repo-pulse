@@ -21,6 +21,7 @@ export function useAnalysisList(params?: {
   return useApiQuery<PaginatedResponse<EventAnalysis>, ReturnType<typeof analysisQueryKeys.list>>({
     queryKey: analysisQueryKeys.list(params as Record<string, unknown>),
     queryFn: () => analysisService.getList(params),
+    placeholderData: (previousData) => previousData,
   });
 }
 
