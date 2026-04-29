@@ -79,6 +79,7 @@ export interface Event {
   externalUrl: string | null;
   metadata: Record<string, unknown>;
   rawPayload: Record<string, unknown> | null;
+  occurredAt: string | null;
   createdAt: string;
   repository?: {
     id: string;

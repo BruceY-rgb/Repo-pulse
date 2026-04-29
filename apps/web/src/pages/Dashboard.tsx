@@ -328,7 +328,7 @@ export function Dashboard() {
       title: event.title,
       repo: event.repository?.fullName ?? t('dashboard.repo.fallback'),
       author: event.author,
-      time: toRelativeTime(event.createdAt, language),
+      time: toRelativeTime(event.occurredAt ?? event.createdAt, language),
       risk: getRiskByType(event.type),
     }));
   }, [language, recentEventsQuery.data?.items, t]);

@@ -24,6 +24,7 @@ interface NormalizedSyncEvent {
   authorAvatar?: string;
   externalId: string;
   externalUrl?: string;
+  occurredAt: Date;
   metadata: Record<string, unknown>;
 }
 
@@ -169,7 +170,7 @@ export class RepositoryService {
       include: {
         events: {
           take: 10,
-          orderBy: { createdAt: 'desc' },
+          orderBy: { occurredAt: 'desc' },
         },
         users: {
           include: {
@@ -521,6 +522,7 @@ export class RepositoryService {
             authorAvatar: normalized.authorAvatar,
             externalId: normalized.externalId,
             externalUrl: normalized.externalUrl,
+            occurredAt: normalized.occurredAt,
             metadata: normalized.metadata,
           });
           createdCount += 1;
@@ -552,7 +554,7 @@ export class RepositoryService {
       html_url?: string;
       commit?: {
         message?: string;
-        author?: { name?: string };
+        author?: { name?: string; date?: string };
       };
       author?: { login?: string; avatar_url?: string };
     };
@@ -570,6 +572,7 @@ export class RepositoryService {
       authorAvatar: commit.author?.avatar_url,
       externalId: commit.sha,
       externalUrl: commit.html_url,
+      occurredAt: new Date(commit.commit?.author?.date || new Date()),
       metadata: { source: 'repository_sync', provider: 'github', branch },
     };
   }
@@ -582,6 +585,7 @@ export class RepositoryService {
       html_url?: string;
       state?: string;
       merged_at?: string | null;
+      closed_at?: string | null;
       updated_at?: string;
       created_at?: string;
       user?: { login?: string; avatar_url?: string };
@@ -608,6 +612,13 @@ export class RepositoryService {
       authorAvatar: pr.user?.avatar_url,
       externalId: `gh-pr-${pr.id}`,
       externalUrl: pr.html_url,
+      occurredAt: new Date(
+        merged
+          ? pr.merged_at || pr.closed_at || pr.updated_at || pr.created_at || new Date().toISOString()
+          : pr.state === 'closed'
+            ? pr.closed_at || pr.updated_at || pr.created_at || new Date().toISOString()
+            : pr.created_at || pr.updated_at || new Date().toISOString(),
+      ),
       metadata: {
         source: 'repository_sync',
         provider: 'github',
@@ -623,6 +634,7 @@ export class RepositoryService {
       body?: string | null;
       html_url?: string;
       state?: string;
+      closed_at?: string | null;
       updated_at?: string;
       created_at?: string;
       number?: number;
@@ -643,6 +655,11 @@ export class RepositoryService {
       authorAvatar: issue.user?.avatar_url,
       externalId: `gh-issue-${issue.id}`,
       externalUrl: issue.html_url,
+      occurredAt: new Date(
+        issue.state === 'closed'
+          ? issue.closed_at || issue.updated_at || issue.created_at || new Date().toISOString()
+          : issue.created_at || issue.updated_at || new Date().toISOString(),
+      ),
       metadata: {
         source: 'repository_sync',
         provider: 'github',
@@ -657,6 +674,9 @@ export class RepositoryService {
       message?: string;
       web_url?: string;
       author_name?: string;
+      authored_date?: string;
+      committed_date?: string;
+      created_at?: string;
     };
 
     if (!commit.id) {
@@ -671,6 +691,9 @@ export class RepositoryService {
       author: commit.author_name || 'unknown',
       externalId: commit.id,
       externalUrl: commit.web_url,
+      occurredAt: new Date(
+        commit.authored_date || commit.committed_date || commit.created_at || new Date(),
+      ),
       metadata: { source: 'repository_sync', provider: 'gitlab', branch },
     };
   }
@@ -686,6 +709,7 @@ export class RepositoryService {
       web_url?: string;
       state?: string;
       merged_at?: string | null;
+      closed_at?: string | null;
       updated_at?: string;
       created_at?: string;
       author?: { username?: string; avatar_url?: string };
@@ -712,6 +736,13 @@ export class RepositoryService {
       authorAvatar: mr.author?.avatar_url,
       externalId: `gl-mr-${mr.id}`,
       externalUrl: mr.web_url,
+      occurredAt: new Date(
+        merged
+          ? mr.merged_at || mr.closed_at || mr.updated_at || mr.created_at || new Date().toISOString()
+          : mr.state === 'closed'
+            ? mr.closed_at || mr.updated_at || mr.created_at || new Date().toISOString()
+            : mr.created_at || mr.updated_at || new Date().toISOString(),
+      ),
       metadata: {
         source: 'repository_sync',
         provider: 'gitlab',
@@ -727,6 +758,7 @@ export class RepositoryService {
       description?: string | null;
       web_url?: string;
       state?: string;
+      closed_at?: string | null;
       updated_at?: string;
       created_at?: string;
       author?: { username?: string; avatar_url?: string };
@@ -746,6 +778,11 @@ export class RepositoryService {
       authorAvatar: issue.author?.avatar_url,
       externalId: `gl-issue-${issue.id}`,
       externalUrl: issue.web_url,
+      occurredAt: new Date(
+        issue.state === 'closed'
+          ? issue.closed_at || issue.updated_at || issue.created_at || new Date().toISOString()
+          : issue.created_at || issue.updated_at || new Date().toISOString(),
+      ),
       metadata: {
         source: 'repository_sync',
         provider: 'gitlab',

@@ -65,7 +65,7 @@ export class DashboardService {
       where: {
         repositoryId: { in: repositoryIds },
         type: EventType.PUSH,
-        createdAt: { gte: today },
+        occurredAt: { gte: today },
       },
     });
 
@@ -111,11 +111,11 @@ export class DashboardService {
     const events = await prisma.event.findMany({
       where: {
         repositoryId: { in: repositoryIds },
-        createdAt: { gte: startDate },
+        occurredAt: { gte: startDate },
       },
       select: {
         type: true,
-        createdAt: true,
+        occurredAt: true,
       },
     });
 
@@ -132,7 +132,11 @@ export class DashboardService {
 
     // 统计事件
     for (const event of events) {
-      const key = event.createdAt.toLocaleDateString('en-US', { weekday: 'short' });
+      if (!event.occurredAt) {
+        continue;
+      }
+
+      const key = event.occurredAt.toLocaleDateString('en-US', { weekday: 'short' });
       const current = activityMap.get(key);
       if (current) {
         if (event.type === EventType.PUSH) {
@@ -191,7 +195,7 @@ export class DashboardService {
       where: {
         repositoryId: { in: repositoryIds },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { occurredAt: 'desc' },
       take: limit,
       select: {
         id: true,
@@ -199,19 +203,20 @@ export class DashboardService {
         action: true,
         title: true,
         author: true,
-        createdAt: true,
+        occurredAt: true,
         repositoryId: true,
       },
     });
 
-    return events.map((event: { id: string; type: string; action: string | null; title: string | null; author: string | null; repositoryId: string; createdAt: Date }) => ({
+    return events.map((event: { id: string; type: string; action: string | null; title: string | null; author: string | null; repositoryId: string; occurredAt: Date | null }) => ({
       id: event.id,
       type: event.type,
       action: event.action,
       title: event.title,
       author: event.author,
       repo: repoMap.get(event.repositoryId) || 'Unknown',
-      time: this.getRelativeTime(event.createdAt),
+      occurredAt: event.occurredAt?.toISOString() ?? null,
+      time: this.getRelativeTime(event.occurredAt ?? new Date()),
     }));
   }
 

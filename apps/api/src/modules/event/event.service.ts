@@ -64,6 +64,7 @@ export class EventService {
     externalUrl?: string;
     metadata?: Record<string, unknown>;
     rawPayload?: Record<string, unknown>;
+    occurredAt?: Date;
   }): Promise<Event> {
     const event = await this.prisma.event.create({
       data: {
@@ -78,6 +79,7 @@ export class EventService {
         externalUrl: data.externalUrl,
         metadata: (data.metadata || {}) as Prisma.InputJsonValue,
         rawPayload: data.rawPayload as Prisma.InputJsonValue,
+        occurredAt: data.occurredAt,
       },
     });
 
@@ -223,6 +225,7 @@ export class EventService {
         author: event.author,
         authorAvatar: event.authorAvatar,
         externalUrl: event.externalUrl,
+        occurredAt: event.occurredAt,
         createdAt: event.createdAt,
       });
     } catch (error) {
@@ -232,7 +235,10 @@ export class EventService {
   }
 
   async findAll(userId: string, query: PaginationQueryDto): Promise<any> {
-    const { page = 1, pageSize = 20, sortBy = 'createdAt', sortOrder = 'desc' } = query;
+    const { page = 1, pageSize = 20, sortBy = 'occurredAt', sortOrder = 'desc' } = query;
+    const safeSortBy = ['occurredAt', 'createdAt', 'type', 'title', 'author'].includes(sortBy)
+      ? sortBy
+      : 'occurredAt';
     const repositoryIds = await this.resolveRepositoryIds(
       userId,
       query.repositoryId,
@@ -257,7 +263,7 @@ export class EventService {
       this.prisma.event.findMany({
         where,
         orderBy: {
-          [sortBy]: sortOrder,
+          [safeSortBy]: sortOrder,
         },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -347,12 +353,12 @@ export class EventService {
     };
 
     if (dateFrom || dateTo) {
-      where.createdAt = {};
+      where.occurredAt = {};
       if (dateFrom) {
-        (where.createdAt as Record<string, Date>).gte = dateFrom;
+        (where.occurredAt as Record<string, Date>).gte = dateFrom;
       }
       if (dateTo) {
-        (where.createdAt as Record<string, Date>).lte = dateTo;
+        (where.occurredAt as Record<string, Date>).lte = dateTo;
       }
     }
 
@@ -381,7 +387,7 @@ export class EventService {
     const result = await this.prisma.event.deleteMany({
       where: {
         repositoryId,
-        createdAt: {
+        occurredAt: {
           lt: cutoffDate,
         },
       },

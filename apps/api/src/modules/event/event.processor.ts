@@ -3,12 +3,18 @@ import { Logger, BadRequestException } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PrismaClient, EventType } from '@repo-pulse/database';
 import { EventService } from './event.service';
+import {
+  mergeMetadata,
+  resolveGithubWebhookOccurredAt,
+  resolveGitlabWebhookOccurredAt,
+} from './event-time.util';
 
 interface WebhookEventJob {
   repositoryId: string;
   platform: 'github' | 'gitlab';
   eventType: string;
   payload: Record<string, unknown>;
+  receivedAt?: string;
 }
 
 @Processor('webhook-events')
@@ -23,6 +29,7 @@ export class EventProcessor extends WorkerHost {
 
   async process(job: Job<WebhookEventJob>): Promise<void> {
     const { repositoryId, platform, eventType, payload } = job.data;
+    const receivedAt = job.data.receivedAt ? new Date(job.data.receivedAt) : new Date();
 
     this.logger.log(`Processing ${eventType} event for repository ${repositoryId}`);
 
@@ -38,6 +45,10 @@ export class EventProcessor extends WorkerHost {
 
       // 标准化事件数据
       const eventData = this.normalizeEventData(platform, eventType, payload);
+      const timeResolution =
+        platform === 'github'
+          ? resolveGithubWebhookOccurredAt(eventData.type, payload, receivedAt)
+          : resolveGitlabWebhookOccurredAt(eventData.type, payload, receivedAt);
 
       // 存储事件
       await this.eventService.create({
@@ -50,8 +61,9 @@ export class EventProcessor extends WorkerHost {
         authorAvatar: eventData.authorAvatar,
         externalId,
         externalUrl: eventData.externalUrl,
-        metadata: eventData.metadata,
+        metadata: mergeMetadata(eventData.metadata, timeResolution.metadataPatch),
         rawPayload: payload,
+        occurredAt: timeResolution.occurredAt,
       });
 
       this.logger.log(`Event ${externalId} processed successfully`);

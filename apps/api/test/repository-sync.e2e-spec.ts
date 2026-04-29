@@ -27,6 +27,7 @@ describe('Repository sync (e2e)', () => {
   const githubServiceMock = {
     getRepository: jest.fn(),
     createWebhook: jest.fn(),
+    getBranches: jest.fn(),
     getCommits: jest.fn(),
     getPullRequests: jest.fn(),
     getIssues: jest.fn(),
@@ -67,11 +68,12 @@ describe('Repository sync (e2e)', () => {
         html_url: 'https://github.com/sync-org/sync-test-repo/commit/1',
         commit: {
           message: 'Sync commit',
-          author: { name: 'Sync Bot' },
+          author: { name: 'Sync Bot', date: '2026-04-20T08:30:00.000Z' },
         },
         author: { login: 'sync-bot', avatar_url: 'https://avatar/1.png' },
       },
     ]);
+    githubServiceMock.getBranches.mockResolvedValue(['main']);
     githubServiceMock.getPullRequests.mockResolvedValue([
       {
         id: 101,
@@ -79,6 +81,7 @@ describe('Repository sync (e2e)', () => {
         body: 'PR body',
         html_url: 'https://github.com/sync-org/sync-test-repo/pull/101',
         state: 'open',
+        created_at: '2026-04-21T09:00:00.000Z',
         updated_at: new Date().toISOString(),
         user: { login: 'octocat', avatar_url: 'https://avatar/2.png' },
         number: 101,
@@ -91,6 +94,7 @@ describe('Repository sync (e2e)', () => {
         body: 'Issue body',
         html_url: 'https://github.com/sync-org/sync-test-repo/issues/202',
         state: 'open',
+        created_at: '2026-04-22T10:00:00.000Z',
         updated_at: new Date().toISOString(),
         user: { login: 'issue-bot', avatar_url: 'https://avatar/3.png' },
         number: 202,
@@ -158,6 +162,17 @@ describe('Repository sync (e2e)', () => {
     expect(res.body.data.skippedCount).toBe(0);
     expect(res.body.data.failedSources).toEqual([]);
     expect(typeof res.body.data.lastSyncAt).toBe('string');
+
+    const events = await prisma.event.findMany({
+      where: { repositoryId: testRepoId },
+      select: { externalId: true, occurredAt: true, createdAt: true },
+    });
+
+    expect(events).toHaveLength(3);
+    expect(events.every((event) => event.occurredAt instanceof Date)).toBe(true);
+    expect(
+      events.some((event) => event.externalId === 'commit-sha-1' && event.occurredAt?.toISOString() === '2026-04-20T08:30:00.000Z'),
+    ).toBe(true);
   });
 
   it('POST /repositories/:id/sync should skip already imported history on the second run', async () => {

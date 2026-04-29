@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main",
     "start:prod": "node dist/main",
+    "backfill:occurred-at": "ts-node -r tsconfig-paths/register src/scripts/backfill-event-occurred-at.ts",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "test": "jest",
