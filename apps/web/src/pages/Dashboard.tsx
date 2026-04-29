@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   GitPullRequest,
@@ -35,6 +35,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Progress } from '@/components/ui/progress';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   AreaChart,
   Area,
@@ -61,7 +62,6 @@ import {
 } from '@/hooks/queries/use-dashboard-queries';
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
 import { useDashboardActivity } from '@/hooks/use-dashboard';
-import { getMonitoringScopeRepositoryIds } from '@/lib/monitoring-scope';
 import type { Repository } from '@/types/api';
 
 function toRelativeTime(dateString: string, language: 'en' | 'zh') {
@@ -108,7 +108,6 @@ function findRepositoriesBySelection(repositories: Repository[], selectedReposit
 
 export function Dashboard() {
   const cardsRef = useRef<HTMLDivElement>(null);
-  const hasInitializedSelectionRef = useRef(false);
   const { t, language } = useLanguage();
 
   const repositoriesQuery = useDashboardRepositoriesQuery();
@@ -117,25 +116,32 @@ export function Dashboard() {
     monitoringScope,
     persistMonitoringScope,
   } = useMonitoringScopePreferences();
-  const { data: currentUser, isLoading: isCurrentUserLoading } = currentUserQuery;
-  const repos = repositoriesQuery.data ?? [];
+  const { isLoading: isCurrentUserLoading } = currentUserQuery;
+  const repos = useMemo(
+    () => repositoriesQuery.data ?? [],
+    [repositoriesQuery.data],
+  );
   const [isScopePopoverOpen, setIsScopePopoverOpen] = useState(false);
-  const [selectedRepositoryIds, setSelectedRepositoryIds] = useState<string[]>([]);
+  const [scopeTab, setScopeTab] = useState<'selected' | 'all'>('selected');
   const availableRepositoryIds = useMemo(() => repos.map((repository) => repository.id), [repos]);
   const availableRepositoryIdSet = useMemo(
     () => new Set(availableRepositoryIds),
     [availableRepositoryIds],
   );
-  const savedRepositoryIds = useMemo(
-    () => getMonitoringScopeRepositoryIds(currentUser?.preferences),
-    [currentUser?.preferences],
+  const monitoredRepositoryIds = useMemo(
+    () => (monitoringScope.repositoryIds ?? []).filter((repositoryId) => availableRepositoryIdSet.has(repositoryId)),
+    [availableRepositoryIdSet, monitoringScope.repositoryIds],
   );
   const selectedRepositories = useMemo(
-    () => findRepositoriesBySelection(repos, selectedRepositoryIds),
-    [repos, selectedRepositoryIds],
+    () => findRepositoriesBySelection(repos, monitoredRepositoryIds),
+    [monitoredRepositoryIds, repos],
+  );
+  const repositoriesForCurrentScopeTab = useMemo(
+    () => (scopeTab === 'selected' ? selectedRepositories : repos),
+    [repos, scopeTab, selectedRepositories],
   );
   const hasAvailableRepositories = repos.length > 0;
-  const hasSelection = selectedRepositoryIds.length > 0;
+  const hasSelection = monitoredRepositoryIds.length > 0;
 
   const persistMonitoredRepositoryIds = (repositoryIds: string[]) => {
     void persistMonitoringScope({
@@ -143,55 +149,33 @@ export function Dashboard() {
       repositoryIds,
     });
   };
+  const persistMonitoredRepositoryIdsInEffect = useEffectEvent((repositoryIds: string[]) => {
+    persistMonitoredRepositoryIds(repositoryIds);
+  });
 
   useEffect(() => {
-    if (hasInitializedSelectionRef.current) {
-      return;
-    }
-
     if (repositoriesQuery.isLoading || isCurrentUserLoading) {
       return;
     }
 
-    const sanitizedSavedRepositoryIds = savedRepositoryIds.filter((repositoryId) =>
-      availableRepositoryIdSet.has(repositoryId),
-    );
-
-    setSelectedRepositoryIds(sanitizedSavedRepositoryIds);
-    hasInitializedSelectionRef.current = true;
-
-    if (!areStringArraysEqual(sanitizedSavedRepositoryIds, savedRepositoryIds)) {
-      persistMonitoredRepositoryIds(sanitizedSavedRepositoryIds);
+    const rawRepositoryIds = monitoringScope.repositoryIds ?? [];
+    if (!areStringArraysEqual(rawRepositoryIds, monitoredRepositoryIds)) {
+      persistMonitoredRepositoryIdsInEffect(monitoredRepositoryIds);
     }
   }, [
-    availableRepositoryIdSet,
     isCurrentUserLoading,
+    monitoredRepositoryIds,
+    monitoringScope.repositoryIds,
     repositoriesQuery.isLoading,
-    savedRepositoryIds,
   ]);
 
-  useEffect(() => {
-    if (!hasInitializedSelectionRef.current) {
-      return;
-    }
-
-    const sanitizedCurrentSelection = selectedRepositoryIds.filter((repositoryId) =>
-      availableRepositoryIdSet.has(repositoryId),
-    );
-
-    if (!areStringArraysEqual(sanitizedCurrentSelection, selectedRepositoryIds)) {
-      setSelectedRepositoryIds(sanitizedCurrentSelection);
-      persistMonitoredRepositoryIds(sanitizedCurrentSelection);
-    }
-  }, [availableRepositoryIdSet, selectedRepositoryIds]);
-
-  const statsQuery = useDashboardStatsQuery(selectedRepositoryIds);
-  const recentEventsQuery = useDashboardRecentEventsQuery(selectedRepositoryIds);
-  const pendingApprovalsQuery = usePendingApprovalsCountQuery(selectedRepositoryIds);
-  const unreadNotificationsQuery = useUnreadNotificationsCountQuery(selectedRepositoryIds);
+  const statsQuery = useDashboardStatsQuery(monitoredRepositoryIds);
+  const recentEventsQuery = useDashboardRecentEventsQuery(monitoredRepositoryIds);
+  const pendingApprovalsQuery = usePendingApprovalsCountQuery(monitoredRepositoryIds);
+  const unreadNotificationsQuery = useUnreadNotificationsCountQuery(monitoredRepositoryIds);
 
   // 周活动数据 - 来自后端 /dashboard/activity
-  const activityQuery = useDashboardActivity(7, selectedRepositoryIds);
+  const activityQuery = useDashboardActivity(7, monitoredRepositoryIds);
   const activityData = useMemo(() => {
     const data = activityQuery.data ?? [];
     return data.map(item => ({ name: item.date, commits: item.commits, prs: item.prs, issues: item.issues }));
@@ -221,9 +205,9 @@ export function Dashboard() {
     { label: 'Time to Recovery', value: '--', target: '--', progress: 0 },
   ];
 
-  useRepositoryRealtimeSubscription(selectedRepositoryIds);
+  useRepositoryRealtimeSubscription(monitoredRepositoryIds);
 
-  const totalRepositories = selectedRepositoryIds.length;
+  const totalRepositories = monitoredRepositoryIds.length;
   const totalEvents = statsQuery.data?.total ?? 0;
   const pendingApprovals = pendingApprovalsQuery.data?.count ?? 0;
   const unreadNotifications = unreadNotificationsQuery.data?.count ?? 0;
@@ -241,14 +225,13 @@ export function Dashboard() {
       nextRepositoryIdSet.has(repositoryId),
     );
 
-    setSelectedRepositoryIds(normalizedSelection);
     persistMonitoredRepositoryIds(normalizedSelection);
   };
 
   const toggleRepository = (repositoryId: string) => {
-    const nextRepositoryIds = selectedRepositoryIds.includes(repositoryId)
-      ? selectedRepositoryIds.filter((id) => id !== repositoryId)
-      : [...selectedRepositoryIds, repositoryId];
+    const nextRepositoryIds = monitoredRepositoryIds.includes(repositoryId)
+      ? monitoredRepositoryIds.filter((id) => id !== repositoryId)
+      : [...monitoredRepositoryIds, repositoryId];
 
     applySelection(nextRepositoryIds);
   };
@@ -345,7 +328,15 @@ export function Dashboard() {
               <span className="text-xs text-[var(--github-text-secondary)]">
                 {t('dashboard.scope.label')}:
               </span>
-              <Popover open={isScopePopoverOpen} onOpenChange={setIsScopePopoverOpen}>
+              <Popover
+                open={isScopePopoverOpen}
+                onOpenChange={(open) => {
+                  setIsScopePopoverOpen(open);
+                  if (open) {
+                    setScopeTab(hasSelection ? 'selected' : 'all');
+                  }
+                }}
+              >
                 <PopoverTrigger asChild>
                   <Button
                     variant="outline"
@@ -366,6 +357,32 @@ export function Dashboard() {
                         wrapperClassName="h-12 rounded-2xl border border-[var(--github-border)] bg-white/[0.03] px-4 text-foreground shadow-inner shadow-black/10 transition-[background-color,box-shadow,border-color] focus-within:border-[var(--github-border)] focus-within:bg-white/[0.05] focus-within:ring-1 focus-within:ring-[var(--github-accent)]/35 focus-within:shadow-[0_0_0_4px_rgba(255,77,0,0.08)]"
                         className="h-10 border-0 py-0 text-base placeholder:text-[var(--github-text-secondary)] focus-visible:outline-none focus-visible:ring-0"
                       />
+                    </div>
+                    <div className="border-b border-[var(--github-border)]/80 px-3 py-2">
+                      <Tabs
+                        value={scopeTab}
+                        onValueChange={(value) => setScopeTab(value as 'selected' | 'all')}
+                        className="gap-0"
+                      >
+                        <TabsList className="h-9 w-full rounded-xl bg-white/[0.04] p-1">
+                          <TabsTrigger
+                            value="selected"
+                            className="rounded-lg border border-transparent text-xs text-[var(--github-text-secondary)] transition-colors hover:text-white data-[state=active]:border-[var(--github-accent)]/60 data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white data-[state=active]:shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]"
+                          >
+                            {t('dashboard.scope.tabs.selected')}
+                            <span className="ml-1 text-[10px] opacity-80">
+                              {selectedRepositories.length}
+                            </span>
+                          </TabsTrigger>
+                          <TabsTrigger
+                            value="all"
+                            className="rounded-lg border border-transparent text-xs text-[var(--github-text-secondary)] transition-colors hover:text-white data-[state=active]:border-[var(--github-accent)]/60 data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white data-[state=active]:shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]"
+                          >
+                            {t('dashboard.scope.tabs.all')}
+                            <span className="ml-1 text-[10px] opacity-80">{repos.length}</span>
+                          </TabsTrigger>
+                        </TabsList>
+                      </Tabs>
                     </div>
                     <div className="flex items-center justify-between border-b border-[var(--github-border)]/80 px-3 py-2">
                       <Button
@@ -388,10 +405,14 @@ export function Dashboard() {
                       </Button>
                     </div>
                     <CommandList className="max-h-[320px] px-2 py-2">
-                      <CommandEmpty>{t('dashboard.scope.noSearchResult')}</CommandEmpty>
+                      <CommandEmpty>
+                        {scopeTab === 'selected'
+                          ? t('dashboard.scope.emptySelectedTab')
+                          : t('dashboard.scope.noSearchResult')}
+                      </CommandEmpty>
                       <CommandGroup className="space-y-1 p-0">
-                        {repos.map((repo) => {
-                          const checked = selectedRepositoryIds.includes(repo.id);
+                        {repositoriesForCurrentScopeTab.map((repo) => {
+                          const checked = monitoredRepositoryIds.includes(repo.id);
 
                           return (
                             <CommandItem
