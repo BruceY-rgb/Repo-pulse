@@ -37,6 +37,7 @@ export class EventController {
       user.sub,
       query.repositoryId,
       query.repositoryIds,
+      query.branchScopes,
       query.dateFrom ? new Date(query.dateFrom) : undefined,
       query.dateTo ? new Date(query.dateTo) : undefined,
     );

@@ -2,6 +2,7 @@ import { apiClient } from './api-client';
 import type {
   ApiResponse,
   Repository,
+  RepositoryBranchScopeOption,
   CreateRepositoryDto,
   UpdateRepositoryDto,
   PaginatedResponse,
@@ -38,6 +39,11 @@ export const repositoryService = {
   async sync(id: string): Promise<Repository> {
     const { data } = await apiClient.post<ApiResponse<Repository>>(`/repositories/${id}/sync`);
     return data.data;
+  },
+
+  async getBranches(id: string): Promise<RepositoryBranchScopeOption[]> {
+    const { data } = await apiClient.get<ApiResponse<string[]>>(`/repositories/${id}/branches`);
+    return data.data.map((name) => ({ name }));
   },
 
   async getEvents(

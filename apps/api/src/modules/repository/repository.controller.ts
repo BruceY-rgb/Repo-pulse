@@ -91,6 +91,13 @@ export class RepositoryController {
     return this.repositoryService.findById(id);
   }
 
+  @Get(':id/branches')
+  @ApiOperation({ summary: 'Get repository branches' })
+  async getBranches(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.getBranches(userId, id);
+  }
+
   @Patch(':id')
   @ApiOperation({ summary: 'Update repository' })
   async update(@Param('id') id: string, @Body() dto: UpdateRepositoryDto) {

@@ -220,6 +220,7 @@ export class SyncService {
               title: commit.commit?.message?.split('\n')[0] || 'Push',
               body: commit.commit?.message || '',
               author: commit.commit?.author?.name || commit.commit?.author?.login || 'Unknown',
+              branch: repository.defaultBranch,
               createdAt: new Date(commit.commit?.author?.date || new Date()),
             },
           });
@@ -263,6 +264,9 @@ export class SyncService {
               title: pr.title,
               body: pr.body || '',
               author: pr.user?.login || 'Unknown',
+              branch: pr.base?.ref,
+              sourceBranch: pr.head?.ref,
+              targetBranch: pr.base?.ref,
               createdAt: new Date(pr.created_at),
             },
           });

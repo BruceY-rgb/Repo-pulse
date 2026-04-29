@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import {
   GitPullRequest,
   GitCommit,
+  ChevronDown,
+  ChevronRight,
   AlertCircle,
   TrendingUp,
   Clock,
@@ -15,6 +17,7 @@ import {
   MoreHorizontal,
   RefreshCcw,
   ChevronsUpDown,
+  Loader2,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -23,10 +26,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Command,
-  CommandEmpty,
-  CommandGroup,
   CommandInput,
-  CommandItem,
   CommandList,
 } from '@/components/ui/command';
 import {
@@ -60,9 +60,10 @@ import {
   usePendingApprovalsCountQuery,
   useUnreadNotificationsCountQuery,
 } from '@/hooks/queries/use-dashboard-queries';
+import { useRepositoryBranchesQuery } from '@/hooks/queries/use-repository-queries';
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
 import { useDashboardActivity } from '@/hooks/use-dashboard';
-import type { Repository } from '@/types/api';
+import type { Repository, RepositoryBranchScopeMap } from '@/types/api';
 
 function toRelativeTime(dateString: string, language: 'en' | 'zh') {
   const now = Date.now();
@@ -106,6 +107,157 @@ function findRepositoriesBySelection(repositories: Repository[], selectedReposit
     .filter((repository): repository is Repository => Boolean(repository));
 }
 
+function formatBranchSummary(branches: string[], fallbackLabel: string) {
+  if (branches.length === 0) {
+    return fallbackLabel;
+  }
+
+  if (branches.length === 1) {
+    return branches[0];
+  }
+
+  return `${branches[0]} +${branches.length - 1}`;
+}
+
+function areRepositoryBranchScopesEqual(
+  left: RepositoryBranchScopeMap,
+  right: RepositoryBranchScopeMap,
+) {
+  const leftEntries = Object.entries(left).sort(([leftKey], [rightKey]) =>
+    leftKey.localeCompare(rightKey),
+  );
+  const rightEntries = Object.entries(right).sort(([leftKey], [rightKey]) =>
+    leftKey.localeCompare(rightKey),
+  );
+
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+
+  return leftEntries.every(([repositoryId, branches], index) => {
+    const [rightRepositoryId, rightBranches] = rightEntries[index];
+    return (
+      repositoryId === rightRepositoryId &&
+      areStringArraysEqual(branches, rightBranches)
+    );
+  });
+}
+
+interface ScopeRepositoryItemProps {
+  repo: Repository;
+  checked: boolean;
+  expanded: boolean;
+  branchSummary: string;
+  selectedBranches: string[];
+  allBranchesLabel: string;
+  notInScopeLabel: string;
+  onToggleRepository: (repositoryId: string) => void;
+  onToggleExpanded: (repositoryId: string) => void;
+  onToggleBranch: (repositoryId: string, branchName: string) => void;
+  onResetBranches: (repositoryId: string) => void;
+  t: (key: string) => string;
+}
+
+function ScopeRepositoryItem({
+  repo,
+  checked,
+  expanded,
+  branchSummary,
+  selectedBranches,
+  allBranchesLabel,
+  notInScopeLabel,
+  onToggleRepository,
+  onToggleExpanded,
+  onToggleBranch,
+  onResetBranches,
+  t,
+}: ScopeRepositoryItemProps) {
+  const branchesQuery = useRepositoryBranchesQuery(repo.id, expanded);
+  const branchOptions = branchesQuery.data ?? [];
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-[var(--github-border)]/80 bg-white/[0.02]">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <button
+          type="button"
+          className="flex flex-1 items-center gap-3 text-left"
+          onClick={() => onToggleRepository(repo.id)}
+        >
+          <Checkbox checked={checked} className="pointer-events-none" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-white">{repo.fullName}</p>
+            <p className="truncate text-xs text-[var(--github-text-secondary)]">
+              {checked ? branchSummary : notInScopeLabel}
+            </p>
+          </div>
+        </button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-lg text-[var(--github-text-secondary)] hover:bg-white/5 hover:text-white"
+          onClick={() => onToggleExpanded(repo.id)}
+        >
+          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </Button>
+      </div>
+
+      {expanded ? (
+        <div className="space-y-3 border-t border-[var(--github-border)]/80 bg-black/10 px-4 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--github-text-secondary)]">
+                {t('dashboard.scope.branches.title')}
+              </p>
+              <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
+                {t('dashboard.scope.branches.description')}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-lg px-2 text-xs text-[var(--github-accent)] hover:bg-[var(--github-accent)]/10 hover:text-white"
+              onClick={() => onResetBranches(repo.id)}
+            >
+              {allBranchesLabel}
+            </Button>
+          </div>
+
+          {branchesQuery.isLoading ? (
+            <div className="flex items-center gap-2 rounded-xl border border-[var(--github-border)]/70 bg-white/[0.03] px-3 py-3 text-sm text-[var(--github-text-secondary)]">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {t('dashboard.scope.branches.loading')}
+            </div>
+          ) : branchOptions.length === 0 ? (
+            <div className="rounded-xl border border-[var(--github-border)]/70 bg-white/[0.03] px-3 py-3 text-sm text-[var(--github-text-secondary)]">
+              {t('dashboard.scope.branches.empty')}
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              {branchOptions.map((branch) => {
+                const branchChecked = selectedBranches.includes(branch.name);
+
+                return (
+                  <button
+                    key={`${repo.id}-${branch.name}`}
+                    type="button"
+                    className="flex items-center gap-3 rounded-xl border border-[var(--github-border)]/70 bg-white/[0.02] px-3 py-2 text-left transition-colors hover:border-[var(--github-accent)]/40 hover:bg-white/[0.05]"
+                    onClick={() => onToggleBranch(repo.id, branch.name)}
+                  >
+                    <Checkbox checked={branchChecked} className="pointer-events-none" />
+                    <span className="truncate text-sm text-white">{branch.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function Dashboard() {
   const cardsRef = useRef<HTMLDivElement>(null);
   const { t, language } = useLanguage();
@@ -123,6 +275,8 @@ export function Dashboard() {
   );
   const [isScopePopoverOpen, setIsScopePopoverOpen] = useState(false);
   const [scopeTab, setScopeTab] = useState<'selected' | 'all'>('selected');
+  const [scopeSearchValue, setScopeSearchValue] = useState('');
+  const [expandedRepositoryIds, setExpandedRepositoryIds] = useState<string[]>([]);
   const availableRepositoryIds = useMemo(() => repos.map((repository) => repository.id), [repos]);
   const availableRepositoryIdSet = useMemo(
     () => new Set(availableRepositoryIds),
@@ -136,17 +290,45 @@ export function Dashboard() {
     () => findRepositoriesBySelection(repos, monitoredRepositoryIds),
     [monitoredRepositoryIds, repos],
   );
+  const repositoryBranchScopes = useMemo(
+    () => monitoringScope.repositoryBranchScopes ?? {},
+    [monitoringScope.repositoryBranchScopes],
+  );
+  const normalizedRepositoryBranchScopes = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(repositoryBranchScopes)
+          .filter(([repositoryId]) => availableRepositoryIdSet.has(repositoryId))
+          .map(([repositoryId, branches]) => [
+            repositoryId,
+            Array.from(new Set(branches)).sort((left, right) => left.localeCompare(right)),
+          ]),
+      ),
+    [availableRepositoryIdSet, repositoryBranchScopes],
+  );
   const repositoriesForCurrentScopeTab = useMemo(
     () => (scopeTab === 'selected' ? selectedRepositories : repos),
     [repos, scopeTab, selectedRepositories],
   );
+  const filteredRepositoriesForCurrentScopeTab = useMemo(() => {
+    const normalizedKeyword = scopeSearchValue.trim().toLowerCase();
+    if (!normalizedKeyword) {
+      return repositoriesForCurrentScopeTab;
+    }
+
+    return repositoriesForCurrentScopeTab.filter((repository) =>
+      repository.fullName.toLowerCase().includes(normalizedKeyword) ||
+      repository.name.toLowerCase().includes(normalizedKeyword),
+    );
+  }, [repositoriesForCurrentScopeTab, scopeSearchValue]);
   const hasAvailableRepositories = repos.length > 0;
   const hasSelection = monitoredRepositoryIds.length > 0;
 
   const persistMonitoredRepositoryIds = (repositoryIds: string[]) => {
     void persistMonitoringScope({
-      branchNames: monitoringScope.branchNames,
       repositoryIds,
+      branchNames: [],
+      repositoryBranchScopes: normalizedRepositoryBranchScopes,
     });
   };
   const persistMonitoredRepositoryIdsInEffect = useEffectEvent((repositoryIds: string[]) => {
@@ -169,13 +351,55 @@ export function Dashboard() {
     repositoriesQuery.isLoading,
   ]);
 
-  const statsQuery = useDashboardStatsQuery(monitoredRepositoryIds);
-  const recentEventsQuery = useDashboardRecentEventsQuery(monitoredRepositoryIds);
-  const pendingApprovalsQuery = usePendingApprovalsCountQuery(monitoredRepositoryIds);
-  const unreadNotificationsQuery = useUnreadNotificationsCountQuery(monitoredRepositoryIds);
+  useEffect(() => {
+    if (repositoriesQuery.isLoading || isCurrentUserLoading) {
+      return;
+    }
+
+    if (
+      !areRepositoryBranchScopesEqual(
+        repositoryBranchScopes,
+        normalizedRepositoryBranchScopes,
+      )
+    ) {
+      void persistMonitoringScope({
+        repositoryIds: monitoredRepositoryIds,
+        branchNames: [],
+        repositoryBranchScopes: normalizedRepositoryBranchScopes,
+      });
+    }
+  }, [
+    isCurrentUserLoading,
+    monitoredRepositoryIds,
+    normalizedRepositoryBranchScopes,
+    persistMonitoringScope,
+    repositoriesQuery.isLoading,
+    repositoryBranchScopes,
+  ]);
+
+  const statsQuery = useDashboardStatsQuery(
+    monitoredRepositoryIds,
+    normalizedRepositoryBranchScopes,
+  );
+  const recentEventsQuery = useDashboardRecentEventsQuery(
+    monitoredRepositoryIds,
+    normalizedRepositoryBranchScopes,
+  );
+  const pendingApprovalsQuery = usePendingApprovalsCountQuery(
+    monitoredRepositoryIds,
+    normalizedRepositoryBranchScopes,
+  );
+  const unreadNotificationsQuery = useUnreadNotificationsCountQuery(
+    monitoredRepositoryIds,
+    normalizedRepositoryBranchScopes,
+  );
 
   // 周活动数据 - 来自后端 /dashboard/activity
-  const activityQuery = useDashboardActivity(7, monitoredRepositoryIds);
+  const activityQuery = useDashboardActivity(
+    7,
+    monitoredRepositoryIds,
+    normalizedRepositoryBranchScopes,
+  );
   const activityData = useMemo(() => {
     const data = activityQuery.data ?? [];
     return data.map(item => ({ name: item.date, commits: item.commits, prs: item.prs, issues: item.issues }));
@@ -225,7 +449,11 @@ export function Dashboard() {
       nextRepositoryIdSet.has(repositoryId),
     );
 
-    persistMonitoredRepositoryIds(normalizedSelection);
+    void persistMonitoringScope({
+      repositoryIds: normalizedSelection,
+      branchNames: [],
+      repositoryBranchScopes: normalizedRepositoryBranchScopes,
+    });
   };
 
   const toggleRepository = (repositoryId: string) => {
@@ -242,6 +470,48 @@ export function Dashboard() {
 
   const clearSelectedRepositories = () => {
     applySelection([]);
+  };
+
+  const toggleExpandedRepository = (repositoryId: string) => {
+    setExpandedRepositoryIds((current) =>
+      current.includes(repositoryId)
+        ? current.filter((id) => id !== repositoryId)
+        : [...current, repositoryId],
+    );
+  };
+
+  const toggleRepositoryBranch = (repositoryId: string, branchName: string) => {
+    const repositoryIds = monitoredRepositoryIds.includes(repositoryId)
+      ? monitoredRepositoryIds
+      : [...monitoredRepositoryIds, repositoryId];
+    const currentBranches = normalizedRepositoryBranchScopes[repositoryId] ?? [];
+    const nextBranches = currentBranches.includes(branchName)
+      ? currentBranches.filter((branch) => branch !== branchName)
+      : [...currentBranches, branchName].sort((left, right) => left.localeCompare(right));
+
+    void persistMonitoringScope({
+      repositoryIds,
+      branchNames: [],
+      repositoryBranchScopes: {
+        ...normalizedRepositoryBranchScopes,
+        [repositoryId]: nextBranches,
+      },
+    });
+  };
+
+  const resetRepositoryBranches = (repositoryId: string) => {
+    if (!monitoredRepositoryIds.includes(repositoryId)) {
+      return;
+    }
+
+    void persistMonitoringScope({
+      repositoryIds: monitoredRepositoryIds,
+      branchNames: [],
+      repositoryBranchScopes: {
+        ...normalizedRepositoryBranchScopes,
+        [repositoryId]: [],
+      },
+    });
   };
 
   const statsCards = useMemo(
@@ -334,6 +604,7 @@ export function Dashboard() {
                   setIsScopePopoverOpen(open);
                   if (open) {
                     setScopeTab(hasSelection ? 'selected' : 'all');
+                    setScopeSearchValue('');
                   }
                 }}
               >
@@ -348,11 +619,13 @@ export function Dashboard() {
                 </PopoverTrigger>
                 <PopoverContent
                   align="start"
-                  className="w-[340px] overflow-hidden rounded-2xl border-[var(--github-border)] bg-[#151922] p-0 shadow-2xl"
+                  className="w-[380px] overflow-hidden rounded-2xl border-[var(--github-border)] bg-[#151922] p-0 shadow-2xl"
                 >
                   <Command className="rounded-none bg-transparent">
                     <div className="border-b border-[var(--github-border)]/80 p-3 pb-2">
                       <CommandInput
+                        value={scopeSearchValue}
+                        onValueChange={setScopeSearchValue}
                         placeholder={t('dashboard.scope.searchPlaceholder')}
                         wrapperClassName="h-12 rounded-2xl border border-[var(--github-border)] bg-white/[0.03] px-4 text-foreground shadow-inner shadow-black/10 transition-[background-color,box-shadow,border-color] focus-within:border-[var(--github-border)] focus-within:bg-white/[0.05] focus-within:ring-1 focus-within:ring-[var(--github-accent)]/35 focus-within:shadow-[0_0_0_4px_rgba(255,77,0,0.08)]"
                         className="h-10 border-0 py-0 text-base placeholder:text-[var(--github-text-secondary)] focus-visible:outline-none focus-visible:ring-0"
@@ -405,31 +678,42 @@ export function Dashboard() {
                       </Button>
                     </div>
                     <CommandList className="max-h-[320px] px-2 py-2">
-                      <CommandEmpty>
-                        {scopeTab === 'selected'
-                          ? t('dashboard.scope.emptySelectedTab')
-                          : t('dashboard.scope.noSearchResult')}
-                      </CommandEmpty>
-                      <CommandGroup className="space-y-1 p-0">
-                        {repositoriesForCurrentScopeTab.map((repo) => {
-                          const checked = monitoredRepositoryIds.includes(repo.id);
+                      {filteredRepositoriesForCurrentScopeTab.length === 0 ? (
+                        <div className="py-6 text-center text-sm text-[var(--github-text-secondary)]">
+                          {scopeTab === 'selected'
+                            ? t('dashboard.scope.emptySelectedTab')
+                            : t('dashboard.scope.noSearchResult')}
+                        </div>
+                      ) : (
+                        <div className="space-y-2 p-1">
+                          {filteredRepositoriesForCurrentScopeTab.map((repo) => {
+                            const checked = monitoredRepositoryIds.includes(repo.id);
+                            const selectedBranches = normalizedRepositoryBranchScopes[repo.id] ?? [];
+                            const branchSummary = formatBranchSummary(
+                              selectedBranches,
+                              t('dashboard.scope.row.allBranches'),
+                            );
 
-                          return (
-                            <CommandItem
-                              key={repo.id}
-                              value={repo.fullName ?? repo.name}
-                              keywords={[repo.name, repo.fullName]}
-                              onSelect={() => toggleRepository(repo.id)}
-                              className="gap-3 rounded-xl px-4 py-3 data-[selected=true]:bg-[var(--github-accent)] data-[selected=true]:text-white"
-                            >
-                              <Checkbox checked={checked} className="pointer-events-none" />
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate text-sm">{repo.fullName ?? repo.name}</p>
-                              </div>
-                            </CommandItem>
-                          );
-                        })}
-                      </CommandGroup>
+                            return (
+                              <ScopeRepositoryItem
+                                key={repo.id}
+                                repo={repo}
+                                checked={checked}
+                                expanded={expandedRepositoryIds.includes(repo.id)}
+                                branchSummary={branchSummary}
+                                selectedBranches={selectedBranches}
+                                allBranchesLabel={t('dashboard.scope.row.allBranches')}
+                                notInScopeLabel={t('dashboard.scope.row.notInScope')}
+                                onToggleRepository={toggleRepository}
+                                onToggleExpanded={toggleExpandedRepository}
+                                onToggleBranch={toggleRepositoryBranch}
+                                onResetBranches={resetRepositoryBranches}
+                                t={t}
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
                     </CommandList>
                   </Command>
                 </PopoverContent>

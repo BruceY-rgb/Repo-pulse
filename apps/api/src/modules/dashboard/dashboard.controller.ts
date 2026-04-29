@@ -19,8 +19,9 @@ export class DashboardController {
   async getOverview(
     @CurrentUser() user: { sub: string },
     @Query('repositoryIds') repositoryIds?: string,
+    @Query('branchScopes') branchScopes?: string,
   ) {
-    return this.dashboardService.getOverview(user.sub, repositoryIds);
+    return this.dashboardService.getOverview(user.sub, repositoryIds, branchScopes);
   }
 
   /**
@@ -32,8 +33,9 @@ export class DashboardController {
     @CurrentUser() user: { sub: string },
     @Query('days') days?: number,
     @Query('repositoryIds') repositoryIds?: string,
+    @Query('branchScopes') branchScopes?: string,
   ) {
-    return this.dashboardService.getActivity(user.sub, days, repositoryIds);
+    return this.dashboardService.getActivity(user.sub, days, repositoryIds, branchScopes);
   }
 
   /**
@@ -45,7 +47,8 @@ export class DashboardController {
     @CurrentUser() user: { sub: string },
     @Query('limit') limit?: number,
     @Query('repositoryIds') repositoryIds?: string,
+    @Query('branchScopes') branchScopes?: string,
   ) {
-    return this.dashboardService.getRecentActivity(user.sub, limit, repositoryIds);
+    return this.dashboardService.getRecentActivity(user.sub, limit, repositoryIds, branchScopes);
   }
 }

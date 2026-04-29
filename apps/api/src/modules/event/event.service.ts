@@ -6,6 +6,11 @@ import { AIService } from '../ai/ai.service';
 import { FilterService } from '../filter/filter.service';
 import { NotificationService, NotificationPreferences } from '../notification/notification.service';
 import { SendNotificationDto } from '../notification/dto/notification.dto';
+import {
+  buildEventScopeWhere,
+  normalizeRepositoryBranchScopes,
+  parseRepositoryBranchScopesParam,
+} from '../../common/utils/repository-branch-scope';
 
 @Injectable()
 export class EventService {
@@ -62,6 +67,9 @@ export class EventService {
     authorAvatar?: string;
     externalId: string;
     externalUrl?: string;
+    branch?: string;
+    sourceBranch?: string;
+    targetBranch?: string;
     metadata?: Record<string, unknown>;
     rawPayload?: Record<string, unknown>;
   }): Promise<Event> {
@@ -76,6 +84,9 @@ export class EventService {
         authorAvatar: data.authorAvatar,
         externalId: data.externalId,
         externalUrl: data.externalUrl,
+        branch: data.branch,
+        sourceBranch: data.sourceBranch,
+        targetBranch: data.targetBranch,
         metadata: (data.metadata || {}) as Prisma.InputJsonValue,
         rawPayload: data.rawPayload as Prisma.InputJsonValue,
       },
@@ -238,6 +249,10 @@ export class EventService {
       query.repositoryId,
       query.repositoryIds,
     );
+    const repositoryBranchScopes = normalizeRepositoryBranchScopes(
+      repositoryIds,
+      parseRepositoryBranchScopesParam(query.branchScopes),
+    );
 
     if (repositoryIds.length === 0) {
       return {
@@ -249,9 +264,7 @@ export class EventService {
       };
     }
 
-    const where = {
-      repositoryId: repositoryIds.length === 1 ? repositoryIds[0] : { in: repositoryIds },
-    };
+    const where = buildEventScopeWhere(repositoryIds, repositoryBranchScopes);
 
     const [items, total] = await Promise.all([
       this.prisma.event.findMany({
@@ -330,10 +343,15 @@ export class EventService {
     userId: string,
     repositoryId?: string,
     repositoryIdsParam?: string,
+    repositoryBranchScopesParam?: string,
     dateFrom?: Date,
     dateTo?: Date,
   ) {
     const repositoryIds = await this.resolveRepositoryIds(userId, repositoryId, repositoryIdsParam);
+    const repositoryBranchScopes = normalizeRepositoryBranchScopes(
+      repositoryIds,
+      parseRepositoryBranchScopesParam(repositoryBranchScopesParam),
+    );
 
     if (repositoryIds.length === 0) {
       return {
@@ -342,9 +360,10 @@ export class EventService {
       };
     }
 
-    const where: Record<string, unknown> = {
-      repositoryId: repositoryIds.length === 1 ? repositoryIds[0] : { in: repositoryIds },
-    };
+    const where: Prisma.EventWhereInput = buildEventScopeWhere(
+      repositoryIds,
+      repositoryBranchScopes,
+    );
 
     if (dateFrom || dateTo) {
       where.createdAt = {};

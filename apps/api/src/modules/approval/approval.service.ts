@@ -1,5 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { prisma, Approval, ApprovalStatus, RiskLevel } from '@repo-pulse/database';
+import {
+  buildEventScopeWhere,
+  normalizeRepositoryBranchScopes,
+  parseRepositoryBranchScopesParam,
+} from '../../common/utils/repository-branch-scope';
 
 export interface CreateApprovalDto {
   eventId: string;
@@ -114,29 +119,26 @@ export class ApprovalService {
   /**
    * 获取待审批数量
    */
-  async getPendingCount(userId: string, repositoryIdsParam?: string): Promise<number> {
+  async getPendingCount(
+    userId: string,
+    repositoryIdsParam?: string,
+    repositoryBranchScopesParam?: string,
+  ): Promise<number> {
     const repoIds = await this.resolveRepositoryIds(userId, repositoryIdsParam);
+    const repositoryBranchScopes = normalizeRepositoryBranchScopes(
+      repoIds,
+      parseRepositoryBranchScopesParam(repositoryBranchScopesParam),
+    );
 
     // 如果用户没有任何仓库，返回 0
     if (repoIds.length === 0) {
       return 0;
     }
 
-    const events = await prisma.event.findMany({
-      where: { repositoryId: { in: repoIds } },
-      select: { id: true },
-    });
-    const eventIds = events.map((e: { id: string }) => e.id);
-
-    // 如果没有事件，返回 0
-    if (eventIds.length === 0) {
-      return 0;
-    }
-
     return prisma.approval.count({
       where: {
-        eventId: { in: eventIds },
         status: ApprovalStatus.PENDING,
+        event: buildEventScopeWhere(repoIds, repositoryBranchScopes),
       },
     });
   }

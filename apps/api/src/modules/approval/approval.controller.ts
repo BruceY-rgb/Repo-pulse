@@ -23,12 +23,12 @@ export class ApprovalController {
    */
   @Get()
   async getApprovals(
-    @CurrentUser() user: { userId: string },
+    @CurrentUser() user: { sub: string },
     @Query('status') status?: ApprovalStatus,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ): Promise<{ approvals: Approval[]; total: number }> {
-    return this.approvalService.getApprovals(user.userId, {
+    return this.approvalService.getApprovals(user.sub, {
       status,
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
@@ -40,10 +40,11 @@ export class ApprovalController {
    */
   @Get('pending-count')
   async getPendingCount(
-    @CurrentUser() user: { userId: string },
+    @CurrentUser() user: { sub: string },
     @Query('repositoryIds') repositoryIds?: string,
+    @Query('branchScopes') branchScopes?: string,
   ): Promise<{ count: number }> {
-    const count = await this.approvalService.getPendingCount(user.userId, repositoryIds);
+    const count = await this.approvalService.getPendingCount(user.sub, repositoryIds, branchScopes);
     return { count };
   }
 

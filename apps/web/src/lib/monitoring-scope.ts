@@ -1,4 +1,8 @@
-import type { MonitoringScopePreferences, UserPreferences } from '@/types/api';
+import type {
+  MonitoringScopePreferences,
+  RepositoryBranchScopeMap,
+  UserPreferences,
+} from '@/types/api';
 
 function sanitizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
@@ -6,6 +10,19 @@ function sanitizeStringArray(value: unknown): string[] {
   }
 
   return value.filter((item): item is string => typeof item === 'string');
+}
+
+function sanitizeRepositoryBranchScopes(value: unknown): RepositoryBranchScopeMap {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([repositoryId, branches]) => [
+      repositoryId,
+      sanitizeStringArray(branches),
+    ]),
+  );
 }
 
 export function getMonitoringScopePreferences(
@@ -17,6 +34,9 @@ export function getMonitoringScopePreferences(
     return {
       repositoryIds: sanitizeStringArray(monitoringScope.repositoryIds),
       branchNames: sanitizeStringArray(monitoringScope.branchNames),
+      repositoryBranchScopes: sanitizeRepositoryBranchScopes(
+        monitoringScope.repositoryBranchScopes,
+      ),
     };
   }
 
@@ -25,12 +45,14 @@ export function getMonitoringScopePreferences(
     return {
       repositoryIds: sanitizeStringArray(dashboard.monitoredRepositoryIds),
       branchNames: [],
+      repositoryBranchScopes: {},
     };
   }
 
   return {
     repositoryIds: [],
     branchNames: [],
+    repositoryBranchScopes: {},
   };
 }
 
@@ -46,12 +68,16 @@ export function buildMonitoringScopePreferencesPayload(
 ): UserPreferences {
   const repositoryIds = sanitizeStringArray(nextScope.repositoryIds);
   const branchNames = sanitizeStringArray(nextScope.branchNames);
+  const repositoryBranchScopes = sanitizeRepositoryBranchScopes(
+    nextScope.repositoryBranchScopes,
+  );
 
   return {
     ...(currentPreferences ?? {}),
     monitoringScope: {
       repositoryIds,
       branchNames,
+      repositoryBranchScopes,
     },
   };
 }

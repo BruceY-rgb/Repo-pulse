@@ -3,13 +3,28 @@ import { eventService } from '@/services/event.service';
 import { notificationService } from '@/services/notification.service';
 import { repositoryService } from '@/services/repository.service';
 import { useApiQuery } from '@/lib/query-hooks';
+import type { RepositoryBranchScopeMap } from '@/types/api';
 
-function createSelectionKey(repositoryIds?: string[]) {
+function createSelectionKey(
+  repositoryIds?: string[],
+  repositoryBranchScopes?: RepositoryBranchScopeMap,
+) {
   if (!repositoryIds || repositoryIds.length === 0) {
     return 'none';
   }
 
-  return [...repositoryIds].sort().join(',');
+  const normalizedBranchScopes = repositoryIds.reduce<Record<string, string[]>>((acc, repositoryId) => {
+    const branches = repositoryBranchScopes?.[repositoryId] ?? [];
+    if (branches.length > 0) {
+      acc[repositoryId] = [...branches].sort();
+    }
+    return acc;
+  }, {});
+
+  return JSON.stringify({
+    repositoryIds: [...repositoryIds].sort(),
+    repositoryBranchScopes: normalizedBranchScopes,
+  });
 }
 
 export const dashboardQueryKeys = {
@@ -38,14 +53,17 @@ export function useDashboardRepositoriesQuery() {
   });
 }
 
-export function useDashboardStatsQuery(repositoryIds?: string[]) {
-  const selectionKey = createSelectionKey(repositoryIds);
+export function useDashboardStatsQuery(
+  repositoryIds?: string[],
+  repositoryBranchScopes?: RepositoryBranchScopeMap,
+) {
+  const selectionKey = createSelectionKey(repositoryIds, repositoryBranchScopes);
 
   return useApiQuery({
     queryKey: dashboardQueryKeys.stats(selectionKey),
     queryFn: async () => {
       try {
-        return await eventService.getStats(repositoryIds ?? []);
+        return await eventService.getStats(repositoryIds ?? [], repositoryBranchScopes);
       } catch {
         return {
           total: 0,
@@ -58,14 +76,17 @@ export function useDashboardStatsQuery(repositoryIds?: string[]) {
   });
 }
 
-export function useDashboardRecentEventsQuery(repositoryIds?: string[]) {
-  const selectionKey = createSelectionKey(repositoryIds);
+export function useDashboardRecentEventsQuery(
+  repositoryIds?: string[],
+  repositoryBranchScopes?: RepositoryBranchScopeMap,
+) {
+  const selectionKey = createSelectionKey(repositoryIds, repositoryBranchScopes);
 
   return useApiQuery({
     queryKey: dashboardQueryKeys.recentEvents(selectionKey),
     queryFn: async () => {
       try {
-        return await eventService.getAll(repositoryIds ?? [], {
+        return await eventService.getAll(repositoryIds ?? [], repositoryBranchScopes, {
           page: 1,
           pageSize: 6,
         });
@@ -84,23 +105,29 @@ export function useDashboardRecentEventsQuery(repositoryIds?: string[]) {
   });
 }
 
-export function usePendingApprovalsCountQuery(repositoryIds?: string[]) {
-  const selectionKey = createSelectionKey(repositoryIds);
+export function usePendingApprovalsCountQuery(
+  repositoryIds?: string[],
+  repositoryBranchScopes?: RepositoryBranchScopeMap,
+) {
+  const selectionKey = createSelectionKey(repositoryIds, repositoryBranchScopes);
 
   return useApiQuery({
     queryKey: dashboardQueryKeys.pendingApprovals(selectionKey),
-    queryFn: () => approvalService.getPendingCount(repositoryIds),
+    queryFn: () => approvalService.getPendingCount(repositoryIds, repositoryBranchScopes),
     enabled: Boolean(repositoryIds && repositoryIds.length > 0),
     staleTime: 30 * 1000,
   });
 }
 
-export function useUnreadNotificationsCountQuery(repositoryIds?: string[]) {
-  const selectionKey = createSelectionKey(repositoryIds);
+export function useUnreadNotificationsCountQuery(
+  repositoryIds?: string[],
+  repositoryBranchScopes?: RepositoryBranchScopeMap,
+) {
+  const selectionKey = createSelectionKey(repositoryIds, repositoryBranchScopes);
 
   return useApiQuery({
     queryKey: dashboardQueryKeys.unreadNotifications(selectionKey),
-    queryFn: () => notificationService.getUnreadCount(repositoryIds),
+    queryFn: () => notificationService.getUnreadCount(repositoryIds, repositoryBranchScopes),
     enabled: Boolean(repositoryIds && repositoryIds.length > 0),
     staleTime: 30 * 1000,
   });

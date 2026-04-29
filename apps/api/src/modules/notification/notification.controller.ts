@@ -65,8 +65,9 @@ export class NotificationController {
   async getUnreadCount(
     @CurrentUser() user: { sub: string },
     @Query('repositoryIds') repositoryIds?: string,
+    @Query('branchScopes') branchScopes?: string,
   ): Promise<{ count: number }> {
-    const count = await this.notificationService.getUnreadCount(user.sub, repositoryIds);
+    const count = await this.notificationService.getUnreadCount(user.sub, repositoryIds, branchScopes);
     return { count };
   }
 

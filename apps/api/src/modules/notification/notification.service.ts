@@ -6,6 +6,11 @@ import { FeishuChannel } from './channels/feishu.channel';
 import { WebhookChannel } from './channels/webhook.channel';
 import { ChannelSendResult } from './channels/shared';
 import { SendNotificationDto, UpdateNotificationPreferencesDto } from './dto/notification.dto';
+import {
+  buildEventScopeWhere,
+  normalizeRepositoryBranchScopes,
+  parseRepositoryBranchScopesParam,
+} from '../../common/utils/repository-branch-scope';
 
 export interface NotificationPreferences {
   channels: NotificationChannel[];
@@ -320,8 +325,16 @@ export class NotificationService {
     });
   }
 
-  async getUnreadCount(userId: string, repositoryIdsParam?: string): Promise<number> {
+  async getUnreadCount(
+    userId: string,
+    repositoryIdsParam?: string,
+    repositoryBranchScopesParam?: string,
+  ): Promise<number> {
     const repositoryIds = await this.resolveRepositoryIds(userId, repositoryIdsParam);
+    const repositoryBranchScopes = normalizeRepositoryBranchScopes(
+      repositoryIds,
+      parseRepositoryBranchScopesParam(repositoryBranchScopesParam),
+    );
 
     if (repositoryIds.length === 0) {
       return 0;
@@ -333,9 +346,7 @@ export class NotificationService {
         channel: NotificationChannel.IN_APP,
         readAt: null,
         event: {
-          repositoryId: {
-            in: repositoryIds,
-          },
+          ...buildEventScopeWhere(repositoryIds, repositoryBranchScopes),
         },
       },
     });

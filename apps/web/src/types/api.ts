@@ -25,9 +25,12 @@ export interface DashboardPreferences {
   monitoredRepositoryIds?: string[];
 }
 
+export type RepositoryBranchScopeMap = Record<string, string[]>;
+
 export interface MonitoringScopePreferences {
   repositoryIds?: string[];
   branchNames?: string[];
+  repositoryBranchScopes?: RepositoryBranchScopeMap;
 }
 
 export interface UserPreferences {
@@ -88,6 +91,9 @@ export interface Event {
   authorAvatar: string | null;
   externalId: string;
   externalUrl: string | null;
+  branch: string | null;
+  sourceBranch: string | null;
+  targetBranch: string | null;
   metadata: Record<string, unknown>;
   rawPayload: Record<string, unknown> | null;
   createdAt: string;
@@ -149,4 +155,8 @@ export interface SearchResult {
     avatarUrl: string;
   };
   platform: Platform;
+}
+
+export interface RepositoryBranchScopeOption {
+  name: string;
 }

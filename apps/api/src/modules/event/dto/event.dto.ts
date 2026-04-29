@@ -12,6 +12,10 @@ export class PaginationQueryDto {
   repositoryIds?: string;
 
   @IsOptional()
+  @IsString()
+  branchScopes?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   page?: number;
@@ -44,6 +48,10 @@ export class EventStatsQueryDto {
   @IsOptional()
   @IsString()
   repositoryIds?: string;
+
+  @IsOptional()
+  @IsString()
+  branchScopes?: string;
 
   @IsOptional()
   @IsDateString()

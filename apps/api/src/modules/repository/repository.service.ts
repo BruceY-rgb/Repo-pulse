@@ -24,6 +24,9 @@ interface NormalizedSyncEvent {
   authorAvatar?: string;
   externalId: string;
   externalUrl?: string;
+  branch?: string;
+  sourceBranch?: string;
+  targetBranch?: string;
   metadata: Record<string, unknown>;
 }
 
@@ -191,6 +194,79 @@ export class RepositoryService {
     }
 
     return repository as Repository & Record<string, unknown>;
+  }
+
+  async getBranches(userId: string, id: string): Promise<string[]> {
+    const repository = await this.prisma.repository.findUnique({
+      where: { id },
+      include: {
+        users: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                githubAccessToken: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!repository) {
+      throw new NotFoundException('Repository not found');
+    }
+
+    const membership = repository.users.find((entry) => entry.userId === userId);
+    if (!membership) {
+      throw new ForbiddenException('You do not have access to this repository');
+    }
+
+    const [owner, repo] = this.parseRepositoryPath(repository.fullName);
+    const tokenOwner = repository.users.find((entry) => entry.user.githubAccessToken);
+
+    let providerBranches: string[] = [];
+    try {
+      if (repository.platform === Platform.GITHUB) {
+        providerBranches = await this.githubService.getBranches(
+          owner,
+          repo,
+          tokenOwner?.user.githubAccessToken || undefined,
+        );
+      } else {
+        providerBranches = await this.gitlabService.getBranches(owner, repo);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to fetch provider branches for ${repository.fullName}, falling back to observed branches`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+
+    const observedEvents = await this.prisma.event.findMany({
+      where: { repositoryId: id },
+      select: {
+        branch: true,
+        sourceBranch: true,
+        targetBranch: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+
+    const observedBranches = observedEvents.flatMap((event) =>
+      [event.branch, event.sourceBranch, event.targetBranch].filter(
+        (branch): branch is string => Boolean(branch),
+      ),
+    );
+
+    return Array.from(
+      new Set([
+        ...providerBranches,
+        repository.defaultBranch,
+        ...observedBranches,
+      ].filter(Boolean)),
+    ).sort((left, right) => left.localeCompare(right));
   }
 
   async update(id: string, dto: UpdateRepositoryDto) {
@@ -521,6 +597,9 @@ export class RepositoryService {
             authorAvatar: normalized.authorAvatar,
             externalId: normalized.externalId,
             externalUrl: normalized.externalUrl,
+            branch: normalized.branch,
+            sourceBranch: normalized.sourceBranch,
+            targetBranch: normalized.targetBranch,
             metadata: normalized.metadata,
           });
           createdCount += 1;
@@ -570,6 +649,7 @@ export class RepositoryService {
       authorAvatar: commit.author?.avatar_url,
       externalId: commit.sha,
       externalUrl: commit.html_url,
+      branch,
       metadata: { source: 'repository_sync', provider: 'github', branch },
     };
   }
@@ -584,6 +664,8 @@ export class RepositoryService {
       merged_at?: string | null;
       updated_at?: string;
       created_at?: string;
+      head?: { ref?: string };
+      base?: { ref?: string };
       user?: { login?: string; avatar_url?: string };
       number?: number;
     };
@@ -608,6 +690,9 @@ export class RepositoryService {
       authorAvatar: pr.user?.avatar_url,
       externalId: `gh-pr-${pr.id}`,
       externalUrl: pr.html_url,
+      branch: pr.base?.ref,
+      sourceBranch: pr.head?.ref,
+      targetBranch: pr.base?.ref,
       metadata: {
         source: 'repository_sync',
         provider: 'github',
@@ -671,6 +756,7 @@ export class RepositoryService {
       author: commit.author_name || 'unknown',
       externalId: commit.id,
       externalUrl: commit.web_url,
+      branch,
       metadata: { source: 'repository_sync', provider: 'gitlab', branch },
     };
   }
@@ -688,6 +774,8 @@ export class RepositoryService {
       merged_at?: string | null;
       updated_at?: string;
       created_at?: string;
+      source_branch?: string;
+      target_branch?: string;
       author?: { username?: string; avatar_url?: string };
       iid?: number;
     };
@@ -712,6 +800,9 @@ export class RepositoryService {
       authorAvatar: mr.author?.avatar_url,
       externalId: `gl-mr-${mr.id}`,
       externalUrl: mr.web_url,
+      branch: mr.target_branch,
+      sourceBranch: mr.source_branch,
+      targetBranch: mr.target_branch,
       metadata: {
         source: 'repository_sync',
         provider: 'gitlab',

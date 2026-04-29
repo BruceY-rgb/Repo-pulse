@@ -5,6 +5,7 @@ import type { CreateRepositoryDto } from '@/types/api';
 export const repositoryQueryKeys = {
   all: ['repositories'] as const,
   list: () => [...repositoryQueryKeys.all, 'list'] as const,
+  branches: (id: string) => [...repositoryQueryKeys.all, 'branches', id] as const,
   myRepos: () => [...repositoryQueryKeys.all, 'my-repos'] as const,
   starred: () => [...repositoryQueryKeys.all, 'starred'] as const,
   search: (keyword: string) => [...repositoryQueryKeys.all, 'search', keyword] as const,
@@ -24,6 +25,15 @@ export function useMyRepositoryCandidatesQuery(enabled: boolean) {
     queryFn: repositoryService.getMyRepos,
     enabled,
     staleTime: 60 * 1000,
+  });
+}
+
+export function useRepositoryBranchesQuery(repositoryId: string, enabled: boolean) {
+  return useApiQuery({
+    queryKey: repositoryQueryKeys.branches(repositoryId),
+    queryFn: () => repositoryService.getBranches(repositoryId),
+    enabled,
+    staleTime: 5 * 60 * 1000,
   });
 }
 

@@ -219,7 +219,8 @@ export function Repositories() {
 
     await persistMonitoringScope({
       repositoryIds: Array.from(new Set([...scopeRepositoryIds, createdRepository.id])),
-      branchNames: monitoringScope.branchNames,
+      branchNames: [],
+      repositoryBranchScopes: monitoringScope.repositoryBranchScopes,
     });
 
     await refreshRepositories();
@@ -228,14 +229,16 @@ export function Repositories() {
   const addRepositoryToScope = async (id: string) => {
     await persistMonitoringScope({
       repositoryIds: Array.from(new Set([...scopeRepositoryIds, id])),
-      branchNames: monitoringScope.branchNames,
+      branchNames: [],
+      repositoryBranchScopes: monitoringScope.repositoryBranchScopes,
     });
   };
 
   const removeRepositoryFromScope = async (id: string) => {
     await persistMonitoringScope({
       repositoryIds: scopeRepositoryIds.filter((repositoryId) => repositoryId !== id),
-      branchNames: monitoringScope.branchNames,
+      branchNames: [],
+      repositoryBranchScopes: monitoringScope.repositoryBranchScopes,
     });
   };
 

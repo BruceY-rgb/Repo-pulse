@@ -171,6 +171,9 @@ model Event {
   authorAvatar  String?
   externalId    String
   externalUrl   String?
+  branch        String?
+  sourceBranch  String?
+  targetBranch  String?
   metadata      Json      @default("{}")
   rawPayload    Json?
   createdAt     DateTime  @default(now())

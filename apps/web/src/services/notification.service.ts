@@ -1,5 +1,5 @@
 import { apiClient } from './api-client';
-import type { ApiResponse } from '@/types/api';
+import type { ApiResponse, RepositoryBranchScopeMap } from '@/types/api';
 
 export type NotificationChannel = 'EMAIL' | 'DINGTALK' | 'FEISHU' | 'WEBHOOK' | 'IN_APP';
 
@@ -69,11 +69,27 @@ export const notificationService = {
   /**
    * 获取未读数量
    */
-  async getUnreadCount(repositoryIds?: string[]): Promise<{ count: number }> {
+  async getUnreadCount(
+    repositoryIds?: string[],
+    repositoryBranchScopes?: RepositoryBranchScopeMap,
+  ): Promise<{ count: number }> {
+    const normalizedBranchScopes = repositoryIds?.reduce<Record<string, string[]>>((acc, repositoryId) => {
+      const branches = repositoryBranchScopes?.[repositoryId] ?? [];
+      if (branches.length > 0) {
+        acc[repositoryId] = [...branches].sort();
+      }
+      return acc;
+    }, {});
+
     const { data } = await apiClient.get<ApiResponse<{ count: number }>>('/notifications/unread-count', {
       params:
         repositoryIds && repositoryIds.length > 0
-          ? { repositoryIds: [...repositoryIds].sort().join(',') }
+          ? {
+              repositoryIds: [...repositoryIds].sort().join(','),
+              ...(normalizedBranchScopes && Object.keys(normalizedBranchScopes).length > 0
+                ? { branchScopes: JSON.stringify(normalizedBranchScopes) }
+                : {}),
+            }
           : undefined,
     });
     return data.data;
