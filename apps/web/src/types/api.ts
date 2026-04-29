@@ -16,13 +16,24 @@ export interface User {
   name: string;
   avatar: string | null;
   role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'VIEWER';
-  preferences: Record<string, unknown>;
+  preferences: UserPreferences;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface DashboardPreferences {
   monitoredRepositoryIds?: string[];
+}
+
+export interface MonitoringScopePreferences {
+  repositoryIds?: string[];
+  branchNames?: string[];
+}
+
+export interface UserPreferences {
+  dashboard?: DashboardPreferences;
+  monitoringScope?: MonitoringScopePreferences;
+  [key: string]: unknown;
 }
 
 export interface PaginatedResponse<T> {

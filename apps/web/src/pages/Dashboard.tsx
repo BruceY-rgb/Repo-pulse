@@ -51,10 +51,7 @@ import {
 } from 'recharts';
 import gsap from 'gsap';
 import { useLanguage } from '@/contexts/LanguageContext';
-import {
-  useCurrentUserQuery,
-  useUpdateUserPreferencesMutation,
-} from '@/hooks/queries/use-auth-queries';
+import { useMonitoringScopePreferences } from '@/hooks/use-monitoring-scope-preferences';
 import {
   useDashboardRecentEventsQuery,
   useDashboardRepositoriesQuery,
@@ -64,7 +61,8 @@ import {
 } from '@/hooks/queries/use-dashboard-queries';
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
 import { useDashboardActivity } from '@/hooks/use-dashboard';
-import type { DashboardPreferences, Repository } from '@/types/api';
+import { getMonitoringScopeRepositoryIds } from '@/lib/monitoring-scope';
+import type { Repository } from '@/types/api';
 
 function toRelativeTime(dateString: string, language: 'en' | 'zh') {
   const now = Date.now();
@@ -96,22 +94,6 @@ function getRiskByType(type: string): 'low' | 'medium' | 'high' {
   return 'low';
 }
 
-function getSavedMonitoredRepositoryIds(preferences: Record<string, unknown> | undefined) {
-  const dashboardPrefs = preferences?.dashboard;
-
-  if (!dashboardPrefs || typeof dashboardPrefs !== 'object' || Array.isArray(dashboardPrefs)) {
-    return [];
-  }
-
-  const monitoredRepositoryIds = (dashboardPrefs as DashboardPreferences).monitoredRepositoryIds;
-
-  if (!Array.isArray(monitoredRepositoryIds)) {
-    return [];
-  }
-
-  return monitoredRepositoryIds.filter((value): value is string => typeof value === 'string');
-}
-
 function areStringArraysEqual(left: string[], right: string[]) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
@@ -130,8 +112,12 @@ export function Dashboard() {
   const { t, language } = useLanguage();
 
   const repositoriesQuery = useDashboardRepositoriesQuery();
-  const { data: currentUser, isLoading: isCurrentUserLoading } = useCurrentUserQuery();
-  const updatePreferencesMutation = useUpdateUserPreferencesMutation();
+  const {
+    currentUserQuery,
+    monitoringScope,
+    persistMonitoringScope,
+  } = useMonitoringScopePreferences();
+  const { data: currentUser, isLoading: isCurrentUserLoading } = currentUserQuery;
   const repos = repositoriesQuery.data ?? [];
   const [isScopePopoverOpen, setIsScopePopoverOpen] = useState(false);
   const [selectedRepositoryIds, setSelectedRepositoryIds] = useState<string[]>([]);
@@ -141,7 +127,7 @@ export function Dashboard() {
     [availableRepositoryIds],
   );
   const savedRepositoryIds = useMemo(
-    () => getSavedMonitoredRepositoryIds(currentUser?.preferences),
+    () => getMonitoringScopeRepositoryIds(currentUser?.preferences),
     [currentUser?.preferences],
   );
   const selectedRepositories = useMemo(
@@ -152,12 +138,9 @@ export function Dashboard() {
   const hasSelection = selectedRepositoryIds.length > 0;
 
   const persistMonitoredRepositoryIds = (repositoryIds: string[]) => {
-    updatePreferencesMutation.mutate({
-      preferences: {
-        dashboard: {
-          monitoredRepositoryIds: repositoryIds,
-        },
-      },
+    void persistMonitoringScope({
+      branchNames: monitoringScope.branchNames,
+      repositoryIds,
     });
   };
 

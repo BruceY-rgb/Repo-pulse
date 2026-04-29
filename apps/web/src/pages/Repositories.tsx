@@ -45,6 +45,7 @@ import {
 } from '@/components/ui/tooltip';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
+import { useMonitoringScopePreferences } from '@/hooks/use-monitoring-scope-preferences';
 import {
   repositoryQueryKeys,
   useCreateRepositoryMutation,
@@ -93,6 +94,8 @@ export function Repositories() {
   const [searchKeyword, setSearchKeyword] = useState('');
 
   const repositoriesQuery = useRepositoryListQuery();
+  const { monitoringScope, persistMonitoringScope, updatePreferencesMutation } =
+    useMonitoringScopePreferences();
   const createMutation = useCreateRepositoryMutation();
   const syncMutation = useSyncRepositoryMutation();
   const deleteMutation = useDeleteRepositoryMutation();
@@ -117,16 +120,27 @@ export function Repositories() {
     setKeyword(searchParams.get('keyword') ?? '');
   }, [searchParams]);
 
-  const monitoredRepositories = repositoriesQuery.data ?? [];
-  const monitoredRepositoryIds = useMemo(
-    () => monitoredRepositories.map((repository) => repository.id),
-    [monitoredRepositories],
+  const repositories = useMemo(
+    () => repositoriesQuery.data ?? [],
+    [repositoriesQuery.data],
+  );
+  const scopeRepositoryIds = useMemo(
+    () => monitoringScope.repositoryIds ?? [],
+    [monitoringScope.repositoryIds],
+  );
+  const scopeRepositoryIdSet = useMemo(
+    () => new Set(scopeRepositoryIds),
+    [scopeRepositoryIds],
+  );
+  const repositoryIds = useMemo(
+    () => repositories.map((repository) => repository.id),
+    [repositories],
   );
 
-  useRepositoryRealtimeSubscription(monitoredRepositoryIds);
+  useRepositoryRealtimeSubscription(repositoryIds);
 
   const filteredRepositories = useMemo(() => {
-    return monitoredRepositories.filter((item) => {
+    return repositories.filter((item) => {
       const matchesKeyword =
         item.name.toLowerCase().includes(keyword.toLowerCase()) ||
         item.fullName.toLowerCase().includes(keyword.toLowerCase());
@@ -141,7 +155,17 @@ export function Repositories() {
 
       return matchesKeyword;
     });
-  }, [filter, keyword, monitoredRepositories]);
+  }, [filter, keyword, repositories]);
+
+  const monitoredRepositories = useMemo(
+    () => filteredRepositories.filter((repository) => scopeRepositoryIdSet.has(repository.id)),
+    [filteredRepositories, scopeRepositoryIdSet],
+  );
+
+  const otherRepositories = useMemo(
+    () => filteredRepositories.filter((repository) => !scopeRepositoryIdSet.has(repository.id)),
+    [filteredRepositories, scopeRepositoryIdSet],
+  );
 
   const currentCandidates = useMemo<SearchResult[]>(() => {
     if (source === 'my') {
@@ -161,8 +185,8 @@ export function Repositories() {
     (source === 'search' && searchCandidatesQuery.isLoading);
 
   const monitoredMap = useMemo(
-    () => new Map(monitoredRepositories.map((item) => [item.fullName, item])),
-    [monitoredRepositories],
+    () => new Map(repositories.map((item) => [item.fullName, item])),
+    [repositories],
   );
 
   const formatDateTime = (dateString?: string | null) => {
@@ -187,13 +211,32 @@ export function Repositories() {
       return;
     }
 
-    await createMutation.mutateAsync({
+    const createdRepository = await createMutation.mutateAsync({
       platform: candidate.platform,
       owner,
       repo,
     });
 
+    await persistMonitoringScope({
+      repositoryIds: Array.from(new Set([...scopeRepositoryIds, createdRepository.id])),
+      branchNames: monitoringScope.branchNames,
+    });
+
     await refreshRepositories();
+  };
+
+  const addRepositoryToScope = async (id: string) => {
+    await persistMonitoringScope({
+      repositoryIds: Array.from(new Set([...scopeRepositoryIds, id])),
+      branchNames: monitoringScope.branchNames,
+    });
+  };
+
+  const removeRepositoryFromScope = async (id: string) => {
+    await persistMonitoringScope({
+      repositoryIds: scopeRepositoryIds.filter((repositoryId) => repositoryId !== id),
+      branchNames: monitoringScope.branchNames,
+    });
   };
 
   const syncRepository = async (id: string) => {
@@ -203,6 +246,9 @@ export function Repositories() {
 
   const removeRepository = async (id: string) => {
     await deleteMutation.mutateAsync(id);
+    if (scopeRepositoryIdSet.has(id)) {
+      await removeRepositoryFromScope(id);
+    }
     await refreshRepositories();
   };
 
@@ -216,15 +262,17 @@ export function Repositories() {
   };
 
   const isAnyActionPending =
+    updatePreferencesMutation.isPending ||
     createMutation.isPending ||
     syncMutation.isPending ||
     deleteMutation.isPending ||
     updateMutation.isPending;
 
-  const renderRepositoryCard = (repo: Repository) => {
+  const renderRepositoryCard = (repo: Repository, isInScope: boolean) => {
     const isSyncing = syncMutation.isPending && syncMutation.variables === repo.id;
     const isDeleting = deleteMutation.isPending && deleteMutation.variables === repo.id;
     const isUpdating = updateMutation.isPending && updateMutation.variables?.id === repo.id;
+    const isUpdatingScope = updatePreferencesMutation.isPending;
     const cardStyle = repo.isActive
       ? 'border-emerald-500/30 bg-emerald-500/5'
       : 'border-border/80 bg-muted/35 opacity-90';
@@ -267,6 +315,26 @@ export function Repositories() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Button
+              variant={isInScope ? 'secondary' : 'default'}
+              size="sm"
+              className="gap-2"
+              onClick={() => {
+                if (isInScope) {
+                  removeRepositoryFromScope(repo.id);
+                  return;
+                }
+
+                addRepositoryToScope(repo.id);
+              }}
+              disabled={isUpdatingScope || isAnyActionPending}
+            >
+              {isUpdatingScope ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              {isInScope
+                ? t('repositories.actions.removeFromScope')
+                : t('repositories.actions.addToScope')}
+            </Button>
+
             <Button
               variant="outline"
               size="sm"
@@ -403,8 +471,14 @@ export function Repositories() {
                         ) : (
                           currentCandidates.map((candidate) => {
                             const existingRepository = monitoredMap.get(candidate.fullName);
-                            const alreadyMonitored = Boolean(existingRepository);
+                            const alreadyAdded = Boolean(existingRepository);
+                            const alreadyInScope = Boolean(
+                              existingRepository && scopeRepositoryIdSet.has(existingRepository.id),
+                            );
                             const canEnable = Boolean(existingRepository && !existingRepository.isActive);
+                            const canAddToScope = Boolean(
+                              existingRepository && existingRepository.isActive && !alreadyInScope,
+                            );
                             const isCreating =
                               createMutation.isPending &&
                               createMutation.variables?.owner === candidate.owner.login &&
@@ -412,13 +486,14 @@ export function Repositories() {
                             const isEnabling =
                               updateMutation.isPending &&
                               updateMutation.variables?.id === existingRepository?.id;
+                            const isUpdatingScope = updatePreferencesMutation.isPending;
 
                             return (
                               <div
                                 key={`${candidate.platform}-${candidate.id}`}
                                 className={[
                                   'w-full max-w-full space-y-3 overflow-hidden rounded-lg border p-4 transition-all',
-                                  alreadyMonitored
+                                  alreadyAdded
                                     ? 'border-primary/30 bg-primary/5'
                                     : 'border-border bg-card hover:border-primary/20 hover:bg-white/5',
                                 ].join(' ')}
@@ -463,26 +538,35 @@ export function Repositories() {
                                         updateRepositoryStatus(existingRepository.id, true);
                                         return;
                                       }
+                                      if (canAddToScope && existingRepository) {
+                                        addRepositoryToScope(existingRepository.id);
+                                        return;
+                                      }
                                       addRepository(candidate);
                                     }}
                                     disabled={
-                                      (!canEnable && alreadyMonitored) ||
+                                      (!canEnable && !canAddToScope && alreadyAdded) ||
                                       isCreating ||
                                       isEnabling ||
+                                      isUpdatingScope ||
                                       isAnyActionPending
                                     }
                                     className="w-full gap-2 sm:w-auto"
                                   >
-                                    {isCreating || isEnabling ? (
+                                    {isCreating || isEnabling || isUpdatingScope ? (
                                       <Loader2 className="h-4 w-4 animate-spin" />
                                     ) : (
                                       <Plus className="h-4 w-4" />
                                     )}
                                     {canEnable
                                       ? t('repositories.dialog.enableButton')
-                                      : alreadyMonitored
-                                        ? t('repositories.dialog.added')
-                                        : t('repositories.dialog.addButton')}
+                                      : canAddToScope
+                                        ? t('repositories.dialog.addToScopeButton')
+                                        : alreadyInScope
+                                          ? t('repositories.dialog.inScope')
+                                          : alreadyAdded
+                                            ? t('repositories.dialog.added')
+                                            : t('repositories.dialog.addButton')}
                                   </Button>
 
                                   <Button
@@ -531,14 +615,66 @@ export function Repositories() {
               </Button>
             </CardContent>
           </Card>
-        ) : filteredRepositories.length === 0 ? (
-          <Card>
-            <CardContent className="p-6 text-sm text-muted-foreground">
-              {t('repositories.empty.list')}
-            </CardContent>
-          </Card>
         ) : (
-          <section className="space-y-4">{filteredRepositories.map(renderRepositoryCard)}</section>
+          <div className="space-y-6">
+            <section className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold text-foreground">
+                    {t('repositories.scope.title')}
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    {t('repositories.scope.description')}
+                  </p>
+                </div>
+                <Badge variant="secondary" className="rounded-full">
+                  {monitoredRepositories.length}
+                </Badge>
+              </div>
+
+              {monitoredRepositories.length === 0 ? (
+                <Card>
+                  <CardContent className="p-6 text-sm text-muted-foreground">
+                    {t('repositories.scope.empty')}
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-4">
+                  {monitoredRepositories.map((repo) => renderRepositoryCard(repo, true))}
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold text-foreground">
+                    {t('repositories.other.title')}
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    {t('repositories.other.description')}
+                  </p>
+                </div>
+                <Badge variant="outline" className="rounded-full">
+                  {otherRepositories.length}
+                </Badge>
+              </div>
+
+              {otherRepositories.length === 0 ? (
+                <Card>
+                  <CardContent className="p-6 text-sm text-muted-foreground">
+                    {filteredRepositories.length === 0
+                      ? t('repositories.empty.list')
+                      : t('repositories.other.empty')}
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-4">
+                  {otherRepositories.map((repo) => renderRepositoryCard(repo, false))}
+                </div>
+              )}
+            </section>
+          </div>
         )}
       </div>
     </TooltipProvider>
