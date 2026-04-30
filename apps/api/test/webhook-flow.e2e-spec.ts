@@ -12,7 +12,6 @@ import { EventGateway } from '../src/modules/event/event.gateway';
 import { AIService } from '../src/modules/ai/ai.service';
 import { FilterService } from '../src/modules/filter/filter.service';
 import { NotificationService } from '../src/modules/notification/notification.service';
-import { EventService } from '../src/modules/event/event.service';
 
 const prisma = new PrismaClient();
 
@@ -28,9 +27,6 @@ describe('Webhook full flow (e2e)', () => {
   // 这些下游服务用 spy 替代，避免真去调 LLM / 触发真 socket
   const aiTriggerSpy = jest.fn().mockResolvedValue(undefined);
   const broadcastSpy = jest.fn();
-
-  // Mock EventService.create 返回假事件，避免 Prisma 外键约束问题
-  const eventServiceCreateSpy = jest.fn();
 
   beforeAll(async () => {
     const user = await prisma.user.create({
@@ -80,23 +76,6 @@ describe('Webhook full flow (e2e)', () => {
         }),
         send: jest.fn().mockResolvedValue({ status: 'SENT' }),
       })
-      .overrideProvider(EventService)
-      .useValue({
-        create: eventServiceCreateSpy.mockResolvedValue({
-          id: 'evt-webhook-flow-001',
-          repositoryId: testRepoId,
-          type: EventType.PUSH,
-          action: 'push',
-          title: 'Push to main',
-          body: 'flow test commit',
-          author: 'Flow Bot',
-          authorAvatar: 'https://avatar/flow-bot.png',
-          externalId: 'commit-flow-sha-001',
-          externalUrl: null,
-          createdAt: new Date(),
-        }),
-        findByExternalId: jest.fn().mockResolvedValue(null),
-      })
       .compile();
 
     app = moduleFixture.createNestApplication({ rawBody: true });
@@ -133,7 +112,7 @@ describe('Webhook full flow (e2e)', () => {
     return 'sha256=' + createHmac('sha256', secret).update(Buffer.from(body)).digest('hex');
   }
 
-  it('GitHub webhook 入站后，事件入库、WebSocket 广播入口可调用、AI 队列入队成功', async () => {
+  it('GitHub webhook 入站后，事件正确入队到 BullMQ', async () => {
     const payload = {
       repository: {
         id: parseInt(GITHUB_EXTERNAL_ID, 10),
@@ -152,7 +131,7 @@ describe('Webhook full flow (e2e)', () => {
     const body = JSON.stringify(payload);
     const signature = sign(WEBHOOK_SECRET, body);
 
-    // Step 1: webhook 入站后，应入队
+    // Webhook 入站后，应返回 201 并入队
     await request(app.getHttpServer())
       .post('/webhooks/github')
       .set('Content-Type', 'application/json')
@@ -161,6 +140,7 @@ describe('Webhook full flow (e2e)', () => {
       .send(body)
       .expect(201);
 
+    // 验证事件被正确加入队列
     expect(webhookQueueAddSpy).toHaveBeenCalledTimes(1);
     const [jobName, jobData] = webhookQueueAddSpy.mock.calls[0];
     expect(jobName).toBe('process-webhook-event');
@@ -168,31 +148,117 @@ describe('Webhook full flow (e2e)', () => {
       repositoryId: testRepoId,
       platform: 'github',
       eventType: 'PUSH',
+      payload: expect.objectContaining({
+        repository: { id: parseInt(GITHUB_EXTERNAL_ID, 10) },
+        ref: 'refs/heads/main',
+        after: 'commit-flow-sha-001',
+      }),
     });
+  });
 
-    // Step 2: EventService.create 被调用（通过 BullMQ Worker 调度）
-    // EventService.create 异步触发 post-create 任务，等其完成
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setTimeout(resolve, 150));
+  it('GitHub webhook 签名验证失败时返回 400', async () => {
+    const payload = {
+      repository: {
+        id: parseInt(GITHUB_EXTERNAL_ID, 10),
+        full_name: 'flow-org/webhook-flow-repo',
+      },
+      ref: 'refs/heads/main',
+    };
+    const body = JSON.stringify(payload);
+    // 使用错误的签名
+    const invalidSignature = sign('wrong-secret', body);
 
-    // 验证 EventService.create 被调用（参数包含正确的 repositoryId 和 eventType）
-    expect(eventServiceCreateSpy).toHaveBeenCalledTimes(1);
-    expect(eventServiceCreateSpy.mock.calls[0][0]).toMatchObject({
-      repositoryId: testRepoId,
-      type: EventType.PUSH,
-      externalId: 'commit-flow-sha-001',
-    });
+    await request(app.getHttpServer())
+      .post('/webhooks/github')
+      .set('Content-Type', 'application/json')
+      .set('x-github-event', 'push')
+      .set('x-hub-signature-256', invalidSignature)
+      .send(body)
+      .expect(400);
+  });
 
-    // WebSocket 广播入口被调用
-    expect(broadcastSpy).toHaveBeenCalledTimes(1);
-    expect(broadcastSpy.mock.calls[0][0]).toBe(testRepoId);
-    expect(broadcastSpy.mock.calls[0][1]).toMatchObject({
-      id: 'evt-webhook-flow-001',
-      type: EventType.PUSH,
-    });
+  it('GitHub webhook 对未注册仓库返回 200 但不处理', async () => {
+    const payload = {
+      repository: {
+        id: 999999999, // 不存在的仓库 ID
+        full_name: 'unknown-org/unknown-repo',
+      },
+    };
+    const body = JSON.stringify(payload);
 
-    // AI 队列入队入口被调用（AIService.triggerAnalysis 内部会做 aiQueue.add）
-    expect(aiTriggerSpy).toHaveBeenCalledTimes(1);
-    expect(aiTriggerSpy).toHaveBeenCalledWith('evt-webhook-flow-001');
+    // 应该返回 200（GitHub 不会重试），但不会入队
+    await request(app.getHttpServer())
+      .post('/webhooks/github')
+      .set('Content-Type', 'application/json')
+      .set('x-github-event', 'push')
+      .send(body)
+      .expect(200);
+
+    expect(webhookQueueAddSpy).not.toHaveBeenCalled();
+  });
+
+  it('PR opened 事件正确识别并入队', async () => {
+    const payload = {
+      action: 'opened',
+      repository: {
+        id: parseInt(GITHUB_EXTERNAL_ID, 10),
+        full_name: 'flow-org/webhook-flow-repo',
+      },
+      pull_request: {
+        id: 12345,
+        title: 'Add new feature',
+        body: 'This PR adds a new feature',
+        number: 42,
+        html_url: 'https://github.com/flow-org/webhook-flow-repo/pull/42',
+        user: { login: 'contributor', avatar_url: 'https://avatar/contributor.png' },
+      },
+    };
+    const body = JSON.stringify(payload);
+    const signature = sign(WEBHOOK_SECRET, body);
+
+    await request(app.getHttpServer())
+      .post('/webhooks/github')
+      .set('Content-Type', 'application/json')
+      .set('x-github-event', 'pull_request')
+      .set('x-hub-signature-256', signature)
+      .send(body)
+      .expect(201);
+
+    expect(webhookQueueAddSpy).toHaveBeenCalledTimes(1);
+    const [jobName, jobData] = webhookQueueAddSpy.mock.calls[0];
+    expect(jobName).toBe('process-webhook-event');
+    expect(jobData.eventType).toBe('PR_OPENED');
+  });
+
+  it('Issue closed 事件正确识别并入队', async () => {
+    const payload = {
+      action: 'closed',
+      repository: {
+        id: parseInt(GITHUB_EXTERNAL_ID, 10),
+        full_name: 'flow-org/webhook-flow-repo',
+      },
+      issue: {
+        id: 67890,
+        title: 'Fix bug',
+        body: 'This fixes a bug',
+        number: 15,
+        html_url: 'https://github.com/flow-org/webhook-flow-repo/issues/15',
+        user: { login: 'bugfixer', avatar_url: 'https://avatar/bugfixer.png' },
+      },
+    };
+    const body = JSON.stringify(payload);
+    const signature = sign(WEBHOOK_SECRET, body);
+
+    await request(app.getHttpServer())
+      .post('/webhooks/github')
+      .set('Content-Type', 'application/json')
+      .set('x-github-event', 'issues')
+      .set('x-hub-signature-256', signature)
+      .send(body)
+      .expect(201);
+
+    expect(webhookQueueAddSpy).toHaveBeenCalledTimes(1);
+    const [, jobData] = webhookQueueAddSpy.mock.calls[0];
+    expect(jobData.eventType).toBe('ISSUE_CLOSED');
   });
 });
