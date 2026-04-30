@@ -5,7 +5,7 @@ import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import { createHmac } from 'crypto';
 import type { Queue } from 'bullmq';
-import { PrismaClient, Platform, EventType } from '@repo-pulse/database';
+import { PrismaClient, Platform } from '@repo-pulse/database';
 import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from '../src/app.module';
 import { EventGateway } from '../src/modules/event/event.gateway';
@@ -22,7 +22,7 @@ describe('Webhook full flow (e2e)', () => {
   let app: INestApplication;
   let testRepoId: string;
   let testUserId: string;
-  let webhookQueueAddSpy: jest.SpyInstance;
+  let webhookQueue: Queue;
 
   // 这些下游服务用 spy 替代，避免真去调 LLM / 触发真 socket
   const aiTriggerSpy = jest.fn().mockResolvedValue(undefined);
@@ -91,15 +91,11 @@ describe('Webhook full flow (e2e)', () => {
     );
     await app.init();
 
-    // 真实 BullMQ Queue（CI 已起 Redis），改用 spy 探测 add 调用
-    const webhookQueue = moduleFixture.get<Queue>(getQueueToken('webhook-events'));
-    webhookQueueAddSpy = jest.spyOn(webhookQueue, 'add').mockResolvedValue({ id: 'job-1' } as any);
+    // 获取队列引用，后续测试中每次创建新的 spy
+    webhookQueue = moduleFixture.get<Queue>(getQueueToken('webhook-events'));
   });
 
   afterAll(async () => {
-    if (webhookQueueAddSpy) {
-      webhookQueueAddSpy.mockRestore();
-    }
     await prisma.event.deleteMany({ where: { repositoryId: testRepoId } });
     await prisma.userRepository.deleteMany({ where: { repositoryId: testRepoId } });
     await prisma.repository.deleteMany({ where: { id: testRepoId } });
@@ -112,7 +108,13 @@ describe('Webhook full flow (e2e)', () => {
     return 'sha256=' + createHmac('sha256', secret).update(Buffer.from(body)).digest('hex');
   }
 
+  function createQueueAddSpy() {
+    return jest.spyOn(webhookQueue, 'add').mockResolvedValue({ id: 'job-1' } as any);
+  }
+
   it('GitHub webhook 入站后，事件正确入队到 BullMQ', async () => {
+    const addSpy = createQueueAddSpy();
+
     const payload = {
       repository: {
         id: parseInt(GITHUB_EXTERNAL_ID, 10),
@@ -141,22 +143,26 @@ describe('Webhook full flow (e2e)', () => {
       .expect(201);
 
     // 验证事件被正确加入队列
-    expect(webhookQueueAddSpy).toHaveBeenCalledTimes(1);
-    const [jobName, jobData] = webhookQueueAddSpy.mock.calls[0];
+    expect(addSpy).toHaveBeenCalledTimes(1);
+    const [jobName, jobData] = addSpy.mock.calls[0];
     expect(jobName).toBe('process-webhook-event');
     expect(jobData).toMatchObject({
       repositoryId: testRepoId,
       platform: 'github',
       eventType: 'PUSH',
-      payload: expect.objectContaining({
-        repository: { id: parseInt(GITHUB_EXTERNAL_ID, 10) },
-        ref: 'refs/heads/main',
-        after: 'commit-flow-sha-001',
-      }),
     });
+    expect(jobData.payload).toMatchObject({
+      repository: { id: parseInt(GITHUB_EXTERNAL_ID, 10) },
+      ref: 'refs/heads/main',
+      after: 'commit-flow-sha-001',
+    });
+
+    addSpy.mockRestore();
   });
 
   it('GitHub webhook 签名验证失败时返回 400', async () => {
+    const addSpy = createQueueAddSpy();
+
     const payload = {
       repository: {
         id: parseInt(GITHUB_EXTERNAL_ID, 10),
@@ -175,9 +181,15 @@ describe('Webhook full flow (e2e)', () => {
       .set('x-hub-signature-256', invalidSignature)
       .send(body)
       .expect(400);
+
+    expect(addSpy).not.toHaveBeenCalled();
+
+    addSpy.mockRestore();
   });
 
   it('GitHub webhook 对未注册仓库返回 200 但不处理', async () => {
+    const addSpy = createQueueAddSpy();
+
     const payload = {
       repository: {
         id: 999999999, // 不存在的仓库 ID
@@ -194,10 +206,14 @@ describe('Webhook full flow (e2e)', () => {
       .send(body)
       .expect(200);
 
-    expect(webhookQueueAddSpy).not.toHaveBeenCalled();
+    expect(addSpy).not.toHaveBeenCalled();
+
+    addSpy.mockRestore();
   });
 
   it('PR opened 事件正确识别并入队', async () => {
+    const addSpy = createQueueAddSpy();
+
     const payload = {
       action: 'opened',
       repository: {
@@ -224,13 +240,17 @@ describe('Webhook full flow (e2e)', () => {
       .send(body)
       .expect(201);
 
-    expect(webhookQueueAddSpy).toHaveBeenCalledTimes(1);
-    const [jobName, jobData] = webhookQueueAddSpy.mock.calls[0];
+    expect(addSpy).toHaveBeenCalledTimes(1);
+    const [jobName, jobData] = addSpy.mock.calls[0];
     expect(jobName).toBe('process-webhook-event');
     expect(jobData.eventType).toBe('PR_OPENED');
+
+    addSpy.mockRestore();
   });
 
   it('Issue closed 事件正确识别并入队', async () => {
+    const addSpy = createQueueAddSpy();
+
     const payload = {
       action: 'closed',
       repository: {
@@ -257,8 +277,10 @@ describe('Webhook full flow (e2e)', () => {
       .send(body)
       .expect(201);
 
-    expect(webhookQueueAddSpy).toHaveBeenCalledTimes(1);
-    const [, jobData] = webhookQueueAddSpy.mock.calls[0];
+    expect(addSpy).toHaveBeenCalledTimes(1);
+    const [, jobData] = addSpy.mock.calls[0];
     expect(jobData.eventType).toBe('ISSUE_CLOSED');
+
+    addSpy.mockRestore();
   });
 });
