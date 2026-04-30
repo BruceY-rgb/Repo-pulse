@@ -140,7 +140,7 @@ describe('Webhook full flow (e2e)', () => {
       .set('x-github-event', 'push')
       .set('x-hub-signature-256', signature)
       .send(body)
-      .expect(201);
+      .expect(200);
 
     // 验证事件被正确加入队列
     expect(addSpy).toHaveBeenCalledTimes(1);
@@ -198,7 +198,7 @@ describe('Webhook full flow (e2e)', () => {
     };
     const body = JSON.stringify(payload);
 
-    // 应该返回 200（GitHub 不会重试），但不会入队
+    // Webhook 接收端点统一返回 200（不是标准的 REST 创建资源）
     await request(app.getHttpServer())
       .post('/webhooks/github')
       .set('Content-Type', 'application/json')
@@ -238,7 +238,7 @@ describe('Webhook full flow (e2e)', () => {
       .set('x-github-event', 'pull_request')
       .set('x-hub-signature-256', signature)
       .send(body)
-      .expect(201);
+      .expect(200);
 
     expect(addSpy).toHaveBeenCalledTimes(1);
     const [jobName, jobData] = addSpy.mock.calls[0];
@@ -275,7 +275,7 @@ describe('Webhook full flow (e2e)', () => {
       .set('x-github-event', 'issues')
       .set('x-hub-signature-256', signature)
       .send(body)
-      .expect(201);
+      .expect(200);
 
     expect(addSpy).toHaveBeenCalledTimes(1);
     const [, jobData] = addSpy.mock.calls[0];

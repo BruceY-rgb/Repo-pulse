@@ -4,6 +4,8 @@ import {
   Body,
   Headers,
   Req,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
@@ -22,6 +24,7 @@ export class WebhookController {
    */
   @Post('github')
   @Public()
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'GitHub Webhook 接收端点' })
   async handleGithubWebhook(
     @Headers('x-hub-signature-256') signature: string | undefined,
