@@ -1,6 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
-import { getQueueToken } from '@nestjs/bullmq';
 import {
   PrismaClient,
   Platform,
@@ -12,6 +11,7 @@ import {
 import { AppModule } from '../src/app.module';
 import { ApprovalService } from '../src/modules/approval/approval.service';
 import { EventGateway } from '../src/modules/event/event.gateway';
+import { AIService } from '../src/modules/ai/ai.service';
 
 const prisma = new PrismaClient();
 
@@ -51,12 +51,10 @@ describe('AI analysis → Approval pipeline (e2e)', () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
-      .overrideProvider(getQueueToken('webhook-events'))
-      .useValue({ add: jest.fn().mockResolvedValue({ id: 'job' }) })
-      .overrideProvider(getQueueToken('ai-analysis'))
-      .useValue({ add: jest.fn().mockResolvedValue({ id: 'ai-job' }) })
       .overrideProvider(EventGateway)
       .useValue({ broadcastNewEvent: jest.fn() })
+      .overrideProvider(AIService)
+      .useValue({ triggerAnalysis: jest.fn().mockResolvedValue(undefined) })
       .compile();
 
     app = moduleFixture.createNestApplication();

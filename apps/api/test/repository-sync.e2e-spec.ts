@@ -30,6 +30,7 @@ describe('Repository sync (e2e)', () => {
     getCommits: jest.fn(),
     getPullRequests: jest.fn(),
     getIssues: jest.fn(),
+    getBranches: jest.fn().mockResolvedValue(['main']),
     searchRepositories: jest.fn(),
     getUserRepositories: jest.fn(),
     getStarredRepos: jest.fn(),
