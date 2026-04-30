@@ -1,10 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotificationChannel, NotificationStatus } from '@repo-pulse/database';
-import { NotificationService } from './notification.service';
-import { EmailChannel } from './channels/email.channel';
-import { DingTalkChannel } from './channels/dingtalk.channel';
-import { FeishuChannel } from './channels/feishu.channel';
-import { WebhookChannel } from './channels/webhook.channel';
+import { NotificationService } from '@modules/notification/notification.service';
+import { EmailChannel } from '@modules/notification/channels/email.channel';
+import { DingTalkChannel } from '@modules/notification/channels/dingtalk.channel';
+import { FeishuChannel } from '@modules/notification/channels/feishu.channel';
+import { WebhookChannel } from '@modules/notification/channels/webhook.channel';
 
 // 内存 fake：替代 prisma 的 user / notification 操作
 const userStore = new Map<string, { id: string; preferences: Record<string, unknown> }>();
