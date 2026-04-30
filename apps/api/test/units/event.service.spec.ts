@@ -1,10 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventType, FilterAction, NotificationChannel } from '@repo-pulse/database';
-import { EventService } from './event.service';
-import { EventGateway } from './event.gateway';
-import { AIService } from '../ai/ai.service';
-import { FilterService } from '../filter/filter.service';
-import { NotificationService } from '../notification/notification.service';
+import { EventService } from '@modules/event/event.service';
+import { EventGateway } from '@modules/event/event.gateway';
+import { AIService } from '@modules/ai/ai.service';
+import { FilterService } from '@modules/filter/filter.service';
+import { NotificationService } from '@modules/notification/notification.service';
 
 const flushAsync = async () => {
   // 让 EventService.create 内的 .catch 后置链有机会跑完

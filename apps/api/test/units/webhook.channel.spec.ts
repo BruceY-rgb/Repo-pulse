@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { WebhookChannel } from './webhook.channel';
+import { WebhookChannel } from '@modules/notification/channels/webhook.channel';
 
 jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;

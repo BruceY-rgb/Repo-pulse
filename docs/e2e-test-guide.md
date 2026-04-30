@@ -2,6 +2,8 @@
 
 `apps/api/test/` 下所有 `*.e2e-spec.ts` 文件在每次 CI 时都会执行。每个文件独立启动一个 NestJS 应用实例，用真实数据库跑完后自动清理测试数据。
 
+单元测试位于 `apps/api/src/modules/**/*.spec.ts`。
+
 ---
 
 ## 测试文件
@@ -91,6 +93,177 @@
 
 ---
 
+### `repository-sync.e2e-spec.ts`
+
+测试仓库历史数据同步功能，包括首次同步和重复同步去重。
+
+**测试用户**：
+```typescript
+email: 'e2e-repo-sync@repopulse.dev'
+password: 'repo-sync-test-123'
+name: 'Repo Sync Test User'
+```
+
+| 用例 | 预期结果 |
+| :--- | :---: |
+| POST `/repositories/:id/sync` 首次同步 | 返回 201，createdCount = 3（commits/PRs/issues）|
+| 同步返回 sync summary | 含 repositoryId、createdCount、skippedCount、failedSources、lastSyncAt |
+| 第二次同步（重复同步） | createdCount = 0，skippedCount >= 3（历史事件被去重跳过）|
+
+---
+
+### `ai-approval-pipeline.e2e-spec.ts`
+
+测试 AI 分析结果到审批流程的自动联动。
+
+| 用例 | 预期结果 |
+| :--- | :---: |
+| AI 分析为 HIGH 风险 | 自动创建 PENDING 审批，审批内容含原始摘要 |
+| AI 分析为 CRITICAL 风险 | 自动创建 PENDING 审批 |
+| AI 分析为 LOW 风险 | 不创建审批 |
+| AI 分析为 MEDIUM 风险 | 不创建审批 |
+| 审批持久化验证 | 数据库中可查到对应的审批记录 |
+
+---
+
+### `event-notification-pipeline.e2e-spec.ts`
+
+测试事件创建后通知生成的完整管道。
+
+**测试用户**：
+```typescript
+email: 'e2e-event-pipeline@repopulse.dev'
+name: 'Event Pipeline E2E User'
+```
+
+| 用例 | 预期结果 |
+| :--- | :---: |
+| 未命中过滤规则时 | 生成站内通知，channel = IN_APP，status = SENT |
+| 被 EXCLUDE 规则命中时 | 不生成通知 |
+| 事件本身落库 | 即使被过滤，事件仍正常入库 |
+
+---
+
+### `webhook-flow.e2e-spec.ts`
+
+测试 GitHub Webhook 接收 → 队列处理 → 事件入库 → WebSocket 广播 → AI 入队的完整流程。
+
+| 用例 | 预期结果 |
+| :--- | :---: |
+| Webhook 入站后 | BullMQ 队列添加 job，jobName = 'process-webhook-event' |
+| EventProcessor 处理 job 后 | 事件入库，type = PUSH，author = 'Flow Bot' |
+| 事件入库后 | WebSocket broadcastNewEvent 被调用一次 |
+| 事件入库后 | AI 队列入队入口被调用，参数为 eventId |
+
+---
+
+### `notifications.e2e-spec.ts`
+
+测试通知模块的偏好设置和发送功能。
+
+**测试用户**：
+```typescript
+email: 'e2e-notification-test@repopulse.dev'
+password: 'notification-test-123'
+name: 'Notification E2E User'
+```
+
+| 用例 | 预期结果 |
+| :--- | :---: |
+| GET `/notifications/preferences` | 返回完整默认结构（channels、events、webhookUrl、email）|
+| POST `/notifications/preferences` 部分更新 | 深合并，非更新字段保留原有值 |
+| POST `/notifications/send` 未配置外部渠道 | 状态为 FAILED，metadata.failureReason = 'notification_email_missing' |
+
+---
+
+## 单元测试 (Unit Tests)
+
+单元测试位于 `apps/api/test/units/` 目录下，使用 Jest 进行测试。
+
+---
+
+### `test/units/notification.service.spec.ts`
+
+测试 `NotificationService` 的偏好设置管理和通知发送功能。
+
+#### getPreferences - 默认值合并
+
+| 用例 | 预期结果 |
+|------|----------|
+| 用户 preferences 为空 `{}` | 返回完整默认值 |
+| 用户不存在 | 返回完整默认值 |
+| 部分自定义事件偏好 | 与默认值合并，缺失字段回落默认值 |
+
+**默认值**：
+```typescript
+channels: [NotificationChannel.IN_APP]
+events: {
+  highRisk: true,
+  prUpdates: true,
+  analysisComplete: true,
+  weeklyReport: false,
+}
+webhookUrl: null
+email: null
+```
+
+#### updatePreferences - 部分更新深合并
+
+| 用例 | 预期结果 |
+|------|----------|
+| 只更新部分 events 字段 | 其它字段保留为已有值（非默认值） |
+| 未传入 webhookUrl/email | 不会清空，保持不变 |
+| 传入显式新值 | 覆写成功 |
+
+#### send - 未实现通道失败原因写入
+
+| 用例 | 预期结果 |
+|------|----------|
+| Email 通道未配置收件人 | 状态为 FAILED，metadata.failureReason = 'notification_email_missing' |
+| IN_APP 通道 | 始终成功，状态为 SENT |
+
+---
+
+### `test/units/event.service.spec.ts`
+
+测试 `EventService.create` 的后置编排韧性，验证各服务故障时的容错能力。
+
+#### 正常路径
+
+事件创建后，以下服务全部触发：
+- `broadcastNewEvent` (WebSocket 广播)
+- `notificationService.send` (通知发送)
+- `aiService.triggerAnalysis` (AI 分析)
+
+#### 韧性测试
+
+| 故障场景 | 预期结果 |
+|----------|----------|
+| `broadcastNewEvent` 抛错 | 事件主记录仍正常返回，notify / AI 流程继续 |
+| `notificationService.send` 抛错 | 事件主记录仍正常返回，AI 入队仍执行 |
+| `FilterService.applyRules` 抛错 | 事件主记录仍正常返回，AI 入队仍执行 |
+| `aiService.triggerAnalysis` 抛错 | 事件主记录仍正常返回，无异常抛出 |
+
+---
+
+### `test/units/webhook.channel.spec.ts`
+
+测试 `WebhookChannel` 的 webhook 发送功能。
+
+| 用例 | 预期结果 |
+|------|----------|
+| 未配置 webhookUrl | 失败，failureReason = 'notification_webhook_missing' |
+| HTTP 200 | 成功，metadata 包含 statusCode: 200 |
+| HTTP 500 | 失败，failureReason = 'notification_webhook_http_500' |
+| HTTP 404 | 失败，failureReason = 'notification_webhook_http_404' |
+| 网络超时（ECONNABORTED） | 失败，failureReason = 'notification_webhook_request_failed'，metadata 包含 error |
+
+**axios 配置验证**：
+- 超时时间：5000ms
+- `validateStatus` 函数允许任意状态码返回（不走异常路径）
+
+---
+
 ## 如何读懂 CI 输出
 
 ### 结果总览
@@ -143,6 +316,25 @@ Force exiting Jest: Have you considered using `--detectOpenHandles` ...
 Exit status 1 / Error: Process completed with exit code 1.
 ```
 只要有用例失败 Jest 就以非零退出，这一行只是 CI 挂红的直接原因，真正的原因要找上面的 `●`。
+
+---
+
+## 测试运行命令
+
+```bash
+# 运行所有测试（单元 + E2E）
+pnpm test
+
+# 运行单元测试
+pnpm --filter api test
+
+# 运行 E2E 测试
+pnpm --filter api test:e2e
+
+# 运行特定测试文件
+pnpm --filter api test -- auth.e2e-spec.ts
+pnpm --filter api test -- notification.service.spec.ts
+```
 
 ---
 
