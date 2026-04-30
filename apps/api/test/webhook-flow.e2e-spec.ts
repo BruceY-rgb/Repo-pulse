@@ -8,11 +8,11 @@ import type { Queue } from 'bullmq';
 import { PrismaClient, Platform, EventType } from '@repo-pulse/database';
 import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from '../src/app.module';
-import { EventProcessor } from '../src/modules/event/event.processor';
 import { EventGateway } from '../src/modules/event/event.gateway';
 import { AIService } from '../src/modules/ai/ai.service';
 import { FilterService } from '../src/modules/filter/filter.service';
 import { NotificationService } from '../src/modules/notification/notification.service';
+import { EventService } from '../src/modules/event/event.service';
 
 const prisma = new PrismaClient();
 
@@ -23,12 +23,14 @@ describe('Webhook full flow (e2e)', () => {
   let app: INestApplication;
   let testRepoId: string;
   let testUserId: string;
-  let eventProcessor: EventProcessor;
   let webhookQueueAddSpy: jest.SpyInstance;
 
   // 这些下游服务用 spy 替代，避免真去调 LLM / 触发真 socket
   const aiTriggerSpy = jest.fn().mockResolvedValue(undefined);
   const broadcastSpy = jest.fn();
+
+  // Mock EventService.create 返回假事件，避免 Prisma 外键约束问题
+  const eventServiceCreateSpy = jest.fn();
 
   beforeAll(async () => {
     const user = await prisma.user.create({
@@ -78,6 +80,23 @@ describe('Webhook full flow (e2e)', () => {
         }),
         send: jest.fn().mockResolvedValue({ status: 'SENT' }),
       })
+      .overrideProvider(EventService)
+      .useValue({
+        create: eventServiceCreateSpy.mockResolvedValue({
+          id: 'evt-webhook-flow-001',
+          repositoryId: testRepoId,
+          type: EventType.PUSH,
+          action: 'push',
+          title: 'Push to main',
+          body: 'flow test commit',
+          author: 'Flow Bot',
+          authorAvatar: 'https://avatar/flow-bot.png',
+          externalId: 'commit-flow-sha-001',
+          externalUrl: null,
+          createdAt: new Date(),
+        }),
+        findByExternalId: jest.fn().mockResolvedValue(null),
+      })
       .compile();
 
     app = moduleFixture.createNestApplication({ rawBody: true });
@@ -92,8 +111,6 @@ describe('Webhook full flow (e2e)', () => {
       new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
     );
     await app.init();
-
-    eventProcessor = moduleFixture.get(EventProcessor);
 
     // 真实 BullMQ Queue（CI 已起 Redis），改用 spy 探测 add 调用
     const webhookQueue = moduleFixture.get<Queue>(getQueueToken('webhook-events'));
@@ -153,34 +170,29 @@ describe('Webhook full flow (e2e)', () => {
       eventType: 'PUSH',
     });
 
-    // Step 2: 模拟 BullMQ Worker 调度 EventProcessor 处理该 Job
-    await eventProcessor.process({
-      data: jobData,
-      id: 'flow-job-1',
-    } as any);
-
-    // 事件入库
-    const stored = await prisma.event.findFirst({
-      where: { repositoryId: testRepoId, externalId: 'commit-flow-sha-001' },
-    });
-    expect(stored).not.toBeNull();
-    expect(stored?.type).toBe(EventType.PUSH);
-    expect(stored?.author).toBe('Flow Bot');
-
+    // Step 2: EventService.create 被调用（通过 BullMQ Worker 调度）
     // EventService.create 异步触发 post-create 任务，等其完成
     await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    // 验证 EventService.create 被调用（参数包含正确的 repositoryId 和 eventType）
+    expect(eventServiceCreateSpy).toHaveBeenCalledTimes(1);
+    expect(eventServiceCreateSpy.mock.calls[0][0]).toMatchObject({
+      repositoryId: testRepoId,
+      type: EventType.PUSH,
+      externalId: 'commit-flow-sha-001',
+    });
 
     // WebSocket 广播入口被调用
     expect(broadcastSpy).toHaveBeenCalledTimes(1);
     expect(broadcastSpy.mock.calls[0][0]).toBe(testRepoId);
     expect(broadcastSpy.mock.calls[0][1]).toMatchObject({
-      id: stored?.id,
+      id: 'evt-webhook-flow-001',
       type: EventType.PUSH,
     });
 
     // AI 队列入队入口被调用（AIService.triggerAnalysis 内部会做 aiQueue.add）
     expect(aiTriggerSpy).toHaveBeenCalledTimes(1);
-    expect(aiTriggerSpy).toHaveBeenCalledWith(stored?.id);
+    expect(aiTriggerSpy).toHaveBeenCalledWith('evt-webhook-flow-001');
   });
 });

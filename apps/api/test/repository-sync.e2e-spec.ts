@@ -27,7 +27,6 @@ describe('Repository sync (e2e)', () => {
   const githubServiceMock = {
     getRepository: jest.fn(),
     createWebhook: jest.fn(),
-    getBranches: jest.fn(),
     getCommits: jest.fn(),
     getPullRequests: jest.fn(),
     getIssues: jest.fn(),
