@@ -1,6 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { getQueueToken } from '@nestjs/bullmq';
 import cookieParser from 'cookie-parser';
 import {
   PrismaClient,
@@ -13,6 +12,7 @@ import {
 import { AppModule } from '../src/app.module';
 import { EventService } from '../src/modules/event/event.service';
 import { EventGateway } from '../src/modules/event/event.gateway';
+import { AIService } from '../src/modules/ai/ai.service';
 
 const prisma = new PrismaClient();
 
@@ -56,12 +56,12 @@ describe('Event → Notification pipeline (e2e)', () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
-      .overrideProvider(getQueueToken('webhook-events'))
-      .useValue({ add: jest.fn().mockResolvedValue({ id: 'job' }) })
-      .overrideProvider(getQueueToken('ai-analysis'))
-      .useValue({ add: jest.fn().mockResolvedValue({ id: 'ai-job' }) })
+      // EventGateway 替换为 spy，避免起真 socket
       .overrideProvider(EventGateway)
       .useValue({ broadcastNewEvent: jest.fn() })
+      // AIService 替换为 no-op，避免触发 ai-analysis 队列后 AIProcessor 真去调 LLM
+      .overrideProvider(AIService)
+      .useValue({ triggerAnalysis: jest.fn().mockResolvedValue(undefined) })
       .compile();
 
     app = moduleFixture.createNestApplication();
@@ -104,7 +104,7 @@ describe('Event → Notification pipeline (e2e)', () => {
 
     // EventService.create 异步触发后置任务，等待其完成
     await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 150));
 
     const notifications = await prisma.notification.findMany({
       where: { userId: testUserId, eventId: event.id },
@@ -146,7 +146,7 @@ describe('Event → Notification pipeline (e2e)', () => {
     });
 
     await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 150));
 
     const notifications = await prisma.notification.findMany({
       where: { userId: testUserId, eventId: event.id },

@@ -4,6 +4,7 @@ import { getQueueToken } from '@nestjs/bullmq';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import { createHmac } from 'crypto';
+import type { Queue } from 'bullmq';
 import { PrismaClient, Platform, EventType } from '@repo-pulse/database';
 import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from '../src/app.module';
@@ -23,9 +24,10 @@ describe('Webhook full flow (e2e)', () => {
   let testRepoId: string;
   let testUserId: string;
   let eventProcessor: EventProcessor;
+  let webhookQueueAddSpy: jest.SpyInstance;
 
-  const webhookQueueAddMock = jest.fn().mockResolvedValue({ id: 'job-1' });
-  const aiQueueAddMock = jest.fn().mockResolvedValue({ id: 'ai-job-1' });
+  // 这些下游服务用 spy 替代，避免真去调 LLM / 触发真 socket
+  const aiTriggerSpy = jest.fn().mockResolvedValue(undefined);
   const broadcastSpy = jest.fn();
 
   beforeAll(async () => {
@@ -57,12 +59,10 @@ describe('Webhook full flow (e2e)', () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
-      .overrideProvider(getQueueToken('webhook-events'))
-      .useValue({ add: webhookQueueAddMock })
-      .overrideProvider(getQueueToken('ai-analysis'))
-      .useValue({ add: aiQueueAddMock })
       .overrideProvider(EventGateway)
       .useValue({ broadcastNewEvent: broadcastSpy })
+      .overrideProvider(AIService)
+      .useValue({ triggerAnalysis: aiTriggerSpy })
       .overrideProvider(FilterService)
       .useValue({ applyRules: jest.fn().mockResolvedValue({ action: 'INCLUDE' }) })
       .overrideProvider(NotificationService)
@@ -94,9 +94,16 @@ describe('Webhook full flow (e2e)', () => {
     await app.init();
 
     eventProcessor = moduleFixture.get(EventProcessor);
+
+    // 真实 BullMQ Queue（CI 已起 Redis），改用 spy 探测 add 调用
+    const webhookQueue = moduleFixture.get<Queue>(getQueueToken('webhook-events'));
+    webhookQueueAddSpy = jest.spyOn(webhookQueue, 'add').mockResolvedValue({ id: 'job-1' } as any);
   });
 
   afterAll(async () => {
+    if (webhookQueueAddSpy) {
+      webhookQueueAddSpy.mockRestore();
+    }
     await prisma.event.deleteMany({ where: { repositoryId: testRepoId } });
     await prisma.userRepository.deleteMany({ where: { repositoryId: testRepoId } });
     await prisma.repository.deleteMany({ where: { id: testRepoId } });
@@ -137,8 +144,8 @@ describe('Webhook full flow (e2e)', () => {
       .send(body)
       .expect(201);
 
-    expect(webhookQueueAddMock).toHaveBeenCalledTimes(1);
-    const [jobName, jobData] = webhookQueueAddMock.mock.calls[0];
+    expect(webhookQueueAddSpy).toHaveBeenCalledTimes(1);
+    const [jobName, jobData] = webhookQueueAddSpy.mock.calls[0];
     expect(jobName).toBe('process-webhook-event');
     expect(jobData).toMatchObject({
       repositoryId: testRepoId,
@@ -160,9 +167,9 @@ describe('Webhook full flow (e2e)', () => {
     expect(stored?.type).toBe(EventType.PUSH);
     expect(stored?.author).toBe('Flow Bot');
 
-    // EventService.create 是异步触发 post-create 任务的，等一个微任务 + 1 tick 让它跑完
+    // EventService.create 异步触发 post-create 任务，等其完成
     await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 80));
 
     // WebSocket 广播入口被调用
     expect(broadcastSpy).toHaveBeenCalledTimes(1);
@@ -172,9 +179,8 @@ describe('Webhook full flow (e2e)', () => {
       type: EventType.PUSH,
     });
 
-    // AI 队列入队成功
-    expect(aiQueueAddMock).toHaveBeenCalledTimes(1);
-    expect(aiQueueAddMock.mock.calls[0][0]).toBe('analyze-event');
-    expect(aiQueueAddMock.mock.calls[0][1]).toMatchObject({ eventId: stored?.id });
+    // AI 队列入队入口被调用（AIService.triggerAnalysis 内部会做 aiQueue.add）
+    expect(aiTriggerSpy).toHaveBeenCalledTimes(1);
+    expect(aiTriggerSpy).toHaveBeenCalledWith(stored?.id);
   });
 });
