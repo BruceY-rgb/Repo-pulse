@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { enUS, zhCN } from 'date-fns/locale';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Bell,
   Check,
@@ -263,9 +265,11 @@ export function Notifications() {
                             <p className="text-base font-medium text-foreground">
                               {item.title}
                             </p>
-                            <p className="text-sm text-muted-foreground">
-                              {item.content}
-                            </p>
+                            <div className="prose prose-sm prose-invert max-w-none text-muted-foreground">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {item.content}
+                              </ReactMarkdown>
+                            </div>
                             <p className="text-xs text-muted-foreground">
                               {formatDistanceToNow(new Date(item.createdAt), {
                                 addSuffix: true,
