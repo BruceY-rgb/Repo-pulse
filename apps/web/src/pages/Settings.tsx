@@ -997,7 +997,7 @@ export function Settings() {
                     <Label htmlFor="aiProvider" className="text-sm text-white">{t('settings.ai.provider')}</Label>
                     <Select
                       value={aiConfig.aiProvider || ''}
-                      onValueChange={(value: AIProvider) => setAiConfig({ ...aiConfig, aiProvider: value, aiBaseUrl: undefined })}
+                      onValueChange={(value: AIProvider) => setAiConfig({ ...aiConfig, aiProvider: value, aiModel: PROVIDER_DEFAULT_MODELS[value] || '', aiBaseUrl: value === 'custom' ? '' : null })}
                     >
                       <SelectTrigger className="bg-[var(--github-surface)] border-[var(--github-border)]">
                         <SelectValue placeholder={t('settings.ai.providerPlaceholder')} />

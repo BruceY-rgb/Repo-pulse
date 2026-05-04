@@ -36,7 +36,7 @@ export const PROVIDER_PRESETS: Record<ProviderType, ProviderPreset> = {
   deepseek: {
     channelId: 'deepseek',
     displayName: 'DeepSeek',
-    baseUrl: 'https://api.deepseek.com',
+    baseUrl: 'https://api.deepseek.com/anthropic',
     defaultModel: 'deepseek-chat',
   },
   google: {

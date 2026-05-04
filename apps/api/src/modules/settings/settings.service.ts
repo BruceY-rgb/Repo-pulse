@@ -90,6 +90,21 @@ export class SettingsService {
     };
   }
 
+  /**
+   * 解析实际 API Key。
+   * 如果前端传来掩码 '***'，从数据库读取真实 key；否则使用传入值。
+   */
+  async resolveApiKey(userId: string, apiKey: string): Promise<string> {
+    if (apiKey === '***') {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { aiApiKey: true },
+      });
+      return user?.aiApiKey || '';
+    }
+    return apiKey;
+  }
+
   // @ts-ignore
   async testConnection(
     provider: AIProvider,

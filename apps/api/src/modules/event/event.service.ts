@@ -99,11 +99,29 @@ export class EventService {
 
   private async runPostCreateTasks(event: Event): Promise<void> {
     this.broadcastEvent(event.repositoryId, event);
-    await this.notifyRepositoryUsers(event);
+    await this.notifyRepositoryUsers(event); // 首次通知，有 riskLevel 规则的用户延迟
     await this.enqueueAnalysis(event.id);
   }
 
-  private async notifyRepositoryUsers(event: Event): Promise<void> {
+  /**
+   * AI 分析完成后重新通知仓库用户（riskLevel 此时可用）。
+   * 只通知有 riskLevel 规则的用户（他们之前被延迟了），
+   * 无风险规则的用户早已收到通知，跳过避免重复。
+   * 由 AIProcessor 调用。
+   */
+  async retryNotificationsAfterAnalysis(eventId: string): Promise<void> {
+    const event = await this.prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) {
+      this.logger.warn(`retryNotifications: event not found ${eventId}`);
+      return;
+    }
+    await this.notifyRepositoryUsers(event, { onlyWithRiskRule: true });
+  }
+
+  private async notifyRepositoryUsers(
+    event: Event,
+    options?: { onlyWithRiskRule?: boolean },
+  ): Promise<void> {
     const repository = await this.prisma.repository.findUnique({
       where: { id: event.repositoryId },
       select: { fullName: true },
@@ -113,14 +131,35 @@ export class EventService {
       where: { repositoryId: event.repositoryId },
     });
 
+    // 查询现有 AI 分析结果（如有），用于 riskLevel 过滤
+    const existingAnalysis = await this.prisma.aIAnalysis.findFirst({
+      where: { eventId: event.id, status: 'COMPLETED' },
+      orderBy: { createdAt: 'desc' },
+      select: { riskLevel: true },
+    });
+
     for (const entry of userRepositories) {
       const userId = entry.userId;
       try {
+        const hasRiskRule = await this.filterService.hasRuleReferencingField(userId, 'riskLevel');
+
+        // 重试模式：只通知有 riskLevel 规则的用户，跳过其他（避免重复）
+        if (options?.onlyWithRiskRule && !hasRiskRule) {
+          continue;
+        }
+
+        // 首次模式：有 riskLevel 规则但分析未完成 → 延迟通知
+        if (hasRiskRule && !existingAnalysis && !options?.onlyWithRiskRule) {
+          this.logger.log(`notification_deferred eventId=${event.id} userId=${userId} reason=risk_based_rule_waiting_for_analysis`);
+          continue;
+        }
+
         const filterResult = await this.filterService.applyRules(userId, {
           type: event.type,
           repository: repository?.fullName || event.repositoryId,
           author: event.author,
           body: event.body || undefined,
+          riskLevel: existingAnalysis?.riskLevel as string | undefined,
         });
 
         if (filterResult.action === FilterAction.EXCLUDE) {
@@ -160,16 +199,26 @@ export class EventService {
     }
   }
 
+  /**
+   * 根据事件类型和用户偏好决定启用哪些通知渠道。
+   *
+   * 偏好映射（优先级从高到低）：
+   * - prUpdates=false → 跳过所有 PR 相关事件
+   * - 没有匹配的偏好但渠道列表非空 → 默认发送
+   */
   private resolveChannelsForEvent(
     event: Event,
     preferences: NotificationPreferences,
   ): NotificationChannel[] {
-    if (
-      this.isPullRequestEvent(event.type) &&
-      preferences.events.prUpdates === false
-    ) {
-      return [];
+    // PR 偏好：影响所有 PR 相关事件类型
+    if (this.isPullRequestEvent(event.type)) {
+      if (preferences.events.prUpdates === false) {
+        return [];
+      }
     }
+
+    // 不在此处检查 highRisk / analysisComplete，它们在 AI 分析完成后
+    // 由 AIProcessor.notifyApprovalCreated() 单独处理
 
     return preferences.channels;
   }

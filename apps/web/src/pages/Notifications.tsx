@@ -4,10 +4,8 @@ import { enUS, zhCN } from 'date-fns/locale';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  Bell,
   Check,
   Loader2,
-  Settings,
   Trash2,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -19,9 +17,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
-import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Tooltip,
@@ -35,13 +31,10 @@ import {
   useDeleteNotificationMutation,
   useMarkAllNotificationReadMutation,
   useMarkNotificationReadMutation,
-  useNotificationPreferencesQuery,
   useNotificationsQuery,
   useUnreadNotificationCountQuery,
-  useUpdateNotificationPreferencesMutation,
 } from '@/hooks/queries/use-notification-queries';
 import { useRepositoryListQuery } from '@/hooks/queries/use-repository-queries';
-import type { NotificationChannel } from '@/services/notification.service';
 
 type NotificationTab = 'all' | 'unread';
 
@@ -86,7 +79,6 @@ export function Notifications() {
   const notificationsQuery = useNotificationsQuery();
   const repositoriesQuery = useRepositoryListQuery();
   const unreadCountQuery = useUnreadNotificationCountQuery();
-  const preferencesQuery = useNotificationPreferencesQuery();
 
   const monitoredRepositoryIds = useMemo(
     () => (repositoriesQuery.data ?? []).map((repository) => repository.id),
@@ -98,7 +90,6 @@ export function Notifications() {
   const markReadMutation = useMarkNotificationReadMutation();
   const markAllReadMutation = useMarkAllNotificationReadMutation();
   const deleteMutation = useDeleteNotificationMutation();
-  const updatePrefsMutation = useUpdateNotificationPreferencesMutation();
 
   const notifications = notificationsQuery.data?.notifications ?? [];
   const visibleNotifications =
@@ -107,56 +98,13 @@ export function Notifications() {
       : notifications;
   const total = notificationsQuery.data?.total ?? 0;
   const unreadCount = unreadCountQuery.data?.count ?? 0;
-  const prefs = preferencesQuery.data;
 
   const locale = language === 'zh' ? zhCN : enUS;
 
   const isBusy =
     markReadMutation.isPending ||
     markAllReadMutation.isPending ||
-    deleteMutation.isPending ||
-    updatePrefsMutation.isPending;
-
-  const channelOptions = useMemo(
-    () => [
-      {
-        key: 'IN_APP' as const,
-        label: t('notifications.channels.inApp'),
-        icon: Bell,
-      },
-    ],
-    [t],
-  );
-
-  const toggleChannel = async (channel: NotificationChannel) => {
-    if (!prefs) {
-      return;
-    }
-
-    const exists = prefs.channels.includes(channel);
-    const channels = exists
-      ? prefs.channels.filter((item) => item !== channel)
-      : [...prefs.channels, channel];
-
-    await updatePrefsMutation.mutateAsync({
-      ...prefs,
-      channels,
-    });
-  };
-
-  const toggleEvent = async (eventKey: keyof NonNullable<typeof prefs>['events']) => {
-    if (!prefs) {
-      return;
-    }
-
-    await updatePrefsMutation.mutateAsync({
-      ...prefs,
-      events: {
-        ...prefs.events,
-        [eventKey]: !prefs.events[eventKey],
-      },
-    });
-  };
+    deleteMutation.isPending;
 
   return (
     <TooltipProvider>
@@ -331,102 +279,6 @@ export function Notifications() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
-              <Settings className="h-4 w-4 text-primary" />
-              {t('notifications.settings.title')}
-            </CardTitle>
-            <CardDescription>
-              {t('notifications.settings.description')}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <section className="space-y-3">
-              <p className="text-sm font-medium text-foreground">
-                {t('notifications.settings.channels')}
-              </p>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                {channelOptions.map((option) => {
-                  const enabled = prefs?.channels.includes(option.key) ?? false;
-                  const Icon = option.icon;
-
-                  return (
-                    <div
-                      key={option.key}
-                      className="flex items-center justify-between rounded-lg border border-border bg-card p-3"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Icon className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm text-foreground">
-                          {option.label}
-                        </span>
-                      </div>
-                      <Switch
-                        checked={enabled}
-                        onCheckedChange={() => toggleChannel(option.key)}
-                        disabled={updatePrefsMutation.isPending}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section className="space-y-3">
-              <p className="text-sm font-medium text-foreground">
-                {t('notifications.settings.events')}
-              </p>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
-                  <Label htmlFor="notify-high-risk" className="text-sm text-foreground">
-                    {t('notifications.settings.event.highRisk')}
-                  </Label>
-                  <Switch
-                    id="notify-high-risk"
-                    checked={prefs?.events.highRisk ?? false}
-                    onCheckedChange={() => toggleEvent('highRisk')}
-                    disabled={updatePrefsMutation.isPending}
-                  />
-                </div>
-                <div className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
-                  <Label htmlFor="notify-pr-updates" className="text-sm text-foreground">
-                    {t('notifications.settings.event.prUpdates')}
-                  </Label>
-                  <Switch
-                    id="notify-pr-updates"
-                    checked={prefs?.events.prUpdates ?? false}
-                    onCheckedChange={() => toggleEvent('prUpdates')}
-                    disabled={updatePrefsMutation.isPending}
-                  />
-                </div>
-                <div className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
-                  <Label htmlFor="notify-analysis-complete" className="text-sm text-foreground">
-                    {t('notifications.settings.event.analysisComplete')}
-                  </Label>
-                  <Switch
-                    id="notify-analysis-complete"
-                    checked={prefs?.events.analysisComplete ?? false}
-                    onCheckedChange={() => toggleEvent('analysisComplete')}
-                    disabled={updatePrefsMutation.isPending}
-                  />
-                </div>
-                <div className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
-                  <Label htmlFor="notify-weekly-report" className="text-sm text-foreground">
-                    {t('notifications.settings.event.weeklyReport')}
-                  </Label>
-                  <Switch
-                    id="notify-weekly-report"
-                    checked={prefs?.events.weeklyReport ?? false}
-                    onCheckedChange={() => toggleEvent('weeklyReport')}
-                    disabled={updatePrefsMutation.isPending}
-                  />
-                </div>
-              </div>
-            </section>
-
-          </CardContent>
-        </Card>
       </div>
     </TooltipProvider>
   );

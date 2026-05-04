@@ -41,11 +41,13 @@ export class SettingsController {
   }
 
   /**
-   * 测试 AI 连接（无需登录，用于配置时测试）
+   * 测试 AI 连接（支持掩码 key 回退到已存储 key）
    */
   @Post('ai/test')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: '测试 AI 连接' })
   async testConnection(
+    @CurrentUser() user: { sub: string },
     @Body()
     body: {
       provider: AIProvider;
@@ -53,19 +55,18 @@ export class SettingsController {
       baseUrl?: string;
     },
   ) {
-    return this.settingsService.testConnection(
-      body.provider,
-      body.apiKey,
-      body.baseUrl,
-    );
+    const apiKey = await this.settingsService.resolveApiKey(user.sub, body.apiKey);
+    return this.settingsService.testConnection(body.provider, apiKey, body.baseUrl);
   }
 
   /**
-   * 拉取 AI 模型列表（无需登录，用于配置时拉取）
+   * 拉取 AI 模型列表（支持掩码 key 回退到已存储 key）
    */
   @Post('ai/models')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: '拉取 AI 模型列表' })
   async fetchModels(
+    @CurrentUser() user: { sub: string },
     @Body()
     body: {
       provider: AIProvider;
@@ -73,10 +74,7 @@ export class SettingsController {
       baseUrl?: string;
     },
   ) {
-    return this.settingsService.fetchModels(
-      body.provider,
-      body.apiKey,
-      body.baseUrl,
-    );
+    const apiKey = await this.settingsService.resolveApiKey(user.sub, body.apiKey);
+    return this.settingsService.fetchModels(body.provider, apiKey, body.baseUrl);
   }
 }
