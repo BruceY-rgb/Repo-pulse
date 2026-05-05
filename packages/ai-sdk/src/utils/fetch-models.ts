@@ -38,6 +38,37 @@ export async function fetchModels(
 
   try {
     switch (provider) {
+      case 'deepseek': {
+        // DeepSeek Anthropic 端点不支持 /v1/models，走 OpenAI 兼容 /models
+        const modelsUrl = 'https://api.deepseek.com/models';
+        const response = await fetch(modelsUrl, {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+
+        if (!response.ok) {
+          const text = await response.text().catch(() => '');
+          return {
+            success: false,
+            message: `拉取失败 (${response.status}): ${text.slice(0, 200)}`,
+            models: [],
+          };
+        }
+
+        const data = await response.json() as { data?: { id: string }[] };
+        const models: ModelInfo[] = (data.data || []).map((item) => ({
+          id: item.id,
+          name: item.id,
+          enabled: true,
+        }));
+
+        return {
+          success: true,
+          message: `成功获取 ${models.length} 个模型`,
+          models,
+        };
+      }
+
       case 'anthropic': {
         // Anthropic 使用特殊的 API
         const response = await fetch(`${url}/v1/models`, {
@@ -104,7 +135,6 @@ export async function fetchModels(
       }
 
       case 'openai':
-      case 'deepseek':
       case 'moonshot':
       case 'zhipu':
       case 'minimax':

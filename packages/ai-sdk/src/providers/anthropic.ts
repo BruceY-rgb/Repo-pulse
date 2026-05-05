@@ -23,6 +23,7 @@ export class AnthropicProvider implements AIProvider {
   constructor(config: AIProviderConfig) {
     this.client = new Anthropic({
       apiKey: config.apiKey,
+      baseURL: config.baseUrl || undefined,
       timeout: config.timeout ?? 30000,
       maxRetries: config.maxRetries ?? 3,
     });
@@ -107,7 +108,7 @@ export class AnthropicProvider implements AIProvider {
   ): Promise<string> {
     const response = await this.client.messages.create({
       model: this.model,
-      max_tokens: input.maxTokens ?? 2048,
+      max_tokens: input.maxTokens ?? 4096,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
       temperature: input.temperature ?? 0.3,
