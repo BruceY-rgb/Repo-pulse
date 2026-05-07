@@ -31,11 +31,12 @@ export async function testConnection(
 
   try {
     switch (provider) {
-      case 'anthropic': {
+      case 'anthropic':
+      case 'deepseek': {
         const anthropicProvider = new AnthropicProvider({
           apiKey,
           baseUrl: url,
-          model: 'claude-sonnet-4-20250514',
+          model: provider === 'deepseek' ? 'deepseek-chat' : 'claude-sonnet-4-20250514',
         });
         const available = await anthropicProvider.isAvailable();
         return {
@@ -58,7 +59,6 @@ export async function testConnection(
       }
 
       case 'openai':
-      case 'deepseek':
       case 'moonshot':
       case 'zhipu':
       case 'minimax':

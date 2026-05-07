@@ -5,7 +5,6 @@ import {
   Delete,
   Body,
   Param,
-  ParseUUIDPipe,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -77,7 +76,7 @@ export class NotificationController {
   @Post(':id/read')
   async markAsRead(
     @CurrentUser() user: { sub: string },
-    @Param('id', ParseUUIDPipe) notificationId: string,
+    @Param('id') notificationId: string,
   ): Promise<{ success: boolean }> {
     await this.notificationService.markAsRead(notificationId, user.sub);
     return { success: true };
@@ -100,7 +99,7 @@ export class NotificationController {
   @Delete(':id')
   async deleteNotification(
     @CurrentUser() user: { sub: string },
-    @Param('id', ParseUUIDPipe) notificationId: string,
+    @Param('id') notificationId: string,
   ): Promise<{ success: boolean }> {
     await this.notificationService.deleteNotification(notificationId, user.sub);
     return { success: true };

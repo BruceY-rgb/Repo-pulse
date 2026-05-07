@@ -39,30 +39,7 @@ export class AIController {
   }
 
   /**
-   * 获取事件分析结果（返回 EventAnalysisDto）
-   */
-  @Get('analysis/:eventId')
-  async getAnalysis(
-    @CurrentUser() user: { sub: string },
-    @Param('eventId') eventId: string,
-  ): Promise<{ status: string; analysis: EventAnalysisDto | null }> {
-    const analysis = await prisma.aIAnalysis.findFirst({
-      where: { eventId },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (!analysis) {
-      return { status: 'pending', analysis: null };
-    }
-
-    return {
-      status: analysis.status.toLowerCase(),
-      analysis: this.toDto(analysis),
-    };
-  }
-
-  /**
-   * 分析列表（分页 + 筛选）
+   * 分析列表（分页 + 筛选）—— 必须在 :eventId 之前，避免 'events' 被当作 eventId
    */
   @Get('analysis/events')
   async getAnalysisList(
@@ -112,6 +89,29 @@ export class AIController {
       page: pageNum,
       pageSize: size,
       totalPages: Math.ceil(total / size),
+    };
+  }
+
+  /**
+   * 获取单个事件的分析结果
+   */
+  @Get('analysis/:eventId')
+  async getAnalysis(
+    @CurrentUser() user: { sub: string },
+    @Param('eventId') eventId: string,
+  ): Promise<{ status: string; analysis: EventAnalysisDto | null }> {
+    const analysis = await prisma.aIAnalysis.findFirst({
+      where: { eventId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!analysis) {
+      return { status: 'pending', analysis: null };
+    }
+
+    return {
+      status: analysis.status.toLowerCase(),
+      analysis: this.toDto(analysis),
     };
   }
 

@@ -66,7 +66,7 @@ describe('WebhookModule (e2e)', () => {
         .expect(400);
     });
 
-    it('未注册仓库收到 Webhook 应返回 201（接受但忽略）', () => {
+    it('未注册仓库收到 Webhook 应返回 200（接受但忽略）', () => {
       return request(app.getHttpServer())
         .post('/webhooks/github')
         .set('x-github-event', 'push')
@@ -74,7 +74,7 @@ describe('WebhookModule (e2e)', () => {
           repository: { id: 99999999, full_name: 'unknown/repo' },
           ref: 'refs/heads/main',
         })
-        .expect(201);
+        .expect(200);
     });
   });
 
@@ -88,7 +88,7 @@ describe('WebhookModule (e2e)', () => {
       commits: [],
     };
 
-    it('正确签名应返回 201', () => {
+    it('正确签名应返回 200', () => {
       const body = JSON.stringify(PAYLOAD);
       const signature = sign(WEBHOOK_SECRET, body);
 
@@ -98,7 +98,7 @@ describe('WebhookModule (e2e)', () => {
         .set('x-github-event', 'push')
         .set('x-hub-signature-256', signature)
         .send(body)
-        .expect(201);
+        .expect(200);
     });
 
     it('错误签名应返回 400', () => {

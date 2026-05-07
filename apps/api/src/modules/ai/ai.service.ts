@@ -119,6 +119,7 @@ export class AIService {
     const aiProvider = (user.aiProvider || process.env.AI_DEFAULT_PROVIDER || 'anthropic') as ProviderType;
     const aiApiKey = user.aiApiKey || process.env.ANTHROPIC_API_KEY || '';
     const aiModel = user.aiModel || process.env.AI_DEFAULT_MODEL || 'claude-sonnet-4-20250514';
+    const aiBaseUrl = user.aiBaseUrl || undefined;
 
     // 5. 检查 API Key
     if (!aiApiKey) {
@@ -127,11 +128,12 @@ export class AIService {
       return this.failedOutput('Missing AI provider API key');
     }
 
-    this.logger.log(`Using provider=${aiProvider} model=${aiModel}`);
+    this.logger.log(`Using provider=${aiProvider} model=${aiModel} baseUrl=${aiBaseUrl || 'preset'}`);
 
     // 6. 创建 Provider（factory，非硬编码）
     const provider = createProvider(aiProvider, aiApiKey, {
       model: aiModel,
+      baseUrl: aiBaseUrl,
       timeout: 60000,
       maxRetries: 2,
     });
@@ -139,8 +141,16 @@ export class AIService {
     // 7. 构建输入（sanitize → truncate → 装配）
     const input = this.normalizer.buildAnalysisInput(event);
 
-    // 8. 调用 AI 分析
-    const result = await provider.analyze(input);
+    // 8. 调用 AI 分析（捕获异常并写库）
+    let result: AnalysisOutput;
+    try {
+      result = await provider.analyze(input);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown_error';
+      this.logger.error(`AI call failed for event ${eventId}: ${message}`);
+      await this.saveFailed(eventId, aiModel, message);
+      return this.failedOutput(message);
+    }
 
     // 9. 保存结果（双写新旧字段）
     await this.saveAnalysis(eventId, result, aiModel);

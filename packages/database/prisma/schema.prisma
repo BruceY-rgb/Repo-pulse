@@ -176,6 +176,7 @@ model Event {
   targetBranch  String?
   metadata      Json      @default("{}")
   rawPayload    Json?
+  occurredAt    DateTime?
   createdAt     DateTime  @default(now())
 
   repository    Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
@@ -185,6 +186,8 @@ model Event {
 
   @@index([repositoryId, createdAt])
   @@index([type, createdAt])
+  @@index([repositoryId, occurredAt])
+  @@index([type, occurredAt])
 }
 
 model AIAnalysis {

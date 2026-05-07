@@ -564,7 +564,7 @@ export function Dashboard() {
       title: event.title,
       repo: event.repository?.fullName ?? t('dashboard.repo.fallback'),
       author: event.author,
-      time: toRelativeTime(event.createdAt, language),
+      time: toRelativeTime(event.occurredAt ?? event.createdAt, language),
       risk: getRiskByType(event.type),
     }));
   }, [language, recentEventsQuery.data?.items, t]);
@@ -834,7 +834,7 @@ export function Dashboard() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#30363d" vertical={false} />
                   <XAxis dataKey="name" stroke="#8b949e" fontSize={12} tickLine={false} axisLine={false} />
                   <YAxis stroke="#8b949e" fontSize={12} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px' }} />
+                  <Tooltip contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px', color: '#e6edf3' }} itemStyle={{ color: '#e6edf3' }} />
                   <Area type="monotone" dataKey="commits" stroke="#ff4d00" strokeWidth={2} fillOpacity={1} fill="url(#colorCommits)" />
                   <Area type="monotone" dataKey="prs" stroke="#58a6ff" strokeWidth={2} fillOpacity={1} fill="url(#colorPrs)" />
                 </AreaChart>
@@ -859,7 +859,7 @@ export function Dashboard() {
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px' }} />
+                  <Tooltip contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px', color: '#e6edf3' }} itemStyle={{ color: '#e6edf3' }} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -976,7 +976,7 @@ export function Dashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#30363d" vertical={false} />
                 <XAxis dataKey="name" stroke="#8b949e" fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis stroke="#8b949e" fontSize={12} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px' }} />
+                <Tooltip contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px', color: '#e6edf3' }} itemStyle={{ color: '#e6edf3' }} />
                 <Bar dataKey="commits" fill="#ff4d00" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="issues" fill="#f85149" radius={[4, 4, 0, 0]} />
               </BarChart>

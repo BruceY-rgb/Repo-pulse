@@ -25,9 +25,11 @@ export const envValidationSchema = Joi.object({
   // AI Providers
   OPENAI_API_KEY: Joi.string().allow(''),
   ANTHROPIC_API_KEY: Joi.string().allow(''),
+  DEEPSEEK_API_KEY: Joi.string().allow(''),
+  GEMINI_API_KEY: Joi.string().allow(''),
   OLLAMA_BASE_URL: Joi.string().default('http://localhost:11434'),
   AI_DEFAULT_PROVIDER: Joi.string()
-    .valid('openai', 'anthropic', 'ollama')
+    .valid('openai', 'anthropic', 'ollama', 'deepseek', 'google', 'moonshot', 'zhipu', 'minimax', 'doubao', 'qwen', 'custom')
     .default('openai'),
   AI_DEFAULT_MODEL: Joi.string().default('gpt-4o-mini'),
   AI_FALLBACK_CHAIN: Joi.string().default('openai,anthropic,ollama'),

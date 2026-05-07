@@ -47,7 +47,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         { role: 'user', content: buildUserPrompt(input) },
       ],
       temperature: input.temperature ?? 0.3,
-      max_tokens: input.maxTokens ?? 2048,
+      max_tokens: input.maxTokens ?? 4096,
       response_format: { type: 'json_object' },
     });
 
@@ -62,16 +62,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         latencyMs,
       };
     } catch {
-      // 如果解析失败，返回空结果
-      return {
-        summary: content,
-        riskLevel: 'LOW',
-        categories: [],
-        keyChanges: [],
-        suggestions: [],
-        tokensUsed: response.usage?.total_tokens ?? 0,
-        latencyMs,
-      };
+      throw new Error(`Failed to parse AI response as JSON. Raw content (first 200 chars): ${content.slice(0, 200)}`);
     }
   }
 

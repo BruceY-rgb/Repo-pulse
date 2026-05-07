@@ -46,6 +46,7 @@ export interface DashboardRecentActivity {
   title: string;
   author: string;
   repo: string;
+  occurredAt: string | null;
   time: string;
 }
 

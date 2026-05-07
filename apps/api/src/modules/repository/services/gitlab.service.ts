@@ -29,6 +29,49 @@ interface GitlabBranchResponse {
   name: string;
 }
 
+export interface GitlabCommitResponse {
+  id: string;
+  message?: string;
+  web_url?: string;
+  author_name?: string;
+  authored_date?: string;
+  committed_date?: string;
+  created_at?: string;
+}
+
+export interface GitlabMergeRequestResponse {
+  id: number;
+  iid: number;
+  title?: string;
+  description?: string | null;
+  web_url?: string;
+  state?: string;
+  merged_at?: string | null;
+  closed_at?: string | null;
+  updated_at?: string;
+  created_at?: string;
+  author?: {
+    username?: string;
+    avatar_url?: string;
+  };
+}
+
+export interface GitlabIssueResponse {
+  id: number;
+  iid: number;
+  title?: string;
+  description?: string | null;
+  web_url?: string;
+  state?: string;
+  closed_at?: string | null;
+  updated_at?: string;
+  created_at?: string;
+  author?: {
+    username?: string;
+    avatar_url?: string;
+  };
+}
+
 @Injectable()
 export class GitlabService {
   private readonly logger = new Logger(GitlabService.name);
@@ -121,6 +164,19 @@ export class GitlabService {
     }
   }
 
+  async getCommit(owner: string, repo: string, sha: string): Promise<GitlabCommitResponse | null> {
+    try {
+      const encodedPath = encodeURIComponent(`${owner}/${repo}`);
+      const response = await this.client.get<GitlabCommitResponse>(
+        `/projects/${encodedPath}/repository/commits/${encodeURIComponent(sha)}`,
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Failed to fetch commit ${sha} for ${owner}/${repo}`, error);
+      return null;
+    }
+  }
+
   async getBranches(owner: string, repo: string): Promise<string[]> {
     try {
       const encodedPath = encodeURIComponent(`${owner}/${repo}`);
@@ -154,6 +210,23 @@ export class GitlabService {
     }
   }
 
+  async getMergeRequest(
+    owner: string,
+    repo: string,
+    mergeRequestIid: number,
+  ): Promise<GitlabMergeRequestResponse | null> {
+    try {
+      const encodedPath = encodeURIComponent(`${owner}/${repo}`);
+      const response = await this.client.get<GitlabMergeRequestResponse>(
+        `/projects/${encodedPath}/merge_requests/${mergeRequestIid}`,
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Failed to fetch MR !${mergeRequestIid} for ${owner}/${repo}`, error);
+      return null;
+    }
+  }
+
   async getIssues(
     owner: string,
     repo: string,
@@ -168,6 +241,23 @@ export class GitlabService {
     } catch (error) {
       this.logger.error(`Failed to fetch issues for ${owner}/${repo}`, error);
       return [];
+    }
+  }
+
+  async getIssue(
+    owner: string,
+    repo: string,
+    issueIid: number,
+  ): Promise<GitlabIssueResponse | null> {
+    try {
+      const encodedPath = encodeURIComponent(`${owner}/${repo}`);
+      const response = await this.client.get<GitlabIssueResponse>(
+        `/projects/${encodedPath}/issues/${issueIid}`,
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Failed to fetch issue #${issueIid} for ${owner}/${repo}`, error);
+      return null;
     }
   }
 }

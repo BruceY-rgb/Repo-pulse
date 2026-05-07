@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main",
     "start:prod": "node dist/main",
+    "backfill:occurred-at": "ts-node -r tsconfig-paths/register src/scripts/backfill-event-occurred-at.ts",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "test": "jest",
@@ -68,5 +69,19 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "~5.9.3"
+  },
+  "jest": {
+    "moduleFileExtensions": ["js", "json", "ts"],
+    "rootDir": ".",
+    "testRegex": ".*\\.spec\\.ts$",
+    "roots": ["<rootDir>/src", "<rootDir>/test/units"],
+    "transform": {
+      "^.+\\.(t|j)s$": ["ts-jest", { "isolatedModules": true }]
+    },
+    "moduleNameMapper": {
+      "^@/(.*)$": "<rootDir>/src/$1",
+      "^@modules/(.*)$": "<rootDir>/src/modules/$1"
+    },
+    "testEnvironment": "node"
   }
 }

@@ -1,3 +1,4 @@
+import { forwardRef, Inject } from '@nestjs/common';
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
@@ -5,6 +6,7 @@ import { NotificationChannel, prisma } from '@repo-pulse/database';
 import { AIService } from './ai.service';
 import { ApprovalService } from '../approval/approval.service';
 import { NotificationService } from '../notification/notification.service';
+import { EventService } from '../event/event.service';
 
 interface AIAnalysisJob {
   eventId: string;
@@ -19,6 +21,8 @@ export class AIProcessor extends WorkerHost {
     private readonly aiService: AIService,
     private readonly approvalService: ApprovalService,
     private readonly notificationService: NotificationService,
+    @Inject(forwardRef(() => EventService))
+    private readonly eventService: EventService,
   ) {
     super();
   }
@@ -31,6 +35,9 @@ export class AIProcessor extends WorkerHost {
     try {
       const analysis = await this.aiService.analyzeEvent(eventId, force ?? false);
       this.logger.log(`AI analysis completed for event: ${eventId}`);
+
+      // 分析完成后重试因等待 riskLevel 而延迟的通知
+      await this.eventService.retryNotificationsAfterAnalysis(eventId);
 
       const approval = await this.approvalService.createFromAIAnalysis(eventId);
       if (approval) {

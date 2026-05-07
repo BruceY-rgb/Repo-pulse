@@ -221,7 +221,11 @@ export class SyncService {
               body: commit.commit?.message || '',
               author: commit.commit?.author?.name || commit.commit?.author?.login || 'Unknown',
               branch: repository.defaultBranch,
-              createdAt: new Date(commit.commit?.author?.date || new Date()),
+              occurredAt: new Date(commit.commit?.author?.date || new Date()),
+              metadata: {
+                source: 'legacy_history_sync',
+                provider: 'github',
+              },
             },
           });
           commits++;
@@ -267,7 +271,13 @@ export class SyncService {
               branch: pr.base?.ref,
               sourceBranch: pr.head?.ref,
               targetBranch: pr.base?.ref,
-              createdAt: new Date(pr.created_at),
+              occurredAt: new Date(
+                pr.merged_at || (pr.state === 'closed' ? pr.closed_at : null) || pr.created_at,
+              ),
+              metadata: {
+                source: 'legacy_history_sync',
+                provider: 'github',
+              },
             },
           });
           prs++;
@@ -306,7 +316,15 @@ export class SyncService {
               title: issue.title,
               body: issue.body || '',
               author: issue.user?.login || 'Unknown',
-              createdAt: new Date(issue.created_at),
+              occurredAt: new Date(
+                issue.state === 'closed'
+                  ? issue.closed_at || issue.updated_at || issue.created_at
+                  : issue.created_at,
+              ),
+              metadata: {
+                source: 'legacy_history_sync',
+                provider: 'github',
+              },
             },
           });
           issues++;

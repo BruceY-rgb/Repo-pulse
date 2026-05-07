@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { AIProcessor } from './ai-analysis.processor';
 import { AIService } from './ai.service';
@@ -7,6 +7,7 @@ import { AIEventNormalizer } from './ai-event-normalizer';
 import { UserModule } from '../user/user.module';
 import { ApprovalModule } from '../approval/approval.module';
 import { NotificationModule } from '../notification/notification.module';
+import { EventModule } from '../event/event.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { NotificationModule } from '../notification/notification.module';
     UserModule,
     ApprovalModule,
     NotificationModule,
+    forwardRef(() => EventModule),
   ],
   controllers: [AIController],
   providers: [AIProcessor, AIService, AIEventNormalizer],

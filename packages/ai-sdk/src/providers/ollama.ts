@@ -41,7 +41,7 @@ export class OllamaProvider implements AIProvider {
         stream: false,
         options: {
           temperature: input.temperature ?? 0.3,
-          num_predict: input.maxTokens ?? 2048,
+          num_predict: input.maxTokens ?? 4096,
         },
       }),
       signal: AbortSignal.timeout(this.timeout),
@@ -81,7 +81,7 @@ export class OllamaProvider implements AIProvider {
         stream: true,
         options: {
           temperature: input.temperature ?? 0.3,
-          num_predict: input.maxTokens ?? 2048,
+          num_predict: input.maxTokens ?? 4096,
         },
       }),
       signal: AbortSignal.timeout(this.timeout),

@@ -50,6 +50,9 @@ import {
   useLogoutMutation,
 } from '@/hooks/queries/use-auth-queries';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useUnreadNotificationCountQuery } from '@/hooks/queries/use-notification-queries';
+import { useRepositoryListQuery } from '@/hooks/queries/use-repository-queries';
+import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
 
 interface NavItem {
   path: string;
@@ -67,6 +70,15 @@ export function Layout() {
   const [searchKeyword, setSearchKeyword] = useState('');
   const { data: user, isLoading: isUserLoading } = useCurrentUserQuery();
   const logoutMutation = useLogoutMutation();
+  const repositoriesQuery = useRepositoryListQuery();
+  const unreadNotificationCountQuery = useUnreadNotificationCountQuery();
+  const repositoryIds = useMemo(
+    () => (repositoriesQuery.data ?? []).map((repository) => repository.id),
+    [repositoriesQuery.data],
+  );
+  const unreadNotificationCount = unreadNotificationCountQuery.data?.count ?? 0;
+
+  useRepositoryRealtimeSubscription(repositoryIds);
 
   const navItems = useMemo<NavItem[]>(
     () => [
@@ -74,11 +86,16 @@ export function Layout() {
       { path: '/repositories', labelKey: 'app.nav.repositories', icon: GitBranch },
       { path: '/analysis', labelKey: 'app.nav.analysis', icon: Brain },
       { path: '/approvals', labelKey: 'app.nav.approvals', icon: CheckSquare },
-      { path: '/notifications', labelKey: 'app.nav.notifications', icon: Bell, badgeCount: 0 },
+      {
+        path: '/notifications',
+        labelKey: 'app.nav.notifications',
+        icon: Bell,
+        badgeCount: unreadNotificationCount,
+      },
       { path: '/reports', labelKey: 'app.nav.reports', icon: FileText },
       { path: '/settings', labelKey: 'app.nav.settings', icon: Settings },
     ],
-    [],
+    [unreadNotificationCount],
   );
 
   const handleLogout = async () => {
