@@ -35,6 +35,8 @@ import {
   useUnreadNotificationCountQuery,
 } from '@/hooks/queries/use-notification-queries';
 import { useRepositoryListQuery } from '@/hooks/queries/use-repository-queries';
+import { EventContextChips } from '@/components/shared/EventContextChips';
+import type { NotificationChannel } from '@/services/notification.service';
 
 type NotificationTab = 'all' | 'unread';
 
@@ -213,6 +215,7 @@ export function Notifications() {
                             <p className="text-base font-medium text-foreground">
                               {item.title}
                             </p>
+                            <EventContextChips event={item.event} />
                             <div className="prose prose-sm prose-invert max-w-none text-muted-foreground">
                               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                 {item.content}

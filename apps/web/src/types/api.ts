@@ -141,6 +141,7 @@ export interface EventAnalysis {
   errorMessage?: string;
   promptVersion?: string;
   createdAt: string;
+  event?: Event | null;
 }
 
 export interface SearchResult {

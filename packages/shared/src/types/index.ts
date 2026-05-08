@@ -235,6 +235,25 @@ export interface SuggestionDto {
   description: string;
 }
 
+export interface EventContextDto {
+  id: string;
+  type: EventType;
+  action: string;
+  title: string;
+  branch?: string | null;
+  sourceBranch?: string | null;
+  targetBranch?: string | null;
+  externalUrl?: string | null;
+  occurredAt?: string | null;
+  repository?: {
+    id: string;
+    name: string;
+    fullName: string;
+    platform: Platform;
+    url?: string | null;
+  } | null;
+}
+
 export interface EventAnalysisDto {
   id: string;
   eventId: string;
@@ -259,6 +278,7 @@ export interface EventAnalysisDto {
   errorMessage?: string;
   promptVersion?: string;
   createdAt: string;
+  event?: EventContextDto | null;
 }
 
 export interface NormalizedRepoEvent {

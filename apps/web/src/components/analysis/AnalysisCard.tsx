@@ -1,7 +1,9 @@
 import type { EventAnalysis } from '@/types/api';
 import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { RiskBadge } from './RiskBadge';
 import { CategoryBadge } from './CategoryBadge';
+import { EventContextChips } from '@/components/shared/EventContextChips';
 
 const actionLabels: Record<string, string> = {
   REVIEW_REQUIRED: 'Needs Review',
@@ -23,6 +25,43 @@ interface AnalysisCardProps {
   analysis: EventAnalysis;
 }
 
+function AnalysisStatusBadge({ status }: { status: string }) {
+  switch (status) {
+    case 'COMPLETED':
+      return (
+        <Badge className="bg-green-400/20 text-green-400">
+          {statusLabels[status]}
+        </Badge>
+      );
+    case 'FAILED':
+      return (
+        <Badge className="bg-red-400/20 text-red-400">
+          {statusLabels[status]}
+        </Badge>
+      );
+    case 'PROCESSING':
+      return (
+        <Badge className="bg-blue-400/20 text-blue-400">
+          {statusLabels[status]}
+        </Badge>
+      );
+    case 'PENDING':
+      return (
+        <Badge className="bg-yellow-400/20 text-yellow-400">
+          {statusLabels[status]}
+        </Badge>
+      );
+    case 'SKIPPED':
+      return (
+        <Badge variant="secondary">
+          {statusLabels[status]}
+        </Badge>
+      );
+    default:
+      return <Badge variant="secondary">{status}</Badge>;
+  }
+}
+
 export function AnalysisCard({ analysis }: AnalysisCardProps) {
   return (
     <Card className="hover:bg-accent/5 transition-colors cursor-pointer">
@@ -32,16 +71,20 @@ export function AnalysisCard({ analysis }: AnalysisCardProps) {
             <div className="flex items-center gap-2 mb-2">
               <RiskBadge riskLevel={analysis.riskLevel} />
               <CategoryBadge category={analysis.category} />
-              {analysis.status === 'PROCESSING' && (
-                <span className="text-xs text-muted-foreground animate-pulse">
-                  Analyzing...
-                </span>
-              )}
+              <AnalysisStatusBadge status={analysis.status} />
             </div>
 
             <p className="text-sm text-foreground line-clamp-2 mb-1">
               {analysis.summaryShort || analysis.summary}
             </p>
+
+            {analysis.event?.title ? (
+              <p className="text-xs text-muted-foreground line-clamp-1">
+                {analysis.event.title}
+              </p>
+            ) : null}
+
+            <EventContextChips event={analysis.event} className="mt-3" />
 
             <div className="flex items-center gap-3 text-xs text-muted-foreground mt-2">
               {analysis.tags.length > 0 && (
@@ -52,7 +95,6 @@ export function AnalysisCard({ analysis }: AnalysisCardProps) {
               <span>
                 {actionLabels[analysis.suggestedAction] ?? analysis.suggestedAction}
               </span>
-              <span>{statusLabels[analysis.status] ?? analysis.status}</span>
             </div>
           </div>
 

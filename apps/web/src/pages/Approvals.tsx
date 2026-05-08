@@ -14,6 +14,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { approvalService, type Approval, type ApprovalStatus } from '@/services/approval.service';
+import { EventContextChips } from '@/components/shared/EventContextChips';
 
 export function Approvals() {
   const [activeTab, setActiveTab] = useState('pending');
@@ -183,9 +184,7 @@ export function Approvals() {
                         </div>
                         {getStatusBadge(approval.status)}
                       </div>
-                      <div className="text-xs text-[var(--github-text-secondary)] mb-2">
-                        {approval.event?.repository?.name || 'Unknown Repository'}
-                      </div>
+                      <EventContextChips event={approval.event} className="mb-2" />
                       <div className="text-xs text-[var(--github-text-secondary)]">
                         {new Date(approval.createdAt).toLocaleString()}
                       </div>
@@ -209,9 +208,7 @@ export function Approvals() {
                       <p className="text-sm text-[var(--github-text-secondary)]">
                         {selectedApproval.event?.title || 'Unknown'}
                       </p>
-                      <p className="text-xs text-[var(--github-text-secondary)]">
-                        {selectedApproval.event?.repository?.name}
-                      </p>
+                      <EventContextChips event={selectedApproval.event} className="mt-2" />
                     </div>
 
                     <div>

@@ -1,5 +1,5 @@
 import { apiClient } from './api-client';
-import type { ApiResponse, RepositoryBranchScopeMap } from '@/types/api';
+import type { ApiResponse, Event, RepositoryBranchScopeMap } from '@/types/api';
 
 export type NotificationChannel = 'EMAIL' | 'DINGTALK' | 'FEISHU' | 'WEBHOOK' | 'IN_APP';
 
@@ -25,6 +25,7 @@ interface Notification {
   status: string;
   readAt: string | null;
   createdAt: string;
+  event?: Event | null;
 }
 
 interface NotificationsResponse {

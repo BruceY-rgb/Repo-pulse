@@ -1,5 +1,5 @@
 import { apiClient } from './api-client';
-import type { ApiResponse, RepositoryBranchScopeMap } from '@/types/api';
+import type { ApiResponse, Event, RepositoryBranchScopeMap } from '@/types/api';
 
 export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'EDITED';
 
@@ -13,14 +13,7 @@ export interface Approval {
   comment?: string;
   createdAt: string;
   reviewedAt?: string;
-  event?: {
-    id: string;
-    type: string;
-    title: string;
-    repository: {
-      name: string;
-    };
-  };
+  event?: Event | null;
 }
 
 interface ApprovalsResponse {

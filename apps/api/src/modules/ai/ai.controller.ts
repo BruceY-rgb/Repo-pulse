@@ -16,6 +16,14 @@ import { AIService } from './ai.service';
 import { prisma, AnalysisStatus } from '@repo-pulse/database';
 import type { EventAnalysisDto } from '@repo-pulse/shared';
 
+const analysisInclude = {
+  event: {
+    include: {
+      repository: true,
+    },
+  },
+} as const;
+
 @Controller('ai')
 @UseGuards(JwtAuthGuard)
 export class AIController {
@@ -76,6 +84,7 @@ export class AIController {
     const [items, total] = await Promise.all([
       prisma.aIAnalysis.findMany({
         where: where as any,
+        include: analysisInclude,
         orderBy: { createdAt: 'desc' },
         skip,
         take: size,
@@ -101,7 +110,15 @@ export class AIController {
     @Param('eventId') eventId: string,
   ): Promise<{ status: string; analysis: EventAnalysisDto | null }> {
     const analysis = await prisma.aIAnalysis.findFirst({
-      where: { eventId },
+      where: {
+        eventId,
+        event: {
+          repository: {
+            users: { some: { userId: user.sub } },
+          },
+        },
+      },
+      include: analysisInclude,
       orderBy: { createdAt: 'desc' },
     });
 
@@ -228,6 +245,28 @@ export class AIController {
       errorMessage: analysis.errorMessage ?? undefined,
       promptVersion: analysis.promptVersion ?? undefined,
       createdAt: analysis.createdAt?.toISOString() ?? '',
+      event: analysis.event
+        ? {
+            id: analysis.event.id,
+            type: analysis.event.type,
+            action: analysis.event.action,
+            title: analysis.event.title,
+            branch: analysis.event.branch ?? null,
+            sourceBranch: analysis.event.sourceBranch ?? null,
+            targetBranch: analysis.event.targetBranch ?? null,
+            externalUrl: analysis.event.externalUrl ?? null,
+            occurredAt: analysis.event.occurredAt?.toISOString() ?? null,
+            repository: analysis.event.repository
+              ? {
+                  id: analysis.event.repository.id,
+                  name: analysis.event.repository.name,
+                  fullName: analysis.event.repository.fullName,
+                  platform: analysis.event.repository.platform,
+                  url: analysis.event.repository.url ?? null,
+                }
+              : null,
+          }
+        : null,
     };
   }
 }

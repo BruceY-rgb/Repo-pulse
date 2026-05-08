@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { RiskBadge } from './RiskBadge';
 import { CategoryBadge } from './CategoryBadge';
 import { Brain } from 'lucide-react';
+import { EventContextChips } from '@/components/shared/EventContextChips';
 
 interface AnalysisDetailProps {
   analysis: EventAnalysis;
@@ -30,6 +31,20 @@ export function AnalysisDetail({ analysis, onReanalyze }: AnalysisDetailProps) {
               Score: {analysis.riskScore}/100 · {(analysis.confidence * 100).toFixed(0)}% confidence
             </span>
           </div>
+
+          {analysis.event ? (
+            <div>
+              <span className="text-xs font-medium text-muted-foreground uppercase">
+                Event Context
+              </span>
+              {analysis.event.title ? (
+                <p className="mt-1 text-sm font-medium text-foreground">
+                  {analysis.event.title}
+                </p>
+              ) : null}
+              <EventContextChips event={analysis.event} className="mt-2" />
+            </div>
+          ) : null}
 
           <div>
             <span className="text-xs font-medium text-muted-foreground uppercase">
