@@ -7,6 +7,7 @@ import { AIService } from './ai.service';
 import { ApprovalService } from '../approval/approval.service';
 import { NotificationService } from '../notification/notification.service';
 import { EventService } from '../event/event.service';
+import { EventGateway } from '../event/event.gateway';
 
 interface AIAnalysisJob {
   eventId: string;
@@ -23,6 +24,7 @@ export class AIProcessor extends WorkerHost {
     private readonly notificationService: NotificationService,
     @Inject(forwardRef(() => EventService))
     private readonly eventService: EventService,
+    private readonly eventGateway: EventGateway,
   ) {
     super();
   }
@@ -44,6 +46,9 @@ export class AIProcessor extends WorkerHost {
         this.logger.log(`approval_created eventId=${eventId} approvalId=${approval.id}`);
         await this.notifyApprovalCreated(eventId, analysis.summary);
       }
+
+      // 所有流程完成后通知前端刷新
+      this.eventGateway.broadcastAnalysisCompleted(eventId);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       this.logger.error(`ai_analysis_failed eventId=${eventId} reason=${err.message}`, err.stack);

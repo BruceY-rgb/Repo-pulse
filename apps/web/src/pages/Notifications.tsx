@@ -35,6 +35,7 @@ import {
   useUnreadNotificationCountQuery,
 } from '@/hooks/queries/use-notification-queries';
 import { useRepositoryListQuery } from '@/hooks/queries/use-repository-queries';
+import type { NotificationChannel } from '@/services/notification.service';
 
 type NotificationTab = 'all' | 'unread';
 

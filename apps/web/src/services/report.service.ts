@@ -37,10 +37,6 @@ const ISSUE_COLORS = [
   { name: 'Other', color: '#6e7681' },
 ];
 
-function getWeekdayShort(date: Date): string {
-  return date.toLocaleDateString('en-US', { weekday: 'short' });
-}
-
 export const reportService = {
   async getReportData(repositoryIds?: string[]): Promise<ReportData> {
     // Fetch activity chart data (daily commits, PRs, issues)
@@ -63,7 +59,7 @@ export const reportService = {
     let statsTotal = 0;
     let statsByType: { type: string; count: number }[] = [];
     try {
-      const stats = await eventService.getStats(repositoryIds);
+      const stats = await eventService.getStats(repositoryIds ?? []);
       statsTotal = stats.total;
       statsByType = stats.byType;
     } catch {

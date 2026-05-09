@@ -16,7 +16,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { useAnalysisList, useTriggerAnalysis } from '@/hooks/use-analysis';
+import { useAnalysisList, useTriggerAnalysis, analysisQueryKeys } from '@/hooks/use-analysis';
+import { analysisService } from '@/services/analysis.service';
+import { useQueryClient } from '@tanstack/react-query';
 import type { EventAnalysis } from '@/types/api';
 import { AlertCircle, Loader2, RefreshCw } from 'lucide-react';
 
@@ -71,10 +73,21 @@ export function AIAnalysis() {
     status: status !== 'all' ? status : undefined,
   });
 
+  const queryClient = useQueryClient();
   const triggerMutation = useTriggerAnalysis();
 
   const handleReanalyze = (eventId: string) => {
     triggerMutation.mutate({ eventId, force: true });
+  };
+
+  const handleDelete = async (analysisId: string) => {
+    try {
+      await analysisService.deleteAnalysis(analysisId);
+      setSelected(null);
+      queryClient.invalidateQueries({ queryKey: analysisQueryKeys.all });
+    } catch {
+      // ignore
+    }
   };
 
   // 仅首次加载（data 尚未出现）显示 Skeleton
@@ -181,17 +194,12 @@ export function AIAnalysis() {
               {/* List */}
               <div className="space-y-3">
                 {items.map((analysis) => (
-                  <div
+                  <AnalysisCard
                     key={analysis.id}
+                    analysis={analysis}
                     onClick={() => setSelected(analysis)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') setSelected(analysis);
-                    }}
-                  >
-                    <AnalysisCard analysis={analysis} />
-                  </div>
+                    onDelete={handleDelete}
+                  />
                 ))}
               </div>
 
@@ -236,6 +244,9 @@ export function AIAnalysis() {
                 analysis={selected}
                 onReanalyze={() => {
                   if (selected) handleReanalyze(selected.eventId);
+                }}
+                onDelete={() => {
+                  if (selected) handleDelete(selected.id);
                 }}
               />
             </div>

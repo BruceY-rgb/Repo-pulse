@@ -1,28 +1,26 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { prisma, EventType, ReportType, ReportFormat, ReportStatus } from '@repo-pulse/database';
 import { jsPDF } from 'jspdf';
-import * as fs from 'fs';
-import * as path from 'path';
 
-interface ReportMetrics {
+export interface ReportMetrics {
   issues: number;
   resolved: number;
   prs: number;
 }
 
-interface SecurityMetrics {
+export interface SecurityMetrics {
   critical: number;
   high: number;
   medium: number;
 }
 
-interface TeamMetrics {
+export interface TeamMetrics {
   velocity: string;
   reviewTime: string;
   commits: number;
 }
 
-interface ReportItem {
+export interface ReportItem {
   id: number;
   title: string;
   date: string;

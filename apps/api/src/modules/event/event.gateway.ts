@@ -114,6 +114,15 @@ export class EventGateway
     this.logger.log(`Broadcast event:new to room ${roomName}`);
   }
 
+  broadcastAnalysisCompleted(eventId: string) {
+    this.server.emit('analysis:completed', {
+      type: 'analysis:completed',
+      eventId,
+      timestamp: new Date().toISOString(),
+    });
+    this.logger.log(`Broadcast analysis:completed eventId=${eventId}`);
+  }
+
   private extractToken(client: UserSocket): string | null {
     const authToken = client.handshake.auth?.token as string | undefined;
     if (authToken) {

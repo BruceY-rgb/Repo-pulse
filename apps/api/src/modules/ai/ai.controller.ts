@@ -2,12 +2,14 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Param,
   Body,
   Query,
   Res,
   UseGuards,
   HttpCode,
+  NotFoundException,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -113,6 +115,18 @@ export class AIController {
       status: analysis.status.toLowerCase(),
       analysis: this.toDto(analysis),
     };
+  }
+
+  /**
+   * 删除 AI 分析结果
+   */
+  @Delete('analysis/:analysisId')
+  async deleteAnalysis(@Param('analysisId') analysisId: string) {
+    const analysis = await prisma.aIAnalysis.findUnique({ where: { id: analysisId } });
+    if (!analysis) throw new NotFoundException('Analysis not found');
+
+    await prisma.aIAnalysis.delete({ where: { id: analysisId } });
+    return { success: true };
   }
 
   // ================================================================
