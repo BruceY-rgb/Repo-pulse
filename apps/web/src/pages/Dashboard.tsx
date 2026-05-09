@@ -20,7 +20,6 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -53,6 +52,7 @@ import {
 import gsap from 'gsap';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useMonitoringScopePreferences } from '@/hooks/use-monitoring-scope-preferences';
+import { EventContextChips } from '@/components/shared/EventContextChips';
 import {
   useDashboardRecentEventsQuery,
   useDashboardRepositoriesQuery,
@@ -253,9 +253,9 @@ function ScopeRepositoryItem({
                           default
                         </span>
                       ) : null}
-                      {branch.isObserved && !branch.isDefault ? (
+                      {branch.isObserved && !branch.isDefault && !branch.lastCommitSha ? (
                         <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
-                          observed
+                          observed-only
                         </span>
                       ) : null}
                     </span>
@@ -570,16 +570,16 @@ export function Dashboard() {
 
   const recentActivity = useMemo(() => {
     const events = recentEventsQuery.data?.items ?? [];
-    return events.map((event, index) => ({
-      id: index + 1,
+    return events.map((event) => ({
+      id: event.id,
       type: event.type,
       title: event.title,
-      repo: event.repository?.fullName ?? t('dashboard.repo.fallback'),
-      author: event.author,
+      author: event.author || 'Unknown',
       time: toRelativeTime(event.occurredAt ?? event.createdAt, language),
       risk: getRiskByType(event.type),
+      event,
     }));
-  }, [language, recentEventsQuery.data?.items, t]);
+  }, [language, recentEventsQuery.data?.items]);
 
   useEffect(() => {
     if (cardsRef.current) {
@@ -949,10 +949,8 @@ export function Dashboard() {
                       <div className={`mt-2 h-2 w-2 flex-shrink-0 rounded-full ${activity.risk === 'high' ? 'bg-red-400' : activity.risk === 'medium' ? 'bg-yellow-400' : 'bg-green-400'}`} />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm text-white">{activity.title}</p>
-                        <div className="mt-1 flex items-center gap-2">
-                          <Badge variant="secondary" className="bg-[var(--github-border)] text-xs text-[var(--github-text-secondary)]">
-                            {activity.repo}
-                          </Badge>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <EventContextChips event={activity.event} />
                           <span className="text-xs text-[var(--github-text-secondary)]">{activity.time}</span>
                         </div>
                       </div>

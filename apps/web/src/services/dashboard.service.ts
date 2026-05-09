@@ -46,6 +46,10 @@ export interface DashboardRecentActivity {
   title: string;
   author: string;
   repo: string;
+  branch: string | null;
+  sourceBranch: string | null;
+  targetBranch: string | null;
+  branches: string[];
   occurredAt: string | null;
   time: string;
 }
