@@ -120,4 +120,32 @@ export const reportService = {
 
     return { weeklyData, issueTypes, recentReports };
   },
+
+  async generatePdf(repositoryIds?: string[], type: 'weekly' | 'security' | 'team' = 'weekly') {
+    const { data } = await apiClient.post<{ data: { id: string; title: string; content: string; format: string } }>(
+      '/reports/generate',
+      {
+        repositoryIds,
+        type: type.toUpperCase(),
+        format: 'PDF',
+      },
+    );
+
+    // Trigger download
+    const report = data.data;
+    const response = await apiClient.get(`/reports/${report.id}/download`, {
+      responseType: 'blob',
+    });
+
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${report.title}.pdf`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+
+    return report;
+  },
 };

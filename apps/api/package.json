@@ -42,6 +42,7 @@
     "ioredis": "^5.4.0",
     "joi": "^17.13.0",
     "jsonwebtoken": "^9.0.3",
+    "jspdf": "^4.2.1",
     "passport": "^0.7.0",
     "passport-github2": "^0.1.12",
     "passport-jwt": "^4.0.1",
@@ -71,12 +72,24 @@
     "typescript": "~5.9.3"
   },
   "jest": {
-    "moduleFileExtensions": ["js", "json", "ts"],
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
     "rootDir": ".",
     "testRegex": ".*\\.spec\\.ts$",
-    "roots": ["<rootDir>/src", "<rootDir>/test/units"],
+    "roots": [
+      "<rootDir>/src",
+      "<rootDir>/test/units"
+    ],
     "transform": {
-      "^.+\\.(t|j)s$": ["ts-jest", { "isolatedModules": true }]
+      "^.+\\.(t|j)s$": [
+        "ts-jest",
+        {
+          "isolatedModules": true
+        }
+      ]
     },
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/src/$1",
