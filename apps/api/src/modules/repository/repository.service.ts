@@ -11,6 +11,7 @@ interface SyncSummary {
   repositoryId: string;
   createdCount: number;
   skippedCount: number;
+  updatedCount: number;
   failedSources: string[];
   lastSyncAt: string;
 }
@@ -35,6 +36,7 @@ interface NormalizedSyncEvent {
   branch?: string;
   sourceBranch?: string;
   targetBranch?: string;
+  branches?: string[];
   occurredAt: Date;
   metadata: Record<string, unknown>;
 }
@@ -258,13 +260,14 @@ export class RepositoryService {
         branch: true,
         sourceBranch: true,
         targetBranch: true,
+        branches: true,
       },
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
 
     const observedBranches = observedEvents.flatMap((event) =>
-      [event.branch, event.sourceBranch, event.targetBranch].filter(
+      [...event.branches, event.branch, event.sourceBranch, event.targetBranch].filter(
         (branch): branch is string => Boolean(branch),
       ),
     );
@@ -366,7 +369,7 @@ export class RepositoryService {
     return { success: true };
   }
 
-  async sync(id: string): Promise<SyncSummary> {
+  async sync(id: string, options?: { daysBack?: number }): Promise<SyncSummary> {
     const repository = await this.prisma.repository.findUnique({
       where: { id },
       include: {
@@ -388,11 +391,13 @@ export class RepositoryService {
     }
 
     const [owner, repo] = this.parseRepositoryPath(repository.fullName);
-    const sinceDate = repository.lastSyncAt ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const daysBack = options?.daysBack ?? 7;
+    const sinceDate = repository.lastSyncAt ?? new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
     const since = sinceDate.toISOString();
     const failedSources: string[] = [];
     let createdCount = 0;
     let skippedCount = 0;
+    let updatedCount = 0;
     let successfulSources = 0;
 
     if (repository.platform === Platform.GITHUB) {
@@ -450,6 +455,7 @@ export class RepositoryService {
         const summary = await this.syncSources(repository.id, sources, failedSources);
         createdCount += summary.createdCount;
         skippedCount += summary.skippedCount;
+        updatedCount += summary.updatedCount;
         successfulSources += summary.successfulSources;
       }
     } else {
@@ -485,6 +491,7 @@ export class RepositoryService {
       const summary = await this.syncSources(repository.id, sources, failedSources);
       createdCount += summary.createdCount;
       skippedCount += summary.skippedCount;
+      updatedCount += summary.updatedCount;
       successfulSources += summary.successfulSources;
     }
 
@@ -498,13 +505,14 @@ export class RepositoryService {
     }
 
     this.logger.log(
-      `repository_sync_completed repositoryId=${id} createdCount=${createdCount} skippedCount=${skippedCount} failedSources=${failedSources.join(',') || 'none'}`,
+      `repository_sync_completed repositoryId=${id} createdCount=${createdCount} updatedCount=${updatedCount} skippedCount=${skippedCount} failedSources=${failedSources.join(',') || 'none'}`,
     );
 
     return {
       repositoryId: id,
       createdCount,
       skippedCount,
+      updatedCount,
       failedSources,
       lastSyncAt: completedAt.toISOString(),
     };
@@ -601,9 +609,15 @@ export class RepositoryService {
       normalize: (item: unknown) => NormalizedSyncEvent | null;
     }>,
     failedSources: string[],
-  ): Promise<{ createdCount: number; skippedCount: number; successfulSources: number }> {
+  ): Promise<{
+    createdCount: number;
+    skippedCount: number;
+    updatedCount: number;
+    successfulSources: number;
+  }> {
     let createdCount = 0;
     let skippedCount = 0;
+    let updatedCount = 0;
     let successfulSources = 0;
 
     for (const source of sources) {
@@ -622,9 +636,30 @@ export class RepositoryService {
             normalized.externalId,
           );
           if (existing) {
-            skippedCount += 1;
+            const branches = this.resolveBranches(normalized.branches, [
+              normalized.branch,
+              normalized.sourceBranch,
+              normalized.targetBranch,
+            ]);
+            const existingBranches = existing.branches ?? [];
+            const mergedBranches = this.mergeBranches(existingBranches, branches);
+            if (mergedBranches.length > existingBranches.length) {
+              await this.prisma.event.update({
+                where: { id: existing.id },
+                data: { branches: mergedBranches },
+              });
+              updatedCount += 1;
+            } else {
+              skippedCount += 1;
+            }
             continue;
           }
+
+          const branches = this.resolveBranches(normalized.branches, [
+            normalized.branch,
+            normalized.sourceBranch,
+            normalized.targetBranch,
+          ]);
 
           await this.eventService.create({
             repositoryId,
@@ -639,6 +674,7 @@ export class RepositoryService {
             branch: normalized.branch,
             sourceBranch: normalized.sourceBranch,
             targetBranch: normalized.targetBranch,
+            branches,
             occurredAt: normalized.occurredAt,
             metadata: normalized.metadata,
           });
@@ -653,7 +689,29 @@ export class RepositoryService {
       }
     }
 
-    return { createdCount, skippedCount, successfulSources };
+    return { createdCount, skippedCount, updatedCount, successfulSources };
+  }
+
+  private resolveBranches(
+    explicitBranches: string[] | undefined,
+    fallbackBranches: Array<string | undefined>,
+  ): string[] {
+    const rawBranches = explicitBranches && explicitBranches.length > 0
+      ? explicitBranches
+      : fallbackBranches;
+
+    return Array.from(
+      new Set(
+        rawBranches
+          .filter((branch): branch is string => typeof branch === 'string')
+          .map((branch) => branch.trim())
+          .filter(Boolean),
+      ),
+    );
+  }
+
+  private mergeBranches(existingBranches: string[], incomingBranches: string[]): string[] {
+    return this.resolveBranches([...existingBranches, ...incomingBranches], []);
   }
 
   private parseRepositoryPath(fullName: string): [string, string] {
@@ -690,6 +748,7 @@ export class RepositoryService {
       externalId: commit.sha,
       externalUrl: commit.html_url,
       branch,
+      branches: [branch],
       occurredAt: new Date(commit.commit?.author?.date || new Date()),
       metadata: { source: 'repository_sync', provider: 'github', branch },
     };
@@ -735,6 +794,7 @@ export class RepositoryService {
       branch: pr.base?.ref,
       sourceBranch: pr.head?.ref,
       targetBranch: pr.base?.ref,
+      branches: this.resolveBranches(undefined, [pr.head?.ref, pr.base?.ref]),
       occurredAt: new Date(
         merged
           ? pr.merged_at || pr.closed_at || pr.updated_at || pr.created_at || new Date().toISOString()
@@ -778,6 +838,7 @@ export class RepositoryService {
       authorAvatar: issue.user?.avatar_url,
       externalId: `gh-issue-${issue.id}`,
       externalUrl: issue.html_url,
+      branches: [],
       occurredAt: new Date(
         issue.state === 'closed'
           ? issue.closed_at || issue.updated_at || issue.created_at || new Date().toISOString()
@@ -815,6 +876,7 @@ export class RepositoryService {
       externalId: commit.id,
       externalUrl: commit.web_url,
       branch,
+      branches: [branch],
       occurredAt: new Date(
         commit.authored_date || commit.committed_date || commit.created_at || new Date(),
       ),
@@ -865,6 +927,7 @@ export class RepositoryService {
       branch: mr.target_branch,
       sourceBranch: mr.source_branch,
       targetBranch: mr.target_branch,
+      branches: this.resolveBranches(undefined, [mr.source_branch, mr.target_branch]),
       occurredAt: new Date(
         merged
           ? mr.merged_at || mr.closed_at || mr.updated_at || mr.created_at || new Date().toISOString()
@@ -907,6 +970,7 @@ export class RepositoryService {
       authorAvatar: issue.author?.avatar_url,
       externalId: `gl-issue-${issue.id}`,
       externalUrl: issue.web_url,
+      branches: [],
       occurredAt: new Date(
         issue.state === 'closed'
           ? issue.closed_at || issue.updated_at || issue.created_at || new Date().toISOString()

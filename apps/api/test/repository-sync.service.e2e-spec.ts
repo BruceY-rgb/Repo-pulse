@@ -18,11 +18,13 @@ describe('RepositoryService.sync', () => {
       findUnique: jest.Mock;
       update: jest.Mock;
     };
+    event: {
+      update: jest.Mock;
+    };
   };
   let eventServiceMock: {
     findByExternalId: jest.Mock;
     create: jest.Mock;
-    update: jest.Mock;
   };
 
   beforeEach(() => {
@@ -36,7 +38,6 @@ describe('RepositoryService.sync', () => {
     eventServiceMock = {
       findByExternalId: jest.fn(),
       create: jest.fn(),
-      update: jest.fn(),
     };
 
     service = new RepositoryService(
@@ -49,6 +50,9 @@ describe('RepositoryService.sync', () => {
     prismaMock = {
       repository: {
         findUnique: jest.fn(),
+        update: jest.fn(),
+      },
+      event: {
         update: jest.fn(),
       },
     };
@@ -115,9 +119,9 @@ describe('RepositoryService.sync', () => {
     githubServiceMock.getPullRequests.mockImplementation(async (
       _owner: string,
       _repo: string,
-      options?: { base?: string },
+      state?: string,
     ) => (
-      options?.base === 'main'
+      state === 'all'
         ? [
             {
               id: 101,
@@ -154,19 +158,13 @@ describe('RepositoryService.sync', () => {
     const summary = await service.sync('repo-1', { daysBack: 30 });
 
     expect(summary.createdCount).toBe(4);
+    expect(summary.updatedCount).toBe(0);
     expect(summary.failedSources).toEqual([]);
     expect(githubServiceMock.getPullRequests).toHaveBeenNthCalledWith(
       1,
       'acme',
       'platform-web',
-      { state: 'all', base: 'main' },
-      'token-123',
-    );
-    expect(githubServiceMock.getPullRequests).toHaveBeenNthCalledWith(
-      2,
-      'acme',
-      'platform-web',
-      { state: 'all', base: 'feature/login' },
+      'all',
       'token-123',
     );
     expect(eventServiceMock.create).toHaveBeenCalledWith(
@@ -174,6 +172,7 @@ describe('RepositoryService.sync', () => {
         externalId: 'feature-sha',
         type: EventType.PUSH,
         branch: 'feature/login',
+        branches: ['feature/login'],
         sourceBranch: undefined,
         targetBranch: undefined,
         occurredAt: new Date('2026-04-22T11:00:00.000Z'),
@@ -186,12 +185,13 @@ describe('RepositoryService.sync', () => {
         branch: 'main',
         sourceBranch: 'feature/login',
         targetBranch: 'main',
+        branches: ['feature/login', 'main'],
         occurredAt: new Date('2026-04-23T12:00:00.000Z'),
       }),
     );
   });
 
-  it('refreshes mismatched repository_sync events instead of skipping them forever', async () => {
+  it('adds missing branch ownership to existing repository_sync events', async () => {
     prismaMock.repository.findUnique.mockResolvedValue({
       id: 'repo-2',
       fullName: 'acme/platform-api',
@@ -238,6 +238,7 @@ describe('RepositoryService.sync', () => {
       branch: 'main',
       sourceBranch: null,
       targetBranch: null,
+      branches: ['main'],
       occurredAt: null,
       metadata: {
         source: 'repository_sync',
@@ -252,18 +253,92 @@ describe('RepositoryService.sync', () => {
     const summary = await service.sync('repo-2', { daysBack: 30 });
 
     expect(summary.createdCount).toBe(0);
-    expect(summary.skippedCount).toBe(1);
-    expect(eventServiceMock.update).toHaveBeenCalledWith(
-      'event-1',
-      expect.objectContaining({
-        branch: 'feature/login',
-        occurredAt: new Date('2026-04-22T11:00:00.000Z'),
-        metadata: {
-          source: 'repository_sync',
-          provider: 'github',
-          branch: 'feature/login',
+    expect(summary.updatedCount).toBe(1);
+    expect(summary.skippedCount).toBe(0);
+    expect(prismaMock.event.update).toHaveBeenCalledWith({
+      where: { id: 'event-1' },
+      data: {
+        branches: ['main', 'feature/login'],
+      },
+    });
+  });
+
+  it('keeps a shared commit as one event while recording all synced branches', async () => {
+    prismaMock.repository.findUnique.mockResolvedValue({
+      id: 'repo-3',
+      fullName: 'acme/platform-shared',
+      defaultBranch: 'main',
+      platform: Platform.GITHUB,
+      lastSyncAt: null,
+      users: [
+        {
+          user: {
+            githubAccessToken: 'token-789',
+            githubRefreshToken: null,
+          },
         },
+      ],
+    });
+    prismaMock.repository.update.mockResolvedValue(undefined);
+    githubServiceMock.getBranches.mockResolvedValue([
+      { name: 'main', isProtected: true, lastCommitSha: 'shared-sha' },
+      { name: 'feature/a', isProtected: false, lastCommitSha: 'shared-sha' },
+    ]);
+    githubServiceMock.getCommits.mockResolvedValue([
+      {
+        sha: 'shared-sha',
+        html_url: 'https://github.com/acme/platform-shared/commit/shared',
+        commit: {
+          message: 'Shared commit',
+          author: { name: 'Shared Bot', date: '2026-04-22T11:00:00.000Z' },
+        },
+        author: { login: 'shared-bot', avatar_url: 'https://avatar/shared.png' },
+      },
+    ]);
+    githubServiceMock.getPullRequests.mockResolvedValue([]);
+    githubServiceMock.getIssues.mockResolvedValue([]);
+    eventServiceMock.findByExternalId
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'event-shared',
+        repositoryId: 'repo-3',
+        type: EventType.PUSH,
+        action: 'sync',
+        title: 'Shared sync event',
+        body: null,
+        author: 'shared-bot',
+        authorAvatar: null,
+        externalId: 'shared-sha',
+        externalUrl: null,
+        branch: 'main',
+        sourceBranch: null,
+        targetBranch: null,
+        branches: ['main'],
+        occurredAt: new Date('2026-04-22T11:00:00.000Z'),
+        metadata: {},
+        rawPayload: null,
+        createdAt: new Date('2026-04-29T00:00:00.000Z'),
+        updatedAt: new Date('2026-04-29T00:00:00.000Z'),
+      })
+      .mockResolvedValue(null);
+
+    const summary = await service.sync('repo-3', { daysBack: 30 });
+
+    expect(summary.createdCount).toBe(1);
+    expect(summary.updatedCount).toBe(1);
+    expect(eventServiceMock.create).toHaveBeenCalledTimes(1);
+    expect(eventServiceMock.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalId: 'shared-sha',
+        branch: 'main',
+        branches: ['main'],
       }),
     );
+    expect(prismaMock.event.update).toHaveBeenCalledWith({
+      where: { id: 'event-shared' },
+      data: {
+        branches: ['main', 'feature/a'],
+      },
+    });
   });
 });

@@ -221,6 +221,7 @@ export class SyncService {
               body: commit.commit?.message || '',
               author: commit.commit?.author?.name || commit.commit?.author?.login || 'Unknown',
               branch: repository.defaultBranch,
+              branches: [repository.defaultBranch],
               occurredAt: new Date(commit.commit?.author?.date || new Date()),
               metadata: {
                 source: 'legacy_history_sync',
@@ -271,6 +272,9 @@ export class SyncService {
               branch: pr.base?.ref,
               sourceBranch: pr.head?.ref,
               targetBranch: pr.base?.ref,
+              branches: [pr.head?.ref, pr.base?.ref].filter(
+                (branch): branch is string => Boolean(branch),
+              ),
               occurredAt: new Date(
                 pr.merged_at || (pr.state === 'closed' ? pr.closed_at : null) || pr.created_at,
               ),
@@ -316,6 +320,7 @@ export class SyncService {
               title: issue.title,
               body: issue.body || '',
               author: issue.user?.login || 'Unknown',
+              branches: [],
               occurredAt: new Date(
                 issue.state === 'closed'
                   ? issue.closed_at || issue.updated_at || issue.created_at

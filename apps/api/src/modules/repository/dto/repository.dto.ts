@@ -40,6 +40,8 @@ export class RepositorySyncSummaryDto {
 
   skippedCount!: number;
 
+  updatedCount!: number;
+
   failedSources!: string[];
 
   lastSyncAt!: string;
