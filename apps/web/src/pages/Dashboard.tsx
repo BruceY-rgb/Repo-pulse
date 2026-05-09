@@ -246,7 +246,19 @@ function ScopeRepositoryItem({
                     onClick={() => onToggleBranch(repo.id, branch.name)}
                   >
                     <Checkbox checked={branchChecked} className="pointer-events-none" />
-                    <span className="truncate text-sm text-white">{branch.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-white">{branch.name}</span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      {branch.isDefault ? (
+                        <span className="rounded-full bg-[var(--github-accent)]/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--github-accent)]">
+                          default
+                        </span>
+                      ) : null}
+                      {branch.isObserved && !branch.isDefault ? (
+                        <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
+                          observed
+                        </span>
+                      ) : null}
+                    </span>
                   </button>
                 );
               })}

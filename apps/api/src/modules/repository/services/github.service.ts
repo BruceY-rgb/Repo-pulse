@@ -81,8 +81,18 @@ export interface GithubIssueResponse {
   pull_request?: unknown;
 }
 
+export interface GithubBranchInfo {
+  name: string;
+  isProtected?: boolean;
+  lastCommitSha?: string;
+}
+
 interface GithubBranchResponse {
   name: string;
+  protected?: boolean;
+  commit?: {
+    sha?: string;
+  };
 }
 
 interface GithubSearchResponse {
@@ -256,13 +266,19 @@ export class GithubService {
     owner: string,
     repo: string,
     userToken?: string,
-  ): Promise<string[]> {
+  ): Promise<GithubBranchInfo[]> {
     try {
       const client = this.createUserClient(userToken);
       const response = await client.get<GithubBranchResponse[]>(`/repos/${owner}/${repo}/branches`, {
         params: { per_page: 100 },
       });
-      return response.data.map((branch) => branch.name).filter(Boolean);
+      return response.data
+        .filter((branch) => Boolean(branch.name))
+        .map((branch) => ({
+          name: branch.name,
+          isProtected: branch.protected,
+          lastCommitSha: branch.commit?.sha,
+        }));
     } catch (error) {
       this.logger.error(`Failed to fetch branches for ${owner}/${repo}`, error);
       return [];

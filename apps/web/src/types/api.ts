@@ -161,4 +161,8 @@ export interface SearchResult {
 
 export interface RepositoryBranchScopeOption {
   name: string;
+  isDefault: boolean;
+  isObserved: boolean;
+  isProtected?: boolean;
+  lastCommitSha?: string;
 }

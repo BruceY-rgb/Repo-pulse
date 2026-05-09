@@ -25,8 +25,18 @@ interface GitlabWebhookConfig {
   tag_push_events: boolean;
 }
 
+export interface GitlabBranchInfo {
+  name: string;
+  isProtected?: boolean;
+  lastCommitSha?: string;
+}
+
 interface GitlabBranchResponse {
   name: string;
+  protected?: boolean;
+  commit?: {
+    id?: string;
+  };
 }
 
 export interface GitlabCommitResponse {
@@ -177,7 +187,7 @@ export class GitlabService {
     }
   }
 
-  async getBranches(owner: string, repo: string): Promise<string[]> {
+  async getBranches(owner: string, repo: string): Promise<GitlabBranchInfo[]> {
     try {
       const encodedPath = encodeURIComponent(`${owner}/${repo}`);
       const response = await this.client.get<GitlabBranchResponse[]>(
@@ -186,7 +196,13 @@ export class GitlabService {
           params: { per_page: 100 },
         },
       );
-      return response.data.map((branch) => branch.name).filter(Boolean);
+      return response.data
+        .filter((branch) => Boolean(branch.name))
+        .map((branch) => ({
+          name: branch.name,
+          isProtected: branch.protected,
+          lastCommitSha: branch.commit?.id,
+        }));
     } catch (error) {
       this.logger.error(`Failed to fetch branches for ${owner}/${repo}`, error);
       return [];

@@ -42,8 +42,8 @@ export const repositoryService = {
   },
 
   async getBranches(id: string): Promise<RepositoryBranchScopeOption[]> {
-    const { data } = await apiClient.get<ApiResponse<string[]>>(`/repositories/${id}/branches`);
-    return data.data.map((name) => ({ name }));
+    const { data } = await apiClient.get<ApiResponse<RepositoryBranchScopeOption[]>>(`/repositories/${id}/branches`);
+    return data.data;
   },
 
   async getEvents(

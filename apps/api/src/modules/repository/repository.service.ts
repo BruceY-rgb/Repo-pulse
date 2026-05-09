@@ -2,8 +2,8 @@ import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nest
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient, Platform, Repository, EventType } from '@repo-pulse/database';
 import { randomBytes } from 'crypto';
-import { GithubService } from './services/github.service';
-import { GitlabService } from './services/gitlab.service';
+import { GithubBranchInfo, GithubService } from './services/github.service';
+import { GitlabBranchInfo, GitlabService } from './services/gitlab.service';
 import { CreateRepositoryDto, UpdateRepositoryDto } from './dto/repository.dto';
 import { EventService } from '../event/event.service';
 
@@ -13,6 +13,14 @@ interface SyncSummary {
   skippedCount: number;
   failedSources: string[];
   lastSyncAt: string;
+}
+
+export interface RepositoryBranchOption {
+  name: string;
+  isDefault: boolean;
+  isObserved: boolean;
+  isProtected?: boolean;
+  lastCommitSha?: string;
 }
 
 interface NormalizedSyncEvent {
@@ -197,7 +205,7 @@ export class RepositoryService {
     return repository as Repository & Record<string, unknown>;
   }
 
-  async getBranches(userId: string, id: string): Promise<string[]> {
+  async getBranches(userId: string, id: string): Promise<RepositoryBranchOption[]> {
     const repository = await this.prisma.repository.findUnique({
       where: { id },
       include: {
@@ -226,7 +234,7 @@ export class RepositoryService {
     const [owner, repo] = this.parseRepositoryPath(repository.fullName);
     const tokenOwner = repository.users.find((entry) => entry.user.githubAccessToken);
 
-    let providerBranches: string[] = [];
+    let providerBranches: Array<GithubBranchInfo | GitlabBranchInfo> = [];
     try {
       if (repository.platform === Platform.GITHUB) {
         providerBranches = await this.githubService.getBranches(
@@ -261,13 +269,37 @@ export class RepositoryService {
       ),
     );
 
-    return Array.from(
-      new Set([
-        ...providerBranches,
-        repository.defaultBranch,
-        ...observedBranches,
-      ].filter(Boolean)),
-    ).sort((left, right) => left.localeCompare(right));
+    const branchMap = new Map<string, RepositoryBranchOption>();
+    const ensureBranch = (name: string) => {
+      const existing = branchMap.get(name);
+      if (existing) {
+        return existing;
+      }
+
+      const next: RepositoryBranchOption = {
+        name,
+        isDefault: name === repository.defaultBranch,
+        isObserved: false,
+      };
+      branchMap.set(name, next);
+      return next;
+    };
+
+    for (const branch of providerBranches) {
+      const option = ensureBranch(branch.name);
+      option.isProtected = branch.isProtected;
+      option.lastCommitSha = branch.lastCommitSha;
+    }
+
+    ensureBranch(repository.defaultBranch);
+
+    for (const branch of observedBranches) {
+      ensureBranch(branch).isObserved = true;
+    }
+
+    return Array.from(branchMap.values()).sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
   }
 
   async update(id: string, dto: UpdateRepositoryDto) {
@@ -373,17 +405,20 @@ export class RepositoryService {
           repo,
           tokenOwner.user.githubAccessToken || undefined,
         );
-        const commitSources = (branches.length > 0 ? branches : [repository.defaultBranch]).map(
-          (branch) => ({
-            name: `github_commits:${branch}`,
+        const branchNames = branches.length > 0
+          ? branches.map((branch) => branch.name)
+          : [repository.defaultBranch];
+        const commitSources = branchNames.map(
+          (branchName) => ({
+            name: `github_commits:${branchName}`,
             fetch: () =>
               this.githubService.getCommits(
                 owner,
                 repo,
-                { branch, since },
+                { branch: branchName, since },
                 tokenOwner.user.githubAccessToken || undefined,
               ),
-            normalize: (item: unknown) => this.normalizeGithubCommit(item, branch),
+            normalize: (item: unknown) => this.normalizeGithubCommit(item, branchName),
           }),
         );
         const sources = [
@@ -419,15 +454,18 @@ export class RepositoryService {
       }
     } else {
       const branches = await this.gitlabService.getBranches(owner, repo);
-      const commitSources = (branches.length > 0 ? branches : [repository.defaultBranch]).map(
-        (branch) => ({
-          name: `gitlab_commits:${branch}`,
+      const branchNames = branches.length > 0
+        ? branches.map((branch) => branch.name)
+        : [repository.defaultBranch];
+      const commitSources = branchNames.map(
+        (branchName) => ({
+          name: `gitlab_commits:${branchName}`,
           fetch: () =>
             this.gitlabService.getCommits(owner, repo, {
-              branch,
+              branch: branchName,
               since,
             }),
-          normalize: (item: unknown) => this.normalizeGitlabCommit(item, branch),
+          normalize: (item: unknown) => this.normalizeGitlabCommit(item, branchName),
         }),
       );
       const sources = [
