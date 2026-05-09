@@ -70,10 +70,17 @@ export class EventService {
     branch?: string;
     sourceBranch?: string;
     targetBranch?: string;
+    branches?: string[];
     metadata?: Record<string, unknown>;
     rawPayload?: Record<string, unknown>;
     occurredAt?: Date;
   }): Promise<Event> {
+    const branches = this.resolveBranches(data.branches, [
+      data.branch,
+      data.sourceBranch,
+      data.targetBranch,
+    ]);
+
     const event = await this.prisma.event.create({
       data: {
         repositoryId: data.repositoryId,
@@ -88,6 +95,7 @@ export class EventService {
         branch: data.branch,
         sourceBranch: data.sourceBranch,
         targetBranch: data.targetBranch,
+        branches,
         metadata: (data.metadata || {}) as Prisma.InputJsonValue,
         rawPayload: data.rawPayload as Prisma.InputJsonValue,
         occurredAt: data.occurredAt,
@@ -106,6 +114,21 @@ export class EventService {
     });
 
     return event;
+  }
+
+  private resolveBranches(explicitBranches: string[] | undefined, fallbackBranches: Array<string | undefined>): string[] {
+    const rawBranches = explicitBranches && explicitBranches.length > 0
+      ? explicitBranches
+      : fallbackBranches;
+
+    return Array.from(
+      new Set(
+        rawBranches
+          .filter((branch): branch is string => typeof branch === 'string')
+          .map((branch) => branch.trim())
+          .filter(Boolean),
+      ),
+    );
   }
 
   private async runPostCreateTasks(event: Event): Promise<void> {

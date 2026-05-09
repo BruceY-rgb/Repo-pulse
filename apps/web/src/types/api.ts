@@ -94,6 +94,7 @@ export interface Event {
   branch: string | null;
   sourceBranch: string | null;
   targetBranch: string | null;
+  branches: string[];
   metadata: Record<string, unknown>;
   rawPayload: Record<string, unknown> | null;
   occurredAt: string | null;

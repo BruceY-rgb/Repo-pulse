@@ -17,12 +17,13 @@ describe('EventService - 后置编排韧性 (unit)', () => {
   let service: EventService;
   let prismaMock: {
     event: { create: jest.Mock; findUnique: jest.Mock };
+    aIAnalysis: { findFirst: jest.Mock };
     repository: { findUnique: jest.Mock };
     userRepository: { findMany: jest.Mock };
   };
   let gateway: { broadcastNewEvent: jest.Mock };
   let aiService: { triggerAnalysis: jest.Mock };
-  let filterService: { applyRules: jest.Mock };
+  let filterService: { applyRules: jest.Mock; hasRuleReferencingField: jest.Mock };
   let notificationService: {
     getPreferences: jest.Mock;
     send: jest.Mock;
@@ -51,6 +52,9 @@ describe('EventService - 后置编排韧性 (unit)', () => {
         // enqueueAnalysis 内部用 findUnique 看类型是否在白名单里
         findUnique: jest.fn().mockResolvedValue({ type: EventType.PUSH }),
       },
+      aIAnalysis: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       repository: {
         findUnique: jest.fn().mockResolvedValue({ fullName: 'org/repo' }),
       },
@@ -62,6 +66,7 @@ describe('EventService - 后置编排韧性 (unit)', () => {
     gateway = { broadcastNewEvent: jest.fn() };
     aiService = { triggerAnalysis: jest.fn().mockResolvedValue(undefined) };
     filterService = {
+      hasRuleReferencingField: jest.fn().mockResolvedValue(false),
       applyRules: jest.fn().mockResolvedValue({ action: FilterAction.INCLUDE }),
     };
     notificationService = {
@@ -106,12 +111,41 @@ describe('EventService - 后置编排韧性 (unit)', () => {
 
     expect(result.id).toBe('evt-1');
     expect(prismaMock.event.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.event.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          branches: [],
+        }),
+      }),
+    );
 
     await flushAsync();
 
     expect(gateway.broadcastNewEvent).toHaveBeenCalledTimes(1);
     expect(notificationService.send).toHaveBeenCalledTimes(1);
     expect(aiService.triggerAnalysis).toHaveBeenCalledWith('evt-1');
+  });
+
+  it('自动从 branch/sourceBranch/targetBranch 推导多分支归属', async () => {
+    await service.create({
+      repositoryId: REPO_ID,
+      type: EventType.PR_OPENED,
+      action: 'opened',
+      title: 'branch ownership test',
+      author: 'orch-bot',
+      externalId: 'orch-evt-branches',
+      branch: 'main',
+      sourceBranch: ' feature/login ',
+      targetBranch: 'main',
+    });
+
+    expect(prismaMock.event.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          branches: ['main', 'feature/login'],
+        }),
+      }),
+    );
   });
 
   it('broadcast 抛错时，事件主记录仍正常返回，且 notify / AI 流程继续', async () => {
