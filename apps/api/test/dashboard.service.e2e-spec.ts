@@ -35,22 +35,19 @@ describe('DashboardService', () => {
     expect(prisma.event.count).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        where: {
-          AND: [
-            {
-              repositoryId: 'repo-1',
-              OR: [
-                { branch: { in: ['feature/login'] } },
-                { sourceBranch: { in: ['feature/login'] } },
-                { targetBranch: { in: ['feature/login'] } },
-              ],
-            },
-            { type: EventType.PUSH },
-            expect.objectContaining({
-              OR: expect.any(Array),
-            }),
-          ],
-        },
+        where: expect.objectContaining({
+          repositoryId: 'repo-1',
+          OR: expect.arrayContaining([
+            { branches: { hasSome: ['feature/login'] } },
+            { branch: { in: ['feature/login'] } },
+            { sourceBranch: { in: ['feature/login'] } },
+            { targetBranch: { in: ['feature/login'] } },
+          ]),
+          type: EventType.PUSH,
+          occurredAt: {
+            gte: expect.any(Date),
+          },
+        }),
       }),
     );
   });
@@ -76,5 +73,40 @@ describe('DashboardService', () => {
     expect(activity.find((item) => item.date === occurredAtKey)?.commits).toBe(1);
     expect(activity.find((item) => item.date === currentDayKey)?.commits).toBe(0);
 
+  });
+
+  it('returns branch ownership context for recent activity', async () => {
+    const occurredAt = new Date('2026-04-30T12:00:00.000Z');
+    (prisma.repository.findMany as jest.Mock).mockResolvedValue([
+      { id: 'repo-1', name: 'platform-web', fullName: 'acme/platform-web' },
+    ]);
+    (prisma.event.findMany as jest.Mock).mockResolvedValue([
+      {
+        id: 'event-1',
+        type: EventType.PUSH,
+        action: 'sync',
+        title: 'Feature commit',
+        author: 'feature-bot',
+        repositoryId: 'repo-1',
+        occurredAt,
+        branch: 'feature/login',
+        sourceBranch: null,
+        targetBranch: null,
+        branches: ['feature/login'],
+      },
+    ]);
+
+    const activity = await service.getRecentActivity('user-1', 10, 'repo-1', undefined);
+
+    expect(activity[0]).toEqual(
+      expect.objectContaining({
+        id: 'event-1',
+        repo: 'acme/platform-web',
+        branch: 'feature/login',
+        sourceBranch: null,
+        targetBranch: null,
+        branches: ['feature/login'],
+      }),
+    );
   });
 });

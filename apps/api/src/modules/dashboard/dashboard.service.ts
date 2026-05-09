@@ -237,16 +237,36 @@ export class DashboardService {
         author: true,
         occurredAt: true,
         repositoryId: true,
+        branch: true,
+        sourceBranch: true,
+        targetBranch: true,
+        branches: true,
       },
     });
 
-    return events.map((event: { id: string; type: string; action: string | null; title: string | null; author: string | null; repositoryId: string; occurredAt: Date | null }) => ({
+    return events.map((event: {
+      id: string;
+      type: string;
+      action: string | null;
+      title: string | null;
+      author: string | null;
+      repositoryId: string;
+      occurredAt: Date | null;
+      branch: string | null;
+      sourceBranch: string | null;
+      targetBranch: string | null;
+      branches: string[];
+    }) => ({
       id: event.id,
       type: event.type,
       action: event.action,
       title: event.title,
       author: event.author,
       repo: repoMap.get(event.repositoryId) || 'Unknown',
+      branch: event.branch,
+      sourceBranch: event.sourceBranch,
+      targetBranch: event.targetBranch,
+      branches: event.branches,
       occurredAt: event.occurredAt?.toISOString() ?? null,
       time: this.getRelativeTime(event.occurredAt ?? new Date()),
     }));

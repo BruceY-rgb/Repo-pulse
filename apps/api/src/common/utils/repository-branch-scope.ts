@@ -1,4 +1,4 @@
-import { Prisma } from '@repo-pulse/database';
+import { EventType, Prisma } from '@repo-pulse/database';
 
 export type RepositoryBranchScopeMap = Record<string, string[]>;
 
@@ -72,6 +72,21 @@ export function buildEventScopeWhere(
     return {
       repositoryId,
       OR: [
+        { branches: { hasSome: branches } },
+        {
+          AND: [
+            { branches: { isEmpty: true } },
+            {
+              type: {
+                in: [
+                  EventType.ISSUE_OPENED,
+                  EventType.ISSUE_CLOSED,
+                  EventType.ISSUE_COMMENT,
+                ],
+              },
+            },
+          ],
+        },
         { branch: { in: branches } },
         { sourceBranch: { in: branches } },
         { targetBranch: { in: branches } },
