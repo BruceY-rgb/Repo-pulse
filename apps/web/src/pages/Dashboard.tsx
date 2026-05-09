@@ -63,7 +63,8 @@ import {
 import { useRepositoryBranchesQuery } from '@/hooks/queries/use-repository-queries';
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
 import { useDashboardActivity } from '@/hooks/use-dashboard';
-import type { Repository, RepositoryBranchScopeMap } from '@/types/api';
+import { normalizeBranchOption } from '@/services/repository.service';
+import type { Repository, RepositoryBranchScopeMap, RepositoryBranchScopeOption } from '@/types/api';
 
 function toRelativeTime(dateString: string, language: 'en' | 'zh') {
   const now = Date.now();
@@ -173,7 +174,9 @@ function ScopeRepositoryItem({
   t,
 }: ScopeRepositoryItemProps) {
   const branchesQuery = useRepositoryBranchesQuery(repo.id, expanded);
-  const branchOptions = branchesQuery.data ?? [];
+  const branchOptions = (branchesQuery.data ?? [])
+    .map((branch) => normalizeBranchOption(branch))
+    .filter((branch): branch is RepositoryBranchScopeOption => Boolean(branch));
 
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--github-border)]/80 bg-white/[0.02]">

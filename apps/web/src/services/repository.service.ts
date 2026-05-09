@@ -10,6 +10,45 @@ import type {
   SearchResult,
 } from '@/types/api';
 
+export function normalizeBranchOption(rawBranch: unknown): RepositoryBranchScopeOption | null {
+  if (typeof rawBranch === 'string') {
+    const name = rawBranch.trim();
+    return name
+      ? {
+          name,
+          isDefault: false,
+          isObserved: false,
+        }
+      : null;
+  }
+
+  if (!rawBranch || typeof rawBranch !== 'object') {
+    return null;
+  }
+
+  const branch = rawBranch as Partial<RepositoryBranchScopeOption> & {
+    value?: unknown;
+  };
+  const rawName = typeof branch.name === 'string'
+    ? branch.name
+    : typeof branch.value === 'string'
+      ? branch.value
+      : '';
+  const name = rawName.trim();
+
+  if (!name) {
+    return null;
+  }
+
+  return {
+    name,
+    isDefault: Boolean(branch.isDefault),
+    isObserved: Boolean(branch.isObserved),
+    isProtected: branch.isProtected,
+    lastCommitSha: branch.lastCommitSha,
+  };
+}
+
 export const repositoryService = {
   async getAll(isActive?: boolean): Promise<Repository[]> {
     const params = isActive !== undefined ? { isActive } : {};
@@ -42,8 +81,10 @@ export const repositoryService = {
   },
 
   async getBranches(id: string): Promise<RepositoryBranchScopeOption[]> {
-    const { data } = await apiClient.get<ApiResponse<RepositoryBranchScopeOption[]>>(`/repositories/${id}/branches`);
-    return data.data;
+    const { data } = await apiClient.get<ApiResponse<unknown[]>>(`/repositories/${id}/branches`);
+    return data.data
+      .map(normalizeBranchOption)
+      .filter((branch): branch is RepositoryBranchScopeOption => Boolean(branch));
   },
 
   async getEvents(
