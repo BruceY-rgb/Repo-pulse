@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { dashboardQueryKeys } from '@/hooks/queries/use-dashboard-queries';
 import { notificationQueryKeys } from '@/hooks/queries/use-notification-queries';
 import { repositoryQueryKeys } from '@/hooks/queries/use-repository-queries';
+import { analysisQueryKeys } from '@/hooks/use-analysis';
 import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
 
 export function useRepositoryRealtimeSubscription(repositoryIds?: string | string[]) {
@@ -82,6 +83,14 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
         queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
         queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
         queryClient.invalidateQueries({ queryKey: notificationQueryKeys.preferences() });
+      });
+
+      socket.on('analysis:completed', () => {
+        queryClient.invalidateQueries({ queryKey: analysisQueryKeys.all });
+        queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
+        queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
+        queryClient.invalidateQueries({ queryKey: notificationQueryKeys.preferences() });
+        window.dispatchEvent(new Event('approval-updated'));
       });
 
       socketRef.current = socket;

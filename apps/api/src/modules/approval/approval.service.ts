@@ -284,6 +284,14 @@ export class ApprovalService {
   }
 
   /**
+   * 删除审批记录
+   */
+  async delete(approvalId: string): Promise<void> {
+    await prisma.approval.delete({ where: { id: approvalId } });
+    this.logger.log(`approval_deleted id=${approvalId}`);
+  }
+
+  /**
    * 获取审批详情
    */
   async getById(approvalId: string): Promise<Approval | null> {

@@ -62,6 +62,7 @@ const TYPE_TITLE_KEY: Record<string, string> = {
 export function Reports() {
   const { t } = useLanguage();
   const [selectedId, setSelectedId] = useState(1);
+  const [exporting, setExporting] = useState(false);
 
   const reportQuery = useApiQuery({
     queryKey: ['reports'],
@@ -98,9 +99,20 @@ export function Reports() {
             <Calendar className="w-4 h-4" />
             {t('reports.page.thisWeek')}
           </Button>
-          <Button className="btn-x-primary gap-2">
+          <Button
+            className="btn-x-primary gap-2"
+            disabled={exporting}
+            onClick={async () => {
+              setExporting(true);
+              try {
+                await reportService.generatePdf();
+              } finally {
+                setExporting(false);
+              }
+            }}
+          >
             <Download className="w-4 h-4" />
-            {t('reports.page.exportPdf')}
+            {exporting ? t('reports.page.generating') : t('reports.page.exportPdf')}
           </Button>
         </div>
       </div>

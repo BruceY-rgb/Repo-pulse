@@ -4,14 +4,15 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { RiskBadge } from './RiskBadge';
 import { CategoryBadge } from './CategoryBadge';
-import { Brain } from 'lucide-react';
+import { Brain, Trash2 } from 'lucide-react';
 
 interface AnalysisDetailProps {
   analysis: EventAnalysis;
   onReanalyze?: () => void;
+  onDelete?: () => void;
 }
 
-export function AnalysisDetail({ analysis, onReanalyze }: AnalysisDetailProps) {
+export function AnalysisDetail({ analysis, onReanalyze, onDelete }: AnalysisDetailProps) {
   return (
     <div className="space-y-4">
       {/* Summary */}
@@ -114,11 +115,19 @@ export function AnalysisDetail({ analysis, onReanalyze }: AnalysisDetailProps) {
             · Model: {analysis.model} · {analysis.tokensUsed} tokens · {analysis.latencyMs}ms
           </span>
         </div>
-        {onReanalyze && (
-          <Button variant="outline" size="sm" onClick={onReanalyze}>
-            Re-analyze
-          </Button>
-        )}
+        <div className="flex gap-2">
+          {onReanalyze && (
+            <Button variant="outline" size="sm" onClick={onReanalyze}>
+              Re-analyze
+            </Button>
+          )}
+          {onDelete && (
+            <Button variant="outline" size="sm" onClick={onDelete} className="text-red-400 border-red-400/30 hover:bg-red-400/10">
+              <Trash2 className="w-3 h-3 mr-1" />
+              Delete
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );

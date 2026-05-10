@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   GitPullRequest,
   CheckCircle,
@@ -6,6 +6,7 @@ import {
   Clock,
   AlertTriangle,
   MessageSquare,
+  Trash2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,295 +16,240 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { approvalService, type Approval, type ApprovalStatus } from '@/services/approval.service';
 
+function getStatusBadge(status: ApprovalStatus) {
+  switch (status) {
+    case 'PENDING':
+      return <Badge className="bg-yellow-400/20 text-yellow-400"><Clock className="w-3 h-3 mr-1" /> Pending</Badge>;
+    case 'APPROVED':
+      return <Badge className="bg-green-400/20 text-green-400"><CheckCircle className="w-3 h-3 mr-1" /> Approved</Badge>;
+    case 'REJECTED':
+      return <Badge className="bg-red-400/20 text-red-400"><XCircle className="w-3 h-3 mr-1" /> Rejected</Badge>;
+    case 'EDITED':
+      return <Badge className="bg-blue-400/20 text-blue-400"><MessageSquare className="w-3 h-3 mr-1" /> Edited</Badge>;
+    default:
+      return <Badge>{status}</Badge>;
+  }
+}
+
+function ListPanel({ status, selectedId, onSelect, onDelete }: { status: ApprovalStatus; selectedId?: string; onSelect: (a: Approval) => void; onDelete?: (id: string) => void }) {
+  const [items, setItems] = useState<Approval[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(function () {
+    setLoading(true);
+    approvalService.getApprovals({ status })
+      .then(function (r) { setItems(r?.approvals ?? []); })
+      .catch(function () { setItems([]); })
+      .finally(function () { setLoading(false); });
+  }, [status]);
+
+  useEffect(function () { load(); }, [load]);
+
+  if (loading) return <div className="flex items-center justify-center py-16"><Spinner className="h-8 w-8 text-[var(--github-accent)]" /></div>;
+  if (items.length === 0) return <div className="text-center py-16"><GitPullRequest className="w-16 h-16 mx-auto mb-4 text-[var(--github-text-secondary)]" /><h3 className="text-lg font-medium text-white mb-2">No {status.toLowerCase()} approvals</h3></div>;
+
+  return (
+    <div className="space-y-3">
+      {items.map(function (a) {
+        return (
+          <Card
+            key={a.id}
+            className={'card-github cursor-pointer hover:border-[var(--github-accent)]/50 transition-all group ' + (selectedId === a.id ? 'border-[var(--github-accent)]' : '')}
+            onClick={function () { onSelect(a); }}
+          >
+            <CardContent className="p-4">
+              <div className="flex items-start justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-yellow-400" />
+                  <span className="text-sm font-medium text-white">{a.event?.title || 'Code Change'}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  {getStatusBadge(a.status)}
+                  {onDelete && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-red-400"
+                      onClick={function (e) { e.stopPropagation(); onDelete(a.id); }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <div className="text-xs text-[var(--github-text-secondary)] mb-2">{a.event?.repository?.name || 'Unknown Repository'}</div>
+              <div className="text-xs text-[var(--github-text-secondary)]">{new Date(a.createdAt).toLocaleString()}</div>
+            </CardContent>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Approvals() {
   const [activeTab, setActiveTab] = useState('pending');
-  const [approvals, setApprovals] = useState<Approval[]>([]);
-  const [loading, setLoading] = useState(true);
   const [selectedApproval, setSelectedApproval] = useState<Approval | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [comment, setComment] = useState('');
   const [editedContent, setEditedContent] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [pendingCount, setPendingCount] = useState(0);
 
-  // 加载审批列表
-  useEffect(() => {
-    const loadApprovals = async () => {
-      setLoading(true);
-      try {
-        const status = activeTab === 'pending' ? 'PENDING' :
-          activeTab === 'approved' ? 'APPROVED' :
-            activeTab === 'rejected' ? 'REJECTED' : undefined;
-        const response = await approvalService.getApprovals({ status });
-        setApprovals(response?.approvals ?? []);
-      } catch (error) {
-        console.error('Failed to load approvals:', error);
-        setApprovals([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadApprovals();
-  }, [activeTab]);
+  function triggerRefresh() { setRefreshKey(function (k) { return k + 1; }); window.dispatchEvent(new Event('approval-updated')); }
 
-  const handleApprove = async () => {
+  useEffect(function () {
+    approvalService.getPendingCount().then(function (r) { setPendingCount(r?.count ?? 0); }).catch(function () {});
+  }, [refreshKey]);
+
+  function handleSelect(a: Approval) {
+    setSelectedApproval(a);
+    setEditedContent(a.originalContent || '');
+    setComment('');
+  }
+
+  async function handleApprove() {
     if (!selectedApproval) return;
     setActionLoading(true);
     try {
       await approvalService.approve(selectedApproval.id, comment);
-      setApprovals(approvals.filter((a) => a.id !== selectedApproval.id));
-      setSelectedApproval(null);
-      setComment('');
-    } catch (error) {
-      console.error('Failed to approve:', error);
-    } finally {
-      setActionLoading(false);
-    }
-  };
+      setSelectedApproval(null); setComment('');
+      triggerRefresh();
+    } catch (e) { console.error(e); }
+    finally { setActionLoading(false); }
+  }
 
-  const handleReject = async () => {
+  async function handleReject() {
     if (!selectedApproval) return;
     setActionLoading(true);
     try {
       await approvalService.reject(selectedApproval.id, comment);
-      setApprovals(approvals.filter((a) => a.id !== selectedApproval.id));
-      setSelectedApproval(null);
-      setComment('');
-    } catch (error) {
-      console.error('Failed to reject:', error);
-    } finally {
-      setActionLoading(false);
-    }
-  };
+      setSelectedApproval(null); setComment('');
+      triggerRefresh();
+    } catch (e) { console.error(e); }
+    finally { setActionLoading(false); }
+  }
 
-  const handleEditAndApprove = async () => {
+  async function handleEditAndApprove() {
     if (!selectedApproval || !editedContent) return;
     setActionLoading(true);
     try {
       await approvalService.editAndApprove(selectedApproval.id, editedContent, comment);
-      setApprovals(approvals.filter((a) => a.id !== selectedApproval.id));
-      setSelectedApproval(null);
-      setComment('');
-      setEditedContent('');
-    } catch (error) {
-      console.error('Failed to edit and approve:', error);
-    } finally {
-      setActionLoading(false);
-    }
-  };
+      setSelectedApproval(null); setComment(''); setEditedContent('');
+      triggerRefresh();
+    } catch (e) { console.error(e); }
+    finally { setActionLoading(false); }
+  }
 
-  const getStatusBadge = (status: ApprovalStatus) => {
-    switch (status) {
-      case 'PENDING':
-        return <Badge className="bg-yellow-400/20 text-yellow-400"><Clock className="w-3 h-3 mr-1" /> Pending</Badge>;
-      case 'APPROVED':
-        return <Badge className="bg-green-400/20 text-green-400"><CheckCircle className="w-3 h-3 mr-1" /> Approved</Badge>;
-      case 'REJECTED':
-        return <Badge className="bg-red-400/20 text-red-400"><XCircle className="w-3 h-3 mr-1" /> Rejected</Badge>;
-      case 'EDITED':
-        return <Badge className="bg-blue-400/20 text-blue-400"><MessageSquare className="w-3 h-3 mr-1" /> Edited</Badge>;
-      default:
-        return <Badge>{status}</Badge>;
-    }
-  };
+  async function handleDelete(id: string) {
+    try {
+      await approvalService.deleteApproval(id);
+      if (selectedApproval?.id === id) setSelectedApproval(null);
+      triggerRefresh();
+    } catch (e) { console.error(e); }
+  }
+
+  var statusMap: Record<string, ApprovalStatus> = { pending: 'PENDING', approved: 'APPROVED', rejected: 'REJECTED' };
+  var currentStatus = statusMap[activeTab] || 'PENDING';
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
-      {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Approvals</h1>
-          <p className="text-sm text-[var(--github-text-secondary)] mt-1">
-            Review and approve high-risk code changes
-          </p>
+          <p className="text-sm text-[var(--github-text-secondary)] mt-1">Review and approve high-risk code changes</p>
         </div>
       </div>
 
-      <Tabs defaultValue="pending" className="w-full" onValueChange={setActiveTab}>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="bg-[var(--github-surface)] border border-[var(--github-border)]">
-          <TabsTrigger
-            value="pending"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
-          >
-            <Clock className="w-4 h-4 mr-2" />
-            Pending
-            <Badge className="ml-2 bg-[var(--github-accent)] text-white">
-              {approvals.length}
-            </Badge>
-          </TabsTrigger>
-          <TabsTrigger
-            value="approved"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
-          >
-            <CheckCircle className="w-4 h-4 mr-2" />
-            Approved
-          </TabsTrigger>
-          <TabsTrigger
-            value="rejected"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
-          >
-            <XCircle className="w-4 h-4 mr-2" />
-            Rejected
-          </TabsTrigger>
+          <TabsTrigger value="pending" className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"><Clock className="w-4 h-4 mr-2" />Pending {pendingCount > 0 && (<Badge className="ml-1 bg-[var(--github-accent)] text-white text-xs">{pendingCount}</Badge>)}</TabsTrigger>
+          <TabsTrigger value="approved" className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"><CheckCircle className="w-4 h-4 mr-2" />Approved</TabsTrigger>
+          <TabsTrigger value="rejected" className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"><XCircle className="w-4 h-4 mr-2" />Rejected</TabsTrigger>
         </TabsList>
 
-        <TabsContent value={activeTab} className="mt-4">
-          {loading ? (
-            <div className="flex items-center justify-center py-16">
-              <Spinner className="h-8 w-8 text-[var(--github-accent)]" />
-            </div>
-          ) : approvals.length === 0 ? (
-            <div className="text-center py-16">
-              <GitPullRequest className="w-16 h-16 mx-auto mb-4 text-[var(--github-text-secondary)]" />
-              <h3 className="text-lg font-medium text-white mb-2">No approvals</h3>
-              <p className="text-sm text-[var(--github-text-secondary)]">
-                {activeTab === 'pending' ? 'No pending approvals' : `No ${activeTab} approvals`}
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Approval List */}
-              <div className="space-y-3">
-                {approvals.map((approval) => (
-                  <Card
-                    key={approval.id}
-                    className={`card-github cursor-pointer hover:border-[var(--github-accent)]/50 transition-all ${
-                      selectedApproval?.id === approval.id ? 'border-[var(--github-accent)]' : ''
-                    }`}
-                    onClick={() => {
-                      setSelectedApproval(approval);
-                      setEditedContent(approval.originalContent || '');
-                    }}
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <AlertTriangle className="w-4 h-4 text-yellow-400" />
-                          <span className="text-sm font-medium text-white">
-                            {approval.event?.title || 'Code Change'}
-                          </span>
-                        </div>
-                        {getStatusBadge(approval.status)}
-                      </div>
-                      <div className="text-xs text-[var(--github-text-secondary)] mb-2">
-                        {approval.event?.repository?.name || 'Unknown Repository'}
-                      </div>
-                      <div className="text-xs text-[var(--github-text-secondary)]">
-                        {new Date(approval.createdAt).toLocaleString()}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+        <TabsContent value="pending" className="mt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <ListPanel key={'pending-' + refreshKey} status="PENDING" selectedId={selectedApproval?.id} onSelect={handleSelect} onDelete={handleDelete} />
+            {selectedApproval && selectedApproval.status === 'PENDING' && <DetailPanel approval={selectedApproval} actionLoading={actionLoading} comment={comment} setComment={setComment} editedContent={editedContent} setEditedContent={setEditedContent} onApprove={handleApprove} onReject={handleReject} onEditAndApprove={handleEditAndApprove} />}
+          </div>
+        </TabsContent>
 
-              {/* Approval Detail */}
-              {selectedApproval && (
-                <Card className="card-github sticky top-4">
-                  <CardHeader>
-                    <CardTitle className="text-base font-semibold text-white flex items-center gap-2">
-                      <GitPullRequest className="w-5 h-5" />
-                      Approval Details
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div>
-                      <h4 className="text-sm font-medium text-white mb-1">Event</h4>
-                      <p className="text-sm text-[var(--github-text-secondary)]">
-                        {selectedApproval.event?.title || 'Unknown'}
-                      </p>
-                      <p className="text-xs text-[var(--github-text-secondary)]">
-                        {selectedApproval.event?.repository?.name}
-                      </p>
-                    </div>
+        <TabsContent value="approved" className="mt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <ListPanel key={'approved-' + refreshKey} status="APPROVED" selectedId={selectedApproval?.id} onSelect={handleSelect} onDelete={handleDelete} />
+            {selectedApproval && selectedApproval.status !== 'PENDING' && <DetailPanel approval={selectedApproval} readonly />}
+          </div>
+        </TabsContent>
 
-                    <div>
-                      <h4 className="text-sm font-medium text-white mb-1">AI Analysis Summary</h4>
-                      <div className="p-3 rounded-lg bg-white/5 text-sm text-[var(--github-text)] max-h-40 overflow-y-auto">
-                        {selectedApproval.editedContent || selectedApproval.originalContent || 'No analysis available'}
-                      </div>
-                    </div>
-
-                    {selectedApproval.status === 'PENDING' && (
-                      <>
-                        <div>
-                          <h4 className="text-sm font-medium text-white mb-1">Edit Content (Optional)</h4>
-                          <Textarea
-                            value={editedContent}
-                            onChange={(e) => setEditedContent(e.target.value)}
-                            placeholder="Edit the content before approving..."
-                            className="bg-[var(--github-surface)] border-[var(--github-border)] min-h-[100px]"
-                          />
-                        </div>
-
-                        <div>
-                          <h4 className="text-sm font-medium text-white mb-1">Comment (Optional)</h4>
-                          <Textarea
-                            value={comment}
-                            onChange={(e) => setComment(e.target.value)}
-                            placeholder="Add a comment..."
-                            className="bg-[var(--github-surface)] border-[var(--github-border)]"
-                          />
-                        </div>
-
-                        <div className="flex gap-3">
-                          <Button
-                            onClick={handleApprove}
-                            disabled={actionLoading}
-                            className="flex-1 gap-2 bg-green-600 hover:bg-green-700"
-                          >
-                            {actionLoading ? (
-                              <Spinner className="h-4 w-4" />
-                            ) : (
-                              <CheckCircle className="w-4 h-4" />
-                            )}
-                            Approve
-                          </Button>
-                          <Button
-                            onClick={handleReject}
-                            disabled={actionLoading}
-                            variant="outline"
-                            className="flex-1 gap-2 border-red-400 text-red-400 hover:bg-red-400/10"
-                          >
-                            {actionLoading ? (
-                              <Spinner className="h-4 w-4" />
-                            ) : (
-                              <XCircle className="w-4 h-4" />
-                            )}
-                            Reject
-                          </Button>
-                        </div>
-
-                        {editedContent && editedContent !== selectedApproval.originalContent && (
-                          <Button
-                            onClick={handleEditAndApprove}
-                            disabled={actionLoading || !editedContent}
-                            variant="outline"
-                            className="w-full gap-2"
-                          >
-                            {actionLoading ? (
-                              <Spinner className="h-4 w-4" />
-                            ) : (
-                              <MessageSquare className="w-4 h-4" />
-                            )}
-                            Edit & Approve
-                          </Button>
-                        )}
-                      </>
-                    )}
-
-                    {selectedApproval.status !== 'PENDING' && selectedApproval.comment && (
-                      <div>
-                        <h4 className="text-sm font-medium text-white mb-1">Review Comment</h4>
-                        <p className="text-sm text-[var(--github-text-secondary)] p-3 rounded-lg bg-white/5">
-                          {selectedApproval.comment}
-                        </p>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          )}
+        <TabsContent value="rejected" className="mt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <ListPanel key={'rejected-' + refreshKey} status="REJECTED" selectedId={selectedApproval?.id} onSelect={handleSelect} onDelete={handleDelete} />
+            {selectedApproval && selectedApproval.status !== 'PENDING' && <DetailPanel approval={selectedApproval} readonly />}
+          </div>
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+function DetailPanel({ approval, actionLoading, comment, setComment, editedContent, setEditedContent, onApprove, onReject, onEditAndApprove, readonly }: {
+  approval: Approval;
+  actionLoading?: boolean;
+  comment?: string;
+  setComment?: (v: string) => void;
+  editedContent?: string;
+  setEditedContent?: (v: string) => void;
+  onApprove?: () => void;
+  onReject?: () => void;
+  onEditAndApprove?: () => void;
+  readonly?: boolean;
+}) {
+  return (
+    <Card className="card-github sticky top-4">
+      <CardHeader>
+        <CardTitle className="text-base font-semibold text-white flex items-center gap-2"><GitPullRequest className="w-5 h-5" />Approval Details</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div>
+          <h4 className="text-sm font-medium text-white mb-1">Event</h4>
+          <p className="text-sm text-[var(--github-text-secondary)]">{approval.event?.title || 'Unknown'}</p>
+          <p className="text-xs text-[var(--github-text-secondary)]">{approval.event?.repository?.name}</p>
+        </div>
+        <div>
+          <h4 className="text-sm font-medium text-white mb-1">AI Analysis Summary</h4>
+          <div className="p-3 rounded-lg bg-white/5 text-sm text-[var(--github-text)] max-h-40 overflow-y-auto">
+            {approval.editedContent || approval.originalContent || 'No analysis available'}
+          </div>
+        </div>
+
+        {!readonly && (
+          <>
+            <div>
+              <h4 className="text-sm font-medium text-white mb-1">Edit Content (Optional)</h4>
+              <Textarea value={editedContent || ''} onChange={function (e) { if (setEditedContent) setEditedContent(e.target.value); }} placeholder="Edit the content before approving..." className="bg-[var(--github-surface)] border-[var(--github-border)] min-h-[100px]" />
+            </div>
+            <div>
+              <h4 className="text-sm font-medium text-white mb-1">Comment (Optional)</h4>
+              <Textarea value={comment || ''} onChange={function (e) { if (setComment) setComment(e.target.value); }} placeholder="Add a comment..." className="bg-[var(--github-surface)] border-[var(--github-border)]" />
+            </div>
+            <div className="flex gap-3">
+              <Button onClick={onApprove} disabled={actionLoading} className="flex-1 gap-2 bg-green-600 hover:bg-green-700">{actionLoading ? <Spinner className="h-4 w-4" /> : <CheckCircle className="w-4 h-4" />}Approve</Button>
+              <Button onClick={onReject} disabled={actionLoading} variant="outline" className="flex-1 gap-2 border-red-400 text-red-400 hover:bg-red-400/10">{actionLoading ? <Spinner className="h-4 w-4" /> : <XCircle className="w-4 h-4" />}Reject</Button>
+            </div>
+            {editedContent && editedContent !== approval.originalContent && (
+              <Button onClick={onEditAndApprove} disabled={actionLoading || !editedContent} variant="outline" className="w-full gap-2">{actionLoading ? <Spinner className="h-4 w-4" /> : <MessageSquare className="w-4 h-4" />}Edit & Approve</Button>
+            )}
+          </>
+        )}
+
+        {readonly && approval.comment && (
+          <div>
+            <h4 className="text-sm font-medium text-white mb-1">Review Comment</h4>
+            <p className="text-sm text-[var(--github-text-secondary)] p-3 rounded-lg bg-white/5">{approval.comment}</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

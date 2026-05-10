@@ -37,10 +37,6 @@ const ISSUE_COLORS = [
   { name: 'Other', color: '#6e7681' },
 ];
 
-function getWeekdayShort(date: Date): string {
-  return date.toLocaleDateString('en-US', { weekday: 'short' });
-}
-
 export const reportService = {
   async getReportData(repositoryIds?: string[]): Promise<ReportData> {
     // Fetch activity chart data (daily commits, PRs, issues)
@@ -63,7 +59,7 @@ export const reportService = {
     let statsTotal = 0;
     let statsByType: { type: string; count: number }[] = [];
     try {
-      const stats = await eventService.getStats(repositoryIds);
+      const stats = await eventService.getStats(repositoryIds ?? []);
       statsTotal = stats.total;
       statsByType = stats.byType;
     } catch {
@@ -119,5 +115,33 @@ export const reportService = {
     }
 
     return { weeklyData, issueTypes, recentReports };
+  },
+
+  async generatePdf(repositoryIds?: string[], type: 'weekly' | 'security' | 'team' = 'weekly') {
+    const { data } = await apiClient.post<{ data: { id: string; title: string; content: string; format: string } }>(
+      '/reports/generate',
+      {
+        repositoryIds,
+        type: type.toUpperCase(),
+        format: 'PDF',
+      },
+    );
+
+    // Trigger download
+    const report = data.data;
+    const response = await apiClient.get(`/reports/${report.id}/download`, {
+      responseType: 'blob',
+    });
+
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${report.title}.pdf`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+
+    return report;
   },
 };
