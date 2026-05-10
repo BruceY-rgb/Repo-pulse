@@ -450,6 +450,12 @@ export function Dashboard() {
   const totalEvents = statsQuery.data?.total ?? 0;
   const pendingApprovals = pendingApprovalsQuery.data?.count ?? 0;
   const unreadNotifications = unreadNotificationsQuery.data?.count ?? 0;
+  const hasWeeklyActivity = activityData.some(
+    (item) => item.commits > 0 || item.prs > 0 || item.issues > 0,
+  );
+  const weeklyActivityEmptyMessage = totalEvents > 0
+    ? t('dashboard.activity.emptyWithHistory')
+    : t('dashboard.activity.empty');
   const scopeSummary = hasSelection
     ? selectedRepositories.length === 0
       ? t('dashboard.scope.placeholder')
@@ -823,17 +829,22 @@ export function Dashboard() {
         <Card className="card-github lg:col-span-2">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-base font-semibold text-white">
-                <Activity className="h-4 w-4 text-[var(--github-accent)]" />
-                {t('dashboard.sections.weeklyActivity')}
-              </CardTitle>
+              <div>
+                <CardTitle className="flex items-center gap-2 text-base font-semibold text-white">
+                  <Activity className="h-4 w-4 text-[var(--github-accent)]" />
+                  {t('dashboard.sections.weeklyActivity')}
+                </CardTitle>
+                <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
+                  {t('dashboard.activity.window')}
+                </p>
+              </div>
               <Button variant="ghost" size="icon" className="h-8 w-8 text-[var(--github-text-secondary)]">
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="h-64">
+            <div className="relative h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={activityData}>
                   <defs>
@@ -854,6 +865,16 @@ export function Dashboard() {
                   <Area type="monotone" dataKey="prs" stroke="#58a6ff" strokeWidth={2} fillOpacity={1} fill="url(#colorPrs)" />
                 </AreaChart>
               </ResponsiveContainer>
+              {!hasWeeklyActivity ? (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6">
+                  <div className="max-w-md rounded-2xl border border-[var(--github-border)]/80 bg-[#161b22]/90 px-4 py-3 text-center shadow-xl backdrop-blur">
+                    <p className="text-sm font-medium text-white">{t('dashboard.activity.emptyTitle')}</p>
+                    <p className="mt-1 text-xs leading-5 text-[var(--github-text-secondary)]">
+                      {weeklyActivityEmptyMessage}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -953,7 +974,7 @@ export function Dashboard() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm text-white">{activity.title}</p>
                         <div className="mt-1 flex flex-wrap items-center gap-2">
-                          <EventContextChips event={activity.event} />
+                          <EventContextChips event={activity.event} className="min-w-0 max-w-full" />
                           <span className="text-xs text-[var(--github-text-secondary)]">{activity.time}</span>
                         </div>
                       </div>
@@ -983,7 +1004,7 @@ export function Dashboard() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="h-64">
+          <div className="relative h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={activityData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#30363d" vertical={false} />
@@ -994,6 +1015,16 @@ export function Dashboard() {
                 <Bar dataKey="issues" fill="#f85149" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+            {!hasWeeklyActivity ? (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6">
+                <div className="max-w-md rounded-2xl border border-[var(--github-border)]/80 bg-[#161b22]/90 px-4 py-3 text-center shadow-xl backdrop-blur">
+                  <p className="text-sm font-medium text-white">{t('dashboard.activity.emptyTitle')}</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--github-text-secondary)]">
+                    {weeklyActivityEmptyMessage}
+                  </p>
+                </div>
+              </div>
+            ) : null}
           </div>
         </CardContent>
           </Card>

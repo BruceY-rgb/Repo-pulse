@@ -31,11 +31,18 @@ export function buildBranchLabels(
 
   const labels: string[] = [];
   const branches = event.branches ?? [];
+  const formatBranchList = (values: string[]) => {
+    const visibleBranches = values.slice(0, 2);
+    const hiddenCount = values.length - visibleBranches.length;
+    return hiddenCount > 0
+      ? `${visibleBranches.join(', ')} +${hiddenCount}`
+      : visibleBranches.join(', ');
+  };
 
   if (event.sourceBranch && event.targetBranch) {
     labels.push(`${event.sourceBranch} -> ${event.targetBranch}`);
   } else if (branches.length > 1) {
-    labels.push(`branches: ${branches.join(', ')}`);
+    labels.push(`branches: ${formatBranchList(branches)}`);
   } else if (branches.length === 1) {
     labels.push(`branch: ${branches[0]}`);
   } else if (event.targetBranch) {
@@ -57,11 +64,11 @@ export function EventContextChips({ event, className }: EventContextChipsProps) 
   }
 
   return (
-    <div className={cn('flex flex-wrap items-center gap-2', className)}>
+    <div className={cn('flex min-w-0 max-w-full flex-wrap items-center gap-2', className)}>
       {repositoryName ? (
         <Badge
           variant="outline"
-          className="max-w-full border-[var(--github-accent)]/25 bg-[var(--github-accent)]/8 text-[var(--github-accent)]"
+          className="min-w-0 max-w-full border-[var(--github-accent)]/25 bg-[var(--github-accent)]/8 text-[var(--github-accent)]"
         >
           <span className="truncate font-mono text-[11px]">{repositoryName}</span>
         </Badge>
@@ -71,9 +78,9 @@ export function EventContextChips({ event, className }: EventContextChipsProps) 
         <Badge
           key={label}
           variant="outline"
-          className="border-border/80 bg-muted/35 text-muted-foreground"
+          className="min-w-0 max-w-full border-border/80 bg-muted/35 text-muted-foreground"
         >
-          {label}
+          <span className="truncate">{label}</span>
         </Badge>
       ))}
 
