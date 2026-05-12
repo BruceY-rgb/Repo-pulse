@@ -38,6 +38,27 @@ export enum AnalysisStatus {
   PROCESSING = 'PROCESSING',
   COMPLETED = 'COMPLETED',
   FAILED = 'FAILED',
+  SKIPPED = 'SKIPPED', // 事件不需要分析或无法分析
+}
+
+export enum EventCategory {
+  FEATURE = 'FEATURE',
+  BUGFIX = 'BUGFIX',
+  REFACTOR = 'REFACTOR',
+  DOCS = 'DOCS',
+  TEST = 'TEST',
+  DEPENDENCY = 'DEPENDENCY',
+  SECURITY = 'SECURITY',
+  RELEASE = 'RELEASE',
+  UNKNOWN = 'UNKNOWN',
+}
+
+export enum SuggestedAction {
+  REVIEW_REQUIRED = 'REVIEW_REQUIRED',
+  TEST_REQUIRED = 'TEST_REQUIRED',
+  SAFE_TO_IGNORE = 'SAFE_TO_IGNORE',
+  NOTIFY_OWNER = 'NOTIFY_OWNER',
+  CREATE_APPROVAL = 'CREATE_APPROVAL',
 }
 
 export enum FilterAction {
@@ -204,6 +225,75 @@ export interface ModelInfo {
   id: string;
   name: string;
   enabled: boolean;
+}
+
+// ===== AI Analysis DTO =====
+
+export interface SuggestionDto {
+  type: 'critical' | 'warning' | 'info';
+  title: string;
+  description: string;
+}
+
+export interface EventContextDto {
+  id: string;
+  type: EventType;
+  action: string;
+  title: string;
+  branch?: string | null;
+  sourceBranch?: string | null;
+  targetBranch?: string | null;
+  externalUrl?: string | null;
+  occurredAt?: string | null;
+  repository?: {
+    id: string;
+    name: string;
+    fullName: string;
+    platform: Platform;
+    url?: string | null;
+  } | null;
+}
+
+export interface EventAnalysisDto {
+  id: string;
+  eventId: string;
+  model: string;
+  summary: string; // 映射为 summaryShort，用于列表和通知卡片
+  summaryShort: string;
+  summaryLong: string;
+  category: EventCategory;
+  riskLevel: RiskLevel;
+  riskScore: number;
+  riskReasons: string[];
+  tags: string[];
+  affectedAreas: string[];
+  impactSummary: string;
+  suggestedAction: SuggestedAction;
+  confidence: number;
+  keyChanges: string[];
+  suggestions: SuggestionDto[];
+  tokensUsed: number;
+  latencyMs: number;
+  status: AnalysisStatus;
+  errorMessage?: string;
+  promptVersion?: string;
+  createdAt: string;
+  event?: EventContextDto | null;
+}
+
+export interface NormalizedRepoEvent {
+  eventId: string;
+  repositoryId: string;
+  type: EventType;
+  title: string;
+  body: string; // 已经 sanitize + truncate
+  author?: string;
+  language: 'zh' | 'en';
+  context: {
+    repository: string;
+    branch?: string;
+    url?: string;
+  };
 }
 
 // ===== Filter Rule Types =====

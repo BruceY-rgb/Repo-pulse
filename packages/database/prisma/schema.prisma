@@ -47,6 +47,7 @@ enum AnalysisStatus {
   PROCESSING
   COMPLETED
   FAILED
+  SKIPPED
 }
 
 enum FilterAction {
@@ -170,8 +171,13 @@ model Event {
   authorAvatar  String?
   externalId    String
   externalUrl   String?
+  branch        String?
+  sourceBranch  String?
+  targetBranch  String?
+  branches      String[]  @default([])
   metadata      Json      @default("{}")
   rawPayload    Json?
+  occurredAt    DateTime?
   createdAt     DateTime  @default(now())
 
   repository    Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
@@ -181,6 +187,8 @@ model Event {
 
   @@index([repositoryId, createdAt])
   @@index([type, createdAt])
+  @@index([repositoryId, occurredAt])
+  @@index([type, occurredAt])
 }
 
 model AIAnalysis {
@@ -199,6 +207,19 @@ model AIAnalysis {
   status        AnalysisStatus
   errorMessage  String?
   createdAt     DateTime       @default(now())
+
+  // === 新增 AI Analysis 丰富字段（全部可选，保证迁移安全） ===
+  summaryShort   String?       @db.Text
+  summaryLong    String?       @db.Text
+  category       String?
+  riskScore      Int?
+  riskReasons    String[]      @default([])
+  tags           String[]      @default([])
+  affectedAreas  String[]      @default([])
+  impactSummary  String?       @db.Text
+  suggestedAction String?
+  confidence     Float?
+  promptVersion  String?
 
   event         Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
 

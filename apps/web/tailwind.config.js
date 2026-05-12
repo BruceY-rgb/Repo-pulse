@@ -114,5 +114,5 @@ module.exports = {
     },
   },
   // 引入Tailwind插件，扩展更多功能
-  plugins: [require("tailwindcss-animate")], // tailwindcss-animate插件(提供预设动画、过渡效果)
+  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")], // tailwindcss-animate插件(提供预设动画、过渡效果)
 }

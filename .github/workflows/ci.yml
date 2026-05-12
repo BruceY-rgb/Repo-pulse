@@ -53,6 +53,9 @@ jobs:
       - name: Build api (tsc)
         run: pnpm --filter=@repo-pulse/api build
 
+      - name: Run unit tests
+        run: pnpm --filter=@repo-pulse/api test
+
   # ──────────────────────────────────────────────────────────────────────────────
   # Job 2: 用真实 DB + Redis 跑端到端测试
   # ──────────────────────────────────────────────────────────────────────────────

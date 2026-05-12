@@ -1,25 +1,56 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Spinner } from '@/components/ui/spinner';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { authService } from '@/services/auth.service';
+import { authQueryKeys } from '@/hooks/queries/use-auth-queries';
 
 export function AuthCallback() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { t } = useLanguage();
-  const { data: user, isLoading, isError } = useCurrentUserQuery();
 
   useEffect(() => {
-    if (user) {
-      navigate('/dashboard', { replace: true });
-      return;
-    }
+    let isCancelled = false;
 
-    if (!isLoading && isError) {
-      navigate('/login?error=oauth_failed', { replace: true });
-    }
-  }, [isError, isLoading, navigate, user]);
+    const resolveCurrentUser = async () => {
+      for (let attempt = 1; attempt <= 5; attempt += 1) {
+        try {
+          const user = await authService.getMe();
+
+          if (isCancelled) {
+            return;
+          }
+
+          queryClient.setQueryData(authQueryKeys.currentUser(), user);
+          navigate('/dashboard', { replace: true });
+          return;
+        } catch (error) {
+          if (isCancelled) {
+            return;
+          }
+
+          const status = (error as { response?: { status?: number } }).response?.status;
+          if (status === 401 || attempt === 5) {
+            navigate('/login?error=oauth_failed', { replace: true });
+            return;
+          }
+
+          await new Promise((resolve) => {
+            window.setTimeout(resolve, 600);
+          });
+        }
+      }
+    };
+
+    void resolveCurrentUser();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [navigate, queryClient]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">

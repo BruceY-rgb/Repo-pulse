@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ChannelSendResult } from './shared';
 
 interface DingTalkPayload {
   webhookUrl?: string;
@@ -10,16 +11,13 @@ interface DingTalkPayload {
 export class DingTalkChannel {
   private readonly logger = new Logger(DingTalkChannel.name);
 
-  async send(payload: DingTalkPayload): Promise<boolean> {
+  async send(payload: DingTalkPayload): Promise<ChannelSendResult> {
     if (!payload.webhookUrl) {
       this.logger.warn('No DingTalk webhook URL specified');
-      return false;
+      return { success: false, failureReason: 'notification_webhook_missing' };
     }
 
-    // TODO: 实现真实的钉钉 webhook 调用
-    this.logger.log(`[DingTalk] Sending: ${payload.title}`);
-
-    // Mock 实现
-    return true;
+    this.logger.warn('[DingTalk] Delivery adapter not implemented yet');
+    return { success: false, failureReason: 'notification_channel_not_implemented' };
   }
 }

@@ -3,14 +3,39 @@ import { eventService } from '@/services/event.service';
 import { notificationService } from '@/services/notification.service';
 import { repositoryService } from '@/services/repository.service';
 import { useApiQuery } from '@/lib/query-hooks';
+import type { RepositoryBranchScopeMap } from '@/types/api';
+
+function createSelectionKey(
+  repositoryIds?: string[],
+  repositoryBranchScopes?: RepositoryBranchScopeMap,
+) {
+  if (!repositoryIds || repositoryIds.length === 0) {
+    return 'none';
+  }
+
+  const normalizedBranchScopes = repositoryIds.reduce<Record<string, string[]>>((acc, repositoryId) => {
+    const branches = repositoryBranchScopes?.[repositoryId] ?? [];
+    if (branches.length > 0) {
+      acc[repositoryId] = [...branches].sort();
+    }
+    return acc;
+  }, {});
+
+  return JSON.stringify({
+    repositoryIds: [...repositoryIds].sort(),
+    repositoryBranchScopes: normalizedBranchScopes,
+  });
+}
 
 export const dashboardQueryKeys = {
   all: ['dashboard'] as const,
   repositories: () => [...dashboardQueryKeys.all, 'repositories'] as const,
-  stats: (repositoryId: string) => [...dashboardQueryKeys.all, 'stats', repositoryId] as const,
-  recentEvents: (repositoryId: string) => [...dashboardQueryKeys.all, 'recent-events', repositoryId] as const,
-  pendingApprovals: () => [...dashboardQueryKeys.all, 'pending-approvals'] as const,
-  unreadNotifications: () => [...dashboardQueryKeys.all, 'unread-notifications'] as const,
+  stats: (selectionKey: string) => [...dashboardQueryKeys.all, 'stats', selectionKey] as const,
+  recentEvents: (selectionKey: string) => [...dashboardQueryKeys.all, 'recent-events', selectionKey] as const,
+  pendingApprovals: (selectionKey: string) =>
+    [...dashboardQueryKeys.all, 'pending-approvals', selectionKey] as const,
+  unreadNotifications: (selectionKey: string) =>
+    [...dashboardQueryKeys.all, 'unread-notifications', selectionKey] as const,
 };
 
 export function useDashboardRepositoriesQuery() {
@@ -28,28 +53,17 @@ export function useDashboardRepositoriesQuery() {
   });
 }
 
-export function useDashboardStatsQuery(repositoryId?: string) {
+export function useDashboardStatsQuery(
+  repositoryIds?: string[],
+  repositoryBranchScopes?: RepositoryBranchScopeMap,
+) {
+  const selectionKey = createSelectionKey(repositoryIds, repositoryBranchScopes);
+
   return useApiQuery({
-    queryKey: dashboardQueryKeys.stats(repositoryId ?? 'none'),
+    queryKey: dashboardQueryKeys.stats(selectionKey),
     queryFn: async () => {
       try {
-        const result = await eventService.getAll(repositoryId ?? '', {
-          page: 1,
-          pageSize: 200,
-        });
-
-        const byTypeMap = result.items.reduce<Record<string, number>>((acc, item) => {
-          acc[item.type] = (acc[item.type] ?? 0) + 1;
-          return acc;
-        }, {});
-
-        return {
-          total: result.total,
-          byType: Object.entries(byTypeMap).map(([type, count]) => ({
-            type,
-            count,
-          })),
-        };
+        return await eventService.getStats(repositoryIds ?? [], repositoryBranchScopes);
       } catch {
         return {
           total: 0,
@@ -57,17 +71,22 @@ export function useDashboardStatsQuery(repositoryId?: string) {
         };
       }
     },
-    enabled: Boolean(repositoryId),
+    enabled: Boolean(repositoryIds && repositoryIds.length > 0),
     staleTime: 60 * 1000,
   });
 }
 
-export function useDashboardRecentEventsQuery(repositoryId?: string) {
+export function useDashboardRecentEventsQuery(
+  repositoryIds?: string[],
+  repositoryBranchScopes?: RepositoryBranchScopeMap,
+) {
+  const selectionKey = createSelectionKey(repositoryIds, repositoryBranchScopes);
+
   return useApiQuery({
-    queryKey: dashboardQueryKeys.recentEvents(repositoryId ?? 'none'),
+    queryKey: dashboardQueryKeys.recentEvents(selectionKey),
     queryFn: async () => {
       try {
-        return await repositoryService.getEvents(repositoryId ?? '', {
+        return await eventService.getAll(repositoryIds ?? [], repositoryBranchScopes, {
           page: 1,
           pageSize: 6,
         });
@@ -81,23 +100,35 @@ export function useDashboardRecentEventsQuery(repositoryId?: string) {
         };
       }
     },
-    enabled: Boolean(repositoryId),
+    enabled: Boolean(repositoryIds && repositoryIds.length > 0),
     staleTime: 30 * 1000,
   });
 }
 
-export function usePendingApprovalsCountQuery() {
+export function usePendingApprovalsCountQuery(
+  repositoryIds?: string[],
+  repositoryBranchScopes?: RepositoryBranchScopeMap,
+) {
+  const selectionKey = createSelectionKey(repositoryIds, repositoryBranchScopes);
+
   return useApiQuery({
-    queryKey: dashboardQueryKeys.pendingApprovals(),
-    queryFn: approvalService.getPendingCount,
+    queryKey: dashboardQueryKeys.pendingApprovals(selectionKey),
+    queryFn: () => approvalService.getPendingCount(repositoryIds, repositoryBranchScopes),
+    enabled: Boolean(repositoryIds && repositoryIds.length > 0),
     staleTime: 30 * 1000,
   });
 }
 
-export function useUnreadNotificationsCountQuery() {
+export function useUnreadNotificationsCountQuery(
+  repositoryIds?: string[],
+  repositoryBranchScopes?: RepositoryBranchScopeMap,
+) {
+  const selectionKey = createSelectionKey(repositoryIds, repositoryBranchScopes);
+
   return useApiQuery({
-    queryKey: dashboardQueryKeys.unreadNotifications(),
-    queryFn: notificationService.getUnreadCount,
+    queryKey: dashboardQueryKeys.unreadNotifications(selectionKey),
+    queryFn: () => notificationService.getUnreadCount(repositoryIds, repositoryBranchScopes),
+    enabled: Boolean(repositoryIds && repositoryIds.length > 0),
     staleTime: 30 * 1000,
   });
 }

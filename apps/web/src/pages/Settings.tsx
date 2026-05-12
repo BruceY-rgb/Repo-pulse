@@ -17,6 +17,8 @@ import {
   Wifi,
   Download,
   Loader2,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -73,17 +75,12 @@ import {
 } from '@/services/settings.service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getProviderLogo } from '@/lib/provider-logo';
+import { authService } from '@/services/auth.service';
 import { notificationService } from '@/services/notification.service';
 import type {
   NotificationChannel,
   NotificationPreferences,
 } from '@/services/notification.service';
-
-const connectedAccounts = [
-  { provider: 'GitHub', username: 'johndoe', connected: true, icon: Github },
-  { provider: 'Slack', username: 'acme-corp', connected: true, icon: Slack },
-  { provider: 'Email', username: 'john@example.com', connected: true, icon: Mail },
-];
 
 const apiKeys = [
   { name: 'Production API Key', key: 'rp_live_xxxxxxxxxxxx', created: '2025-01-15', lastUsed: '2 hours ago' },
@@ -94,11 +91,21 @@ export function Settings() {
   const { t } = useLanguage();
   const [saved, setSaved] = useState(false);
 
+  // 用户信息状态
+  const [userLoading, setUserLoading] = useState(false);
+  const [userProfile, setUserProfile] = useState({
+    name: '',
+    email: '',
+    avatar: '',
+    githubId: '',
+  });
+
   // AI 配置状态
   const [aiConfig, setAiConfig] = useState<AIConfig>({});
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSaving, setAiSaving] = useState(false);
   const [aiSaved, setAiSaved] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
 
   // 连接测试状态
   const [testingConnection, setTestingConnection] = useState(false);
@@ -133,6 +140,27 @@ export function Settings() {
   const exceptionRules = (filterRulesQuery.data ?? []).map((rule) =>
     createExceptionRuleFromFilterRule(rule, t),
   );
+
+  // 加载用户信息
+  useEffect(() => {
+    const loadUser = async () => {
+      setUserLoading(true);
+      try {
+        const user = await authService.getMe();
+        setUserProfile({
+          name: user.name || '',
+          email: user.email || '',
+          avatar: user.avatar || '',
+          githubId: user.githubId || '',
+        });
+      } catch (error) {
+        console.error('Failed to load user profile:', error);
+      } finally {
+        setUserLoading(false);
+      }
+    };
+    loadUser();
+  }, []);
 
   // 加载 AI 配置
   useEffect(() => {
@@ -315,9 +343,9 @@ export function Settings() {
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Settings</h1>
+          <h1 className="text-2xl font-bold text-white">{t('settings.page.title')}</h1>
           <p className="text-sm text-[var(--github-text-secondary)] mt-1">
-            Manage your account and preferences
+            {t('settings.page.description')}
           </p>
         </div>
         <Button
@@ -325,7 +353,7 @@ export function Settings() {
           onClick={handleSave}
         >
           {saved ? <CheckCircle className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-          {saved ? 'Saved!' : 'Save Changes'}
+          {saved ? t('settings.saved') : t('settings.save')}
         </Button>
       </div>
 
@@ -336,56 +364,63 @@ export function Settings() {
             className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
           >
             <User className="w-4 h-4 mr-2" />
-            Profile
+            {t('settings.tabs.profile')}
           </TabsTrigger>
           <TabsTrigger
             value="notifications"
             className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
           >
             <Bell className="w-4 h-4 mr-2" />
-            Notifications
+            {t('settings.tabs.notifications')}
           </TabsTrigger>
           <TabsTrigger
             value="integrations"
             className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
           >
             <Code className="w-4 h-4 mr-2" />
-            Integrations
+            {t('settings.tabs.integrations')}
           </TabsTrigger>
           <TabsTrigger
             value="security"
             className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
           >
             <Shield className="w-4 h-4 mr-2" />
-            Security
+            {t('settings.tabs.security')}
           </TabsTrigger>
           <TabsTrigger
             value="ai"
             className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
           >
             <Brain className="w-4 h-4 mr-2" />
-            AI
+            {t('settings.tabs.ai')}
           </TabsTrigger>
         </TabsList>
 
         {/* Profile Tab */}
         <TabsContent value="profile" className="mt-4 space-y-4">
+          {userLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Spinner className="h-6 w-6 text-[var(--github-accent)]" />
+            </div>
+          ) : (
           <Card className="card-github">
             <CardHeader>
-              <CardTitle className="text-base font-semibold text-white">Profile Information</CardTitle>
+              <CardTitle className="text-base font-semibold text-white">{t('settings.profile.title')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="flex items-center gap-6">
                 <Avatar className="w-20 h-20 border-2 border-[var(--github-border)]">
-                  <AvatarImage src="https://github.com/shadcn.png" />
-                  <AvatarFallback className="text-2xl bg-[var(--github-accent)] text-white">JD</AvatarFallback>
+                  <AvatarImage src={userProfile.avatar || 'https://github.com/shadcn.png'} />
+                  <AvatarFallback className="text-2xl bg-[var(--github-accent)] text-white">
+                    {userProfile.name.charAt(0) || 'U'}
+                  </AvatarFallback>
                 </Avatar>
                 <div className="space-y-2">
                   <Button variant="outline" className="border-[var(--github-border)]">
-                    Change Avatar
+                    {t('settings.profile.changeAvatar')}
                   </Button>
                   <p className="text-xs text-[var(--github-text-secondary)]">
-                    JPG, PNG or GIF. Max 2MB.
+                    {t('settings.profile.avatarHint')}
                   </p>
                 </div>
               </div>
@@ -394,15 +429,16 @@ export function Settings() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="name" className="text-sm text-white">Full Name</Label>
+                  <Label htmlFor="name" className="text-sm text-white">{t('settings.profile.fullName')}</Label>
                   <Input
                     id="name"
-                    defaultValue="John Doe"
+                    value={userProfile.name}
+                    onChange={(e) => setUserProfile({ ...userProfile, name: e.target.value })}
                     className="bg-[var(--github-surface)] border-[var(--github-border)]"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="username" className="text-sm text-white">Username</Label>
+                  <Label htmlFor="username" className="text-sm text-white">{t('settings.profile.username')}</Label>
                   <Input
                     id="username"
                     defaultValue="johndoe"
@@ -410,16 +446,17 @@ export function Settings() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="email" className="text-sm text-white">Email</Label>
+                  <Label htmlFor="email" className="text-sm text-white">{t('settings.profile.email')}</Label>
                   <Input
                     id="email"
                     type="email"
-                    defaultValue="john@example.com"
+                    value={userProfile.email}
+                    onChange={(e) => setUserProfile({ ...userProfile, email: e.target.value })}
                     className="bg-[var(--github-surface)] border-[var(--github-border)]"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="company" className="text-sm text-white">Company</Label>
+                  <Label htmlFor="company" className="text-sm text-white">{t('settings.profile.company')}</Label>
                   <Input
                     id="company"
                     defaultValue="Acme Corp"
@@ -429,7 +466,7 @@ export function Settings() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="bio" className="text-sm text-white">Bio</Label>
+                <Label htmlFor="bio" className="text-sm text-white">{t('settings.profile.bio')}</Label>
                 <textarea
                   id="bio"
                   rows={3}
@@ -439,6 +476,7 @@ export function Settings() {
               </div>
             </CardContent>
           </Card>
+          )}
         </TabsContent>
 
         {/* Notifications Tab */}
@@ -453,16 +491,14 @@ export function Settings() {
                 <CardHeader>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge className="bg-[var(--github-accent)]/15 text-[var(--github-accent)]">
-                      Notification Controls
+                      {t('settings.notifications.badge.controls')}
                     </Badge>
                   </div>
                   <CardTitle className="text-base font-semibold text-white">
-                    Reduce noise without missing important updates
+                    {t('settings.notifications.title')}
                   </CardTitle>
                   <CardDescription className="text-[var(--github-text-secondary)]">
-                    Notification settings now combine delivery channels, default focus, and exception
-                    rules in one place. We will move the filtering controls into this tab step by
-                    step.
+                    {t('settings.notifications.description')}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-4 md:grid-cols-3">
@@ -472,9 +508,9 @@ export function Settings() {
                         <Bell className="h-5 w-5 text-white" />
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-white">Delivery channels</p>
+                        <p className="text-sm font-medium text-white">{t('settings.notifications.channels.cardTitle')}</p>
                         <p className="text-xs text-[var(--github-text-secondary)]">
-                          Choose where alerts should arrive.
+                          {t('settings.notifications.channels.cardDesc')}
                         </p>
                       </div>
                     </div>
@@ -486,9 +522,9 @@ export function Settings() {
                         <Shield className="h-5 w-5 text-white" />
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-white">Default notification focus</p>
+                        <p className="text-sm font-medium text-white">{t('settings.notifications.focus.cardTitle')}</p>
                         <p className="text-xs text-[var(--github-text-secondary)]">
-                          This area will host the default level selector next.
+                          {t('settings.notifications.focus.cardDesc')}
                         </p>
                       </div>
                     </div>
@@ -500,9 +536,9 @@ export function Settings() {
                         <Link className="h-5 w-5 text-white" />
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-white">Exception rules</p>
+                        <p className="text-sm font-medium text-white">{t('settings.notifications.exceptions.cardTitle')}</p>
                         <p className="text-xs text-[var(--github-text-secondary)]">
-                          Templates and advanced filters will live here after the focus selector.
+                          {t('settings.notifications.exceptions.cardDesc')}
                         </p>
                       </div>
                     </div>
@@ -512,18 +548,18 @@ export function Settings() {
 
               <div className="space-y-2">
                 <p className="text-xs font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
-                  Delivery
+                  {t('settings.notifications.section.delivery')}
                 </p>
                 <p className="text-sm text-[var(--github-text-secondary)]">
-                  First decide which channels are allowed to reach you.
+                  {t('settings.notifications.section.deliveryDesc')}
                 </p>
               </div>
 
               <Card className="card-github">
                 <CardHeader>
-                  <CardTitle className="text-base font-semibold text-white">Notification Channels</CardTitle>
+                  <CardTitle className="text-base font-semibold text-white">{t('settings.notifications.channels.header')}</CardTitle>
                   <CardDescription className="text-[var(--github-text-secondary)]">
-                    Configure how you want to receive notifications
+                    {t('settings.notifications.channels.headerDesc')}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
@@ -532,8 +568,8 @@ export function Settings() {
                       <div className="flex items-center gap-3">
                         <Mail className="w-5 h-5 text-[var(--github-text-secondary)]" />
                         <div>
-                          <p className="text-sm text-white">Email</p>
-                          <p className="text-xs text-[var(--github-text-secondary)]">Receive updates via email</p>
+                          <p className="text-sm text-white">{t('settings.notifications.channels.email')}</p>
+                          <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.channels.emailDesc')}</p>
                         </div>
                       </div>
                       <Switch
@@ -556,8 +592,8 @@ export function Settings() {
                       <div className="flex items-center gap-3">
                         <Link className="w-5 h-5 text-[var(--github-text-secondary)]" />
                         <div>
-                          <p className="text-sm text-white">DingTalk</p>
-                          <p className="text-xs text-[var(--github-text-secondary)]">Send to DingTalk webhook</p>
+                          <p className="text-sm text-white">{t('settings.notifications.channels.dingtalk')}</p>
+                          <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.channels.dingtalkDesc')}</p>
                         </div>
                       </div>
                       <Switch
@@ -570,8 +606,8 @@ export function Settings() {
                       <div className="flex items-center gap-3">
                         <Link className="w-5 h-5 text-[var(--github-text-secondary)]" />
                         <div>
-                          <p className="text-sm text-white">Feishu</p>
-                          <p className="text-xs text-[var(--github-text-secondary)]">Send to Feishu webhook</p>
+                          <p className="text-sm text-white">{t('settings.notifications.channels.feishu')}</p>
+                          <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.channels.feishuDesc')}</p>
                         </div>
                       </div>
                       <Switch
@@ -584,8 +620,8 @@ export function Settings() {
                       <div className="flex items-center gap-3">
                         <Bell className="w-5 h-5 text-[var(--github-text-secondary)]" />
                         <div>
-                          <p className="text-sm text-white">In-App</p>
-                          <p className="text-xs text-[var(--github-text-secondary)]">Receive in-app notifications</p>
+                          <p className="text-sm text-white">{t('settings.notifications.channels.inApp')}</p>
+                          <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.channels.inAppDesc')}</p>
                         </div>
                       </div>
                       <Switch
@@ -601,7 +637,7 @@ export function Settings() {
                     <>
                       <Separator className="bg-[var(--github-border)]" />
                       <div className="space-y-2">
-                        <Label className="text-sm text-white">Webhook URL</Label>
+                        <Label className="text-sm text-white">{t('settings.notifications.channels.webhookUrl')}</Label>
                         <Input
                           placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx"
                           value={notifPrefs.webhookUrl || ''}
@@ -616,19 +652,18 @@ export function Settings() {
 
               <div className="space-y-2">
                 <p className="text-xs font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
-                  Focus
+                  {t('settings.notifications.section.focus')}
                 </p>
                 <p className="text-sm text-[var(--github-text-secondary)]">
-                  Then decide which kinds of repository activity should still get through by default.
+                  {t('settings.notifications.section.focusDesc')}
                 </p>
               </div>
 
               <Card className="card-github">
                 <CardHeader>
-                  <CardTitle className="text-base font-semibold text-white">Notification Focus</CardTitle>
+                  <CardTitle className="text-base font-semibold text-white">{t('settings.notifications.focus.header')}</CardTitle>
                   <CardDescription className="text-[var(--github-text-secondary)]">
-                    These toggles are the current baseline. Default levels and rule-based filtering will
-                    be added into this section next.
+                    {t('settings.notifications.focus.headerDesc')}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -639,8 +674,8 @@ export function Settings() {
 
                   <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
                     <div>
-                      <p className="text-sm text-white">High Risk Alerts</p>
-                      <p className="text-xs text-[var(--github-text-secondary)]">Critical security and performance issues</p>
+                      <p className="text-sm text-white">{t('settings.notifications.events.highRisk')}</p>
+                      <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.events.highRiskDesc')}</p>
                     </div>
                     <Switch
                       checked={notifPrefs.events.highRisk}
@@ -651,8 +686,8 @@ export function Settings() {
                   </div>
                   <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
                     <div>
-                      <p className="text-sm text-white">PR Updates</p>
-                      <p className="text-xs text-[var(--github-text-secondary)]">Pull request created, updated, or merged</p>
+                      <p className="text-sm text-white">{t('settings.notifications.events.prUpdates')}</p>
+                      <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.events.prUpdatesDesc')}</p>
                     </div>
                     <Switch
                       checked={notifPrefs.events.prUpdates}
@@ -663,8 +698,8 @@ export function Settings() {
                   </div>
                   <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
                     <div>
-                      <p className="text-sm text-white">Analysis Complete</p>
-                      <p className="text-xs text-[var(--github-text-secondary)]">AI analysis finished for a PR</p>
+                      <p className="text-sm text-white">{t('settings.notifications.events.analysisComplete')}</p>
+                      <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.events.analysisCompleteDesc')}</p>
                     </div>
                     <Switch
                       checked={notifPrefs.events.analysisComplete}
@@ -675,8 +710,8 @@ export function Settings() {
                   </div>
                   <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
                     <div>
-                      <p className="text-sm text-white">Weekly Reports</p>
-                      <p className="text-xs text-[var(--github-text-secondary)]">Weekly code quality summary</p>
+                      <p className="text-sm text-white">{t('settings.notifications.events.weeklyReport')}</p>
+                      <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.events.weeklyReportDesc')}</p>
                     </div>
                     <Switch
                       checked={notifPrefs.events.weeklyReport}
@@ -690,22 +725,20 @@ export function Settings() {
 
               <div className="space-y-2">
                 <p className="text-xs font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
-                  Exceptions
+                  {t('settings.notifications.section.exceptions')}
                 </p>
                 <p className="text-sm text-[var(--github-text-secondary)]">
-                  This is where quick templates and exception rules will be merged in, so users can fine-tune
-                  noisy cases without leaving Settings.
+                  {t('settings.notifications.section.exceptionsDesc')}
                 </p>
               </div>
 
               <Card className="card-github border-dashed">
                 <CardHeader>
                   <CardTitle className="text-base font-semibold text-white">
-                    Notification filtering is moving here
+                    {t('settings.notifications.exceptions.incoming')}
                   </CardTitle>
                   <CardDescription className="text-[var(--github-text-secondary)]">
-                    Next we will embed default focus levels, quick templates, and exception rules directly into
-                    this tab.
+                    {t('settings.notifications.exceptions.incomingDesc')}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -715,9 +748,9 @@ export function Settings() {
                   />
 
                   <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
-                    <p className="text-sm font-medium text-white">Planned modules</p>
+                    <p className="text-sm font-medium text-white">{t('settings.notifications.exceptions.planned')}</p>
                     <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
-                      Default notification level, template shortcuts, readable exception rules, and advanced preview.
+                      {t('settings.notifications.exceptions.plannedDesc')}
                     </p>
                   </div>
 
@@ -802,7 +835,7 @@ export function Settings() {
               >
                 {notifSaving && <Spinner className="h-4 w-4" />}
                 {notifSaved ? <CheckCircle className="w-4 h-4" /> : null}
-                {notifSaving ? 'Saving...' : notifSaved ? 'Saved!' : 'Save Notification Settings'}
+                {notifSaving ? t('settings.notifications.saving') : notifSaved ? t('settings.notifications.saved') : t('settings.notifications.save')}
               </Button>
             </>
           )}
@@ -812,10 +845,14 @@ export function Settings() {
         <TabsContent value="integrations" className="mt-4 space-y-4">
           <Card className="card-github">
             <CardHeader>
-              <CardTitle className="text-base font-semibold text-white">Connected Accounts</CardTitle>
+              <CardTitle className="text-base font-semibold text-white">{t('settings.integrations.title')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {connectedAccounts.map((account) => {
+              {[
+                { provider: 'GitHub', username: userProfile.githubId ? userProfile.name || 'Connected' : 'Not connected', connected: !!userProfile.githubId, icon: Github },
+                { provider: 'Slack', username: 'Not configured', connected: false, icon: Slack },
+                { provider: 'Email', username: userProfile.email || 'Not configured', connected: !!userProfile.email, icon: Mail },
+              ].map((account) => {
                 const Icon = account.icon;
                 return (
                   <div key={account.provider} className="flex items-center justify-between p-4 rounded-lg bg-white/5">
@@ -831,14 +868,14 @@ export function Settings() {
                     <div className="flex items-center gap-3">
                       {account.connected ? (
                         <>
-                          <Badge className="bg-green-400/20 text-green-400">Connected</Badge>
+                          <Badge className="bg-green-400/20 text-green-400">{t('settings.integrations.connected')}</Badge>
                           <Button variant="outline" size="sm" className="border-[var(--github-border)] text-red-400 hover:text-red-400">
-                            Disconnect
+                            {t('settings.integrations.disconnect')}
                           </Button>
                         </>
                       ) : (
                         <Button size="sm" className="btn-x-primary">
-                          Connect
+                          {t('settings.integrations.connect')}
                         </Button>
                       )}
                     </div>
@@ -851,10 +888,10 @@ export function Settings() {
           <Card className="card-github">
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle className="text-base font-semibold text-white">API Keys</CardTitle>
+                <CardTitle className="text-base font-semibold text-white">{t('settings.integrations.apiKeys')}</CardTitle>
                 <Button size="sm" className="btn-x-primary gap-2">
                   <Key className="w-4 h-4" />
-                  Generate New Key
+                  {t('settings.integrations.generateKey')}
                 </Button>
               </div>
             </CardHeader>
@@ -864,13 +901,13 @@ export function Settings() {
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-sm font-medium text-white">{apiKey.name}</p>
                     <Button variant="ghost" size="sm" className="text-red-400 hover:text-red-400">
-                      Revoke
+                      {t('settings.integrations.revoke')}
                     </Button>
                   </div>
                   <div className="flex items-center gap-4 text-xs text-[var(--github-text-secondary)]">
                     <code className="px-2 py-1 rounded bg-[var(--github-surface)]">{apiKey.key}</code>
-                    <span>Created: {apiKey.created}</span>
-                    <span>Last used: {apiKey.lastUsed}</span>
+                    <span>{t('settings.integrations.created')} {apiKey.created}</span>
+                    <span>{t('settings.integrations.lastUsed')} {apiKey.lastUsed}</span>
                   </div>
                 </div>
               ))}
@@ -882,11 +919,11 @@ export function Settings() {
         <TabsContent value="security" className="mt-4 space-y-4">
           <Card className="card-github">
             <CardHeader>
-              <CardTitle className="text-base font-semibold text-white">Password</CardTitle>
+              <CardTitle className="text-base font-semibold text-white">{t('settings.security.password')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="current" className="text-sm text-white">Current Password</Label>
+                <Label htmlFor="current" className="text-sm text-white">{t('settings.security.currentPassword')}</Label>
                 <Input
                   id="current"
                   type="password"
@@ -894,7 +931,7 @@ export function Settings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="new" className="text-sm text-white">New Password</Label>
+                <Label htmlFor="new" className="text-sm text-white">{t('settings.security.newPassword')}</Label>
                 <Input
                   id="new"
                   type="password"
@@ -902,14 +939,14 @@ export function Settings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="confirm" className="text-sm text-white">Confirm New Password</Label>
+                <Label htmlFor="confirm" className="text-sm text-white">{t('settings.security.confirmPassword')}</Label>
                 <Input
                   id="confirm"
                   type="password"
                   className="bg-[var(--github-surface)] border-[var(--github-border)]"
                 />
               </div>
-              <Button className="btn-x-primary">Update Password</Button>
+              <Button className="btn-x-primary">{t('settings.security.updatePassword')}</Button>
             </CardContent>
           </Card>
 
@@ -917,19 +954,19 @@ export function Settings() {
             <CardHeader>
               <CardTitle className="text-base font-semibold text-white flex items-center gap-2">
                 <AlertTriangle className="w-5 h-5 text-red-400" />
-                Danger Zone
+                {t('settings.security.dangerZone')}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between p-4 rounded-lg bg-red-400/5 border border-red-400/20">
                 <div>
-                  <p className="text-sm font-medium text-white">Delete Account</p>
+                  <p className="text-sm font-medium text-white">{t('settings.security.deleteAccount')}</p>
                   <p className="text-xs text-[var(--github-text-secondary)]">
-                    Permanently delete your account and all data
+                    {t('settings.security.deleteDescription')}
                   </p>
                 </div>
                 <Button variant="outline" className="border-red-400 text-red-400 hover:bg-red-400/10">
-                  Delete Account
+                  {t('settings.security.deleteButton')}
                 </Button>
               </div>
             </CardContent>
@@ -942,10 +979,10 @@ export function Settings() {
             <CardHeader>
               <CardTitle className="text-base font-semibold text-white flex items-center gap-2">
                 <Brain className="w-5 h-5" />
-                AI Provider Configuration
+                {t('settings.ai.title')}
               </CardTitle>
               <CardDescription className="text-[var(--github-text-secondary)]">
-                Configure your AI provider for code analysis
+                {t('settings.ai.description')}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -957,13 +994,13 @@ export function Settings() {
                 <>
                   {/* Provider Selection */}
                   <div className="space-y-2">
-                    <Label htmlFor="aiProvider" className="text-sm text-white">AI Provider</Label>
+                    <Label htmlFor="aiProvider" className="text-sm text-white">{t('settings.ai.provider')}</Label>
                     <Select
                       value={aiConfig.aiProvider || ''}
-                      onValueChange={(value: AIProvider) => setAiConfig({ ...aiConfig, aiProvider: value, aiBaseUrl: undefined })}
+                      onValueChange={(value: AIProvider) => setAiConfig({ ...aiConfig, aiProvider: value, aiModel: PROVIDER_DEFAULT_MODELS[value] || '', aiBaseUrl: value === 'custom' ? '' : null })}
                     >
                       <SelectTrigger className="bg-[var(--github-surface)] border-[var(--github-border)]">
-                        <SelectValue placeholder="Select an AI provider" />
+                        <SelectValue placeholder={t('settings.ai.providerPlaceholder')} />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="openai">
@@ -1033,17 +1070,26 @@ export function Settings() {
                   {/* API Key - show for all providers except custom */}
                   {(aiConfig.aiProvider && aiConfig.aiProvider !== 'custom') && (
                     <div className="space-y-2">
-                      <Label htmlFor="aiApiKey" className="text-sm text-white">API Key</Label>
-                      <Input
-                        id="aiApiKey"
-                        type="password"
-                        placeholder={aiConfig.aiApiKey ? '***' : 'Enter your API key'}
-                        value={aiConfig.aiApiKey || ''}
-                        onChange={(e) => setAiConfig({ ...aiConfig, aiApiKey: e.target.value })}
-                        className="bg-[var(--github-surface)] border-[var(--github-border)]"
-                      />
+                      <Label htmlFor="aiApiKey" className="text-sm text-white">{t('settings.ai.apiKey')}</Label>
+                      <div className="relative">
+                        <Input
+                          id="aiApiKey"
+                          type={showApiKey ? 'text' : 'password'}
+                          placeholder={aiConfig.aiApiKey ? '***' : t('settings.ai.apiKeyPlaceholder')}
+                          value={aiConfig.aiApiKey || ''}
+                          onChange={(e) => setAiConfig({ ...aiConfig, aiApiKey: e.target.value })}
+                          className="bg-[var(--github-surface)] border-[var(--github-border)] pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey(!showApiKey)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--github-text-secondary)] hover:text-white transition-colors"
+                        >
+                          {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
                       <p className="text-xs text-[var(--github-text-secondary)]">
-                        Leave empty to keep the existing API key
+                        {t('settings.ai.apiKeyHint')}
                       </p>
                     </div>
                   )}
@@ -1051,11 +1097,11 @@ export function Settings() {
                   {/* Base URL - show for custom */}
                   {aiConfig.aiProvider === 'custom' && (
                     <div className="space-y-2">
-                      <Label htmlFor="aiBaseUrl" className="text-sm text-white">Base URL</Label>
+                      <Label htmlFor="aiBaseUrl" className="text-sm text-white">{t('settings.ai.baseUrl')}</Label>
                       <Input
                         id="aiBaseUrl"
                         type="url"
-                        placeholder="https://api.example.com/v1"
+                        placeholder={t('settings.ai.baseUrlPlaceholder')}
                         value={aiConfig.aiBaseUrl || ''}
                         onChange={(e) => setAiConfig({ ...aiConfig, aiBaseUrl: e.target.value })}
                         className="bg-[var(--github-surface)] border-[var(--github-border)]"
@@ -1066,7 +1112,7 @@ export function Settings() {
                   {/* Endpoint Preview */}
                   {aiConfig.aiProvider && (
                     <div className="p-3 rounded-lg bg-white/5 border border-[var(--github-border)]">
-                      <p className="text-xs text-[var(--github-text-secondary)] mb-1">Endpoint Preview</p>
+                      <p className="text-xs text-[var(--github-text-secondary)] mb-1">{t('settings.ai.endpointPreview')}</p>
                       <code className="text-sm text-white break-all">
                         {getEndpointPreview(aiConfig.aiProvider, aiConfig.aiProvider === 'custom' ? aiConfig.aiBaseUrl : undefined)}
                       </code>
@@ -1086,7 +1132,7 @@ export function Settings() {
                       ) : (
                         <Wifi className="w-4 h-4" />
                       )}
-                      {testingConnection ? 'Testing...' : 'Test Connection'}
+                      {testingConnection ? t('settings.ai.testing') : t('settings.ai.testConnection')}
                     </Button>
                     {connectionTestResult && (
                       <div className={`flex items-center gap-2 text-sm ${connectionTestResult.success ? 'text-green-400' : 'text-red-400'}`}>
@@ -1102,7 +1148,7 @@ export function Settings() {
 
                   {/* Model */}
                   <div className="space-y-2">
-                    <Label htmlFor="aiModel" className="text-sm text-white">Model</Label>
+                    <Label htmlFor="aiModel" className="text-sm text-white">{t('settings.ai.model')}</Label>
                     <Input
                       id="aiModel"
                       placeholder={getDefaultModel(aiConfig.aiProvider)}
@@ -1129,7 +1175,7 @@ export function Settings() {
                         ) : (
                           <Download className="w-4 h-4" />
                         )}
-                        {fetchingModels ? 'Fetching...' : 'Fetch Models from Provider'}
+                        {fetchingModels ? t('settings.ai.fetching') : t('settings.ai.fetchModels')}
                       </Button>
 
                       {modelFetchResult && !modelFetchResult.success && (
@@ -1142,7 +1188,7 @@ export function Settings() {
                       {/* Model List */}
                       {models.length > 0 && (
                         <div className="space-y-2">
-                          <Label className="text-sm text-white">Available Models</Label>
+                          <Label className="text-sm text-white">{t('settings.ai.availableModels')}</Label>
                           <div className="max-h-48 overflow-y-auto space-y-1 border border-[var(--github-border)] rounded-lg">
                             {models.map((model) => (
                               <div
@@ -1162,7 +1208,7 @@ export function Settings() {
                                   }}
                                   className="text-xs text-[var(--github-accent)] hover:underline"
                                 >
-                                  Use
+                                  {t('settings.ai.use')}
                                 </button>
                               </div>
                             ))}
@@ -1181,7 +1227,7 @@ export function Settings() {
                   >
                     {aiSaving && <Spinner className="h-4 w-4" />}
                     {aiSaved ? <CheckCircle className="w-4 h-4" /> : null}
-                    {aiSaving ? 'Saving...' : aiSaved ? 'Saved!' : 'Save AI Config'}
+                    {aiSaving ? t('settings.ai.saving') : aiSaved ? t('settings.ai.saved') : t('settings.ai.save')}
                   </Button>
                 </>
               )}

@@ -54,7 +54,9 @@ export class EventGateway
     try {
       const token = this.extractToken(client);
       if (!token) {
-        this.logger.warn(`Client ${client.id} connected without token`);
+        this.logger.warn(
+          `Client ${client.id} connected without token (origin=${client.handshake.headers.origin ?? 'unknown'})`,
+        );
         client.disconnect();
         return;
       }
@@ -64,8 +66,9 @@ export class EventGateway
       client.email = decoded.email;
 
       this.logger.log(`Client ${client.id} connected as user ${decoded.sub}`);
-    } catch {
-      this.logger.warn(`Client ${client.id} authentication failed`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown_error';
+      this.logger.warn(`Client ${client.id} authentication failed: ${message}`);
       client.disconnect();
     }
   }
@@ -109,6 +112,15 @@ export class EventGateway
       timestamp: new Date().toISOString(),
     });
     this.logger.log(`Broadcast event:new to room ${roomName}`);
+  }
+
+  broadcastAnalysisCompleted(eventId: string) {
+    this.server.emit('analysis:completed', {
+      type: 'analysis:completed',
+      eventId,
+      timestamp: new Date().toISOString(),
+    });
+    this.logger.log(`Broadcast analysis:completed eventId=${eventId}`);
   }
 
   private extractToken(client: UserSocket): string | null {

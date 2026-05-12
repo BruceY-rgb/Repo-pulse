@@ -1,18 +1,17 @@
 import {
   Controller,
   Get,
-  Post,
   Param,
   Query,
-  Body,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { EventService } from './event.service';
 import { EventQueryDto, EventStatsQueryDto } from './dto/event.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
-@ApiTags('事件管理')
+@ApiTags('Event Management')
 @ApiBearerAuth()
 @UseGuards(AuthGuard('jwt'))
 @Controller('events')
@@ -20,30 +19,33 @@ export class EventController {
   constructor(private readonly eventService: EventService) {}
 
   @Get()
-  @ApiOperation({ summary: '获取事件列表' })
-  async findAll(@Query('repositoryId') repositoryId: string, @Query() query: EventQueryDto): Promise<any> {
-    const result = await this.eventService.findAll(repositoryId, query);
-    return result;
+  @ApiOperation({ summary: 'List events' })
+  async findAll(
+    @CurrentUser() user: { sub: string },
+    @Query() query: EventQueryDto,
+  ): Promise<any> {
+    return this.eventService.findAll(user.sub, query);
   }
 
   @Get('stats')
-  @ApiOperation({ summary: '获取事件统计' })
+  @ApiOperation({ summary: 'Get event stats' })
   async getStats(
-    @Query('repositoryId') repositoryId: string,
+    @CurrentUser() user: { sub: string },
     @Query() query: EventStatsQueryDto,
   ) {
-    const result = await this.eventService.getEventStats(
-      repositoryId,
+    return this.eventService.getEventStats(
+      user.sub,
+      query.repositoryId,
+      query.repositoryIds,
+      query.branchScopes,
       query.dateFrom ? new Date(query.dateFrom) : undefined,
       query.dateTo ? new Date(query.dateTo) : undefined,
     );
-    return result;
   }
 
   @Get(':id')
-  @ApiOperation({ summary: '获取事件详情' })
+  @ApiOperation({ summary: 'Get event details' })
   async findById(@Param('id') id: string): Promise<any> {
-    const event = await this.eventService.findById(id);
-    return event;
+    return this.eventService.findById(id);
   }
 }

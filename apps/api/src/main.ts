@@ -60,10 +60,11 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, document);
 
+  const host = configService.get<string>('APP_HOST', '127.0.0.1');
   const port = configService.get<number>('APP_PORT', 3001);
-  await app.listen(port);
-  logger.log(`Application running on http://localhost:${port}`);
-  logger.log(`Swagger docs at http://localhost:${port}/docs`);
+  await app.listen(port, host);
+  logger.log(`Application running on http://${host}:${port}`);
+  logger.log(`Swagger docs at http://${host}:${port}/docs`);
   logger.log(`Frontend URL (CORS): ${frontendUrl}`);
 }
 

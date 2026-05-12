@@ -6,6 +6,7 @@
 
 import type { AIProvider, AIProviderConfig, ProviderType } from '../interfaces/ai-provider';
 import { PROVIDER_PRESETS, type ProviderPreset } from './presets';
+import { AnthropicProvider } from './anthropic';
 import { OpenAICompatibleProvider } from './openai-compatible';
 import { GeminiProvider } from './gemini';
 
@@ -147,7 +148,7 @@ export function createCustomProvider(
  * 根据 provider 类型创建 Provider
  */
 export function createProvider(
-  provider: Exclude<ProviderType, 'google' | 'anthropic'>,
+  provider: Exclude<ProviderType, 'google' | 'anthropic' | 'deepseek'>,
   apiKey: string,
   options?: Partial<AIProviderConfig>
 ): OpenAICompatibleProvider;
@@ -156,6 +157,11 @@ export function createProvider(
   apiKey: string,
   options?: Partial<AIProviderConfig>
 ): GeminiProvider;
+export function createProvider(
+  provider: 'anthropic' | 'deepseek',
+  apiKey: string,
+  options?: Partial<AIProviderConfig>
+): AnthropicProvider;
 export function createProvider(
   provider: ProviderType,
   apiKey: string,
@@ -168,21 +174,34 @@ export function createProvider(
 ): AIProvider {
   const preset = PROVIDER_PRESETS[provider];
 
+  if (provider === 'anthropic' || provider === 'deepseek') {
+    // DeepSeek 使用 Anthropic 兼容协议，baseUrl 指向其 /anthropic 端点
+    const anthropicBaseUrl = provider === 'deepseek'
+      ? 'https://api.deepseek.com/anthropic'
+      : options?.baseUrl ?? preset.baseUrl;
+    return new AnthropicProvider({
+      apiKey,
+      ...options,
+      baseUrl: anthropicBaseUrl,
+      model: options?.model ?? preset.defaultModel,
+    });
+  }
+
   if (provider === 'google') {
     return new GeminiProvider({
       apiKey,
+      ...options,
       baseUrl: options?.baseUrl ?? preset.baseUrl,
       model: options?.model ?? preset.defaultModel,
-      ...options,
     });
   }
 
   return new OpenAICompatibleProvider(
     {
       apiKey,
+      ...options,
       baseUrl: options?.baseUrl ?? preset.baseUrl,
       model: options?.model ?? preset.defaultModel,
-      ...options,
     },
     preset
   );

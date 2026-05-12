@@ -31,6 +31,70 @@ export interface GithubSearchResult {
   };
 }
 
+export interface GithubCommitResponse {
+  sha: string;
+  html_url?: string;
+  commit?: {
+    message?: string;
+    author?: {
+      name?: string;
+      date?: string;
+    };
+  };
+  author?: {
+    login?: string;
+    avatar_url?: string;
+  } | null;
+}
+
+export interface GithubPullRequestResponse {
+  id: number;
+  number: number;
+  title?: string;
+  body?: string | null;
+  html_url?: string;
+  state?: string;
+  merged_at?: string | null;
+  closed_at?: string | null;
+  updated_at?: string;
+  created_at?: string;
+  user?: {
+    login?: string;
+    avatar_url?: string;
+  };
+}
+
+export interface GithubIssueResponse {
+  id: number;
+  number: number;
+  title?: string;
+  body?: string | null;
+  html_url?: string;
+  state?: string;
+  closed_at?: string | null;
+  updated_at?: string;
+  created_at?: string;
+  user?: {
+    login?: string;
+    avatar_url?: string;
+  };
+  pull_request?: unknown;
+}
+
+export interface GithubBranchInfo {
+  name: string;
+  isProtected?: boolean;
+  lastCommitSha?: string;
+}
+
+interface GithubBranchResponse {
+  name: string;
+  protected?: boolean;
+  commit?: {
+    sha?: string;
+  };
+}
+
 interface GithubSearchResponse {
   total_count: number;
   incomplete_results: boolean;
@@ -182,6 +246,45 @@ export class GithubService {
     }
   }
 
+  async getCommit(
+    owner: string,
+    repo: string,
+    sha: string,
+    userToken?: string,
+  ): Promise<GithubCommitResponse | null> {
+    try {
+      const client = this.createUserClient(userToken);
+      const response = await client.get<GithubCommitResponse>(`/repos/${owner}/${repo}/commits/${sha}`);
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Failed to fetch commit ${sha} for ${owner}/${repo}`, error);
+      return null;
+    }
+  }
+
+  async getBranches(
+    owner: string,
+    repo: string,
+    userToken?: string,
+  ): Promise<GithubBranchInfo[]> {
+    try {
+      const client = this.createUserClient(userToken);
+      const response = await client.get<GithubBranchResponse[]>(`/repos/${owner}/${repo}/branches`, {
+        params: { per_page: 100 },
+      });
+      return response.data
+        .filter((branch) => Boolean(branch.name))
+        .map((branch) => ({
+          name: branch.name,
+          isProtected: branch.protected,
+          lastCommitSha: branch.commit?.sha,
+        }));
+    } catch (error) {
+      this.logger.error(`Failed to fetch branches for ${owner}/${repo}`, error);
+      return [];
+    }
+  }
+
   async getPullRequests(
     owner: string,
     repo: string,
@@ -200,6 +303,24 @@ export class GithubService {
     }
   }
 
+  async getPullRequest(
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    userToken?: string,
+  ): Promise<GithubPullRequestResponse | null> {
+    try {
+      const client = this.createUserClient(userToken);
+      const response = await client.get<GithubPullRequestResponse>(
+        `/repos/${owner}/${repo}/pulls/${pullNumber}`,
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Failed to fetch PR #${pullNumber} for ${owner}/${repo}`, error);
+      return null;
+    }
+  }
+
   async getIssues(
     owner: string,
     repo: string,
@@ -215,6 +336,24 @@ export class GithubService {
     } catch (error) {
       this.logger.error(`Failed to fetch issues for ${owner}/${repo}`, error);
       return [];
+    }
+  }
+
+  async getIssue(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    userToken?: string,
+  ): Promise<GithubIssueResponse | null> {
+    try {
+      const client = this.createUserClient(userToken);
+      const response = await client.get<GithubIssueResponse>(
+        `/repos/${owner}/${repo}/issues/${issueNumber}`,
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Failed to fetch issue #${issueNumber} for ${owner}/${repo}`, error);
+      return null;
     }
   }
 

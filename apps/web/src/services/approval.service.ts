@@ -1,5 +1,5 @@
 import { apiClient } from './api-client';
-import type { ApiResponse } from '@/types/api';
+import type { ApiResponse, Event, RepositoryBranchScopeMap } from '@/types/api';
 
 export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'EDITED';
 
@@ -13,14 +13,7 @@ export interface Approval {
   comment?: string;
   createdAt: string;
   reviewedAt?: string;
-  event?: {
-    id: string;
-    type: string;
-    title: string;
-    repository: {
-      name: string;
-    };
-  };
+  event?: Event | null;
 }
 
 interface ApprovalsResponse {
@@ -49,8 +42,29 @@ export const approvalService = {
   /**
    * 获取待审批数量
    */
-  async getPendingCount(): Promise<{ count: number }> {
-    const { data } = await apiClient.get<ApiResponse<{ count: number }>>('/approvals/pending-count');
+  async getPendingCount(
+    repositoryIds?: string[],
+    repositoryBranchScopes?: RepositoryBranchScopeMap,
+  ): Promise<{ count: number }> {
+    const normalizedBranchScopes = repositoryIds?.reduce<Record<string, string[]>>((acc, repositoryId) => {
+      const branches = repositoryBranchScopes?.[repositoryId] ?? [];
+      if (branches.length > 0) {
+        acc[repositoryId] = [...branches].sort();
+      }
+      return acc;
+    }, {});
+
+    const { data } = await apiClient.get<ApiResponse<{ count: number }>>('/approvals/pending-count', {
+      params:
+        repositoryIds && repositoryIds.length > 0
+          ? {
+              repositoryIds: [...repositoryIds].sort().join(','),
+              ...(normalizedBranchScopes && Object.keys(normalizedBranchScopes).length > 0
+                ? { branchScopes: JSON.stringify(normalizedBranchScopes) }
+                : {}),
+            }
+          : undefined,
+    });
     return data.data;
   },
 
@@ -75,6 +89,14 @@ export const approvalService = {
    */
   async reject(approvalId: string, comment?: string): Promise<Approval> {
     const { data } = await apiClient.post<ApiResponse<Approval>>(`/approvals/${approvalId}/reject`, { comment });
+    return data.data;
+  },
+
+  /**
+   * 删除审批记录
+   */
+  async deleteApproval(approvalId: string): Promise<{ success: boolean }> {
+    const { data } = await apiClient.delete<ApiResponse<{ success: boolean }>>(`/approvals/${approvalId}`);
     return data.data;
   },
 

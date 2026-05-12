@@ -4,6 +4,18 @@ import { EventType } from '@repo-pulse/database';
 
 export class PaginationQueryDto {
   @IsOptional()
+  @IsString()
+  repositoryId?: string;
+
+  @IsOptional()
+  @IsString()
+  repositoryIds?: string;
+
+  @IsOptional()
+  @IsString()
+  branchScopes?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   page?: number;
@@ -29,6 +41,18 @@ export class EventQueryDto extends PaginationQueryDto {
 }
 
 export class EventStatsQueryDto {
+  @IsOptional()
+  @IsString()
+  repositoryId?: string;
+
+  @IsOptional()
+  @IsString()
+  repositoryIds?: string;
+
+  @IsOptional()
+  @IsString()
+  branchScopes?: string;
+
   @IsOptional()
   @IsDateString()
   dateFrom?: string;

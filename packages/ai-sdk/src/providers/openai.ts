@@ -36,7 +36,7 @@ export class OpenAIProvider implements AIProvider {
         { role: 'user', content: buildUserPrompt(input) },
       ],
       temperature: input.temperature ?? 0.3,
-      max_tokens: input.maxTokens ?? 2048,
+      max_tokens: input.maxTokens ?? 4096,
       response_format: { type: 'json_object' },
     });
 
@@ -59,7 +59,7 @@ export class OpenAIProvider implements AIProvider {
         { role: 'user', content: buildUserPrompt(input) },
       ],
       temperature: input.temperature ?? 0.3,
-      max_tokens: input.maxTokens ?? 2048,
+      max_tokens: input.maxTokens ?? 4096,
       stream: true,
     });
 

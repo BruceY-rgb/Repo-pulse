@@ -16,9 +16,27 @@ export interface User {
   name: string;
   avatar: string | null;
   role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'VIEWER';
-  preferences: Record<string, unknown>;
+  preferences: UserPreferences;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DashboardPreferences {
+  monitoredRepositoryIds?: string[];
+}
+
+export type RepositoryBranchScopeMap = Record<string, string[]>;
+
+export interface MonitoringScopePreferences {
+  repositoryIds?: string[];
+  branchNames?: string[];
+  repositoryBranchScopes?: RepositoryBranchScopeMap;
+}
+
+export interface UserPreferences {
+  dashboard?: DashboardPreferences;
+  monitoringScope?: MonitoringScopePreferences;
+  [key: string]: unknown;
 }
 
 export interface PaginatedResponse<T> {
@@ -73,14 +91,60 @@ export interface Event {
   authorAvatar: string | null;
   externalId: string;
   externalUrl: string | null;
+  branch: string | null;
+  sourceBranch: string | null;
+  targetBranch: string | null;
+  branches: string[];
   metadata: Record<string, unknown>;
   rawPayload: Record<string, unknown> | null;
+  occurredAt: string | null;
   createdAt: string;
+  repository?: {
+    id: string;
+    name: string;
+    fullName: string;
+    platform: Platform;
+  };
 }
 
 /**
  * 搜索结果仓库（用于添加仓库时的搜索选择）
  */
+// ===== AI Analysis =====
+
+export interface Suggestion {
+  type: 'critical' | 'warning' | 'info';
+  title: string;
+  description: string;
+}
+
+export interface EventAnalysis {
+  id: string;
+  eventId: string;
+  model: string;
+  summary: string;
+  summaryShort: string;
+  summaryLong: string;
+  category: string;
+  riskLevel: string;
+  riskScore: number;
+  riskReasons: string[];
+  tags: string[];
+  affectedAreas: string[];
+  impactSummary: string;
+  suggestedAction: string;
+  confidence: number;
+  keyChanges: string[];
+  suggestions: Suggestion[];
+  tokensUsed: number;
+  latencyMs: number;
+  status: string;
+  errorMessage?: string;
+  promptVersion?: string;
+  createdAt: string;
+  event?: Event | null;
+}
+
 export interface SearchResult {
   id: number;
   name: string;
@@ -94,4 +158,12 @@ export interface SearchResult {
     avatarUrl: string;
   };
   platform: Platform;
+}
+
+export interface RepositoryBranchScopeOption {
+  name: string;
+  isDefault: boolean;
+  isObserved: boolean;
+  isProtected?: boolean;
+  lastCommitSha?: string;
 }

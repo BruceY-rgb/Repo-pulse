@@ -1,5 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { prisma, Approval, ApprovalStatus, RiskLevel } from '@repo-pulse/database';
+import {
+  buildEventScopeWhere,
+  normalizeRepositoryBranchScopes,
+  parseRepositoryBranchScopesParam,
+} from '../../common/utils/repository-branch-scope';
 
 export interface CreateApprovalDto {
   eventId: string;
@@ -15,6 +20,36 @@ export interface UpdateApprovalDto {
 @Injectable()
 export class ApprovalService {
   private readonly logger = new Logger(ApprovalService.name);
+
+  private async resolveRepositoryIds(
+    userId: string,
+    repositoryIdsParam?: string,
+  ): Promise<string[]> {
+    const userRepos = await prisma.userRepository.findMany({
+      where: { userId },
+      select: { repositoryId: true },
+    });
+
+    const accessibleRepositoryIds = userRepos.map(
+      (repository: { repositoryId: string }) => repository.repositoryId,
+    );
+
+    if (!repositoryIdsParam) {
+      return accessibleRepositoryIds;
+    }
+
+    const requestedRepositoryIds = repositoryIdsParam
+      .split(',')
+      .map((repositoryId) => repositoryId.trim())
+      .filter(Boolean);
+
+    if (requestedRepositoryIds.length === 0) {
+      return [];
+    }
+
+    const accessibleRepositoryIdSet = new Set(accessibleRepositoryIds);
+    return requestedRepositoryIds.filter((repositoryId) => accessibleRepositoryIdSet.has(repositoryId));
+  }
 
   /**
    * 获取用户的审批列表
@@ -84,34 +119,26 @@ export class ApprovalService {
   /**
    * 获取待审批数量
    */
-  async getPendingCount(userId: string): Promise<number> {
-    const userRepos = await prisma.userRepository.findMany({
-      where: { userId },
-      select: { repositoryId: true },
-    });
-
-    const repoIds = userRepos.map((r: { repositoryId: string }) => r.repositoryId);
+  async getPendingCount(
+    userId: string,
+    repositoryIdsParam?: string,
+    repositoryBranchScopesParam?: string,
+  ): Promise<number> {
+    const repoIds = await this.resolveRepositoryIds(userId, repositoryIdsParam);
+    const repositoryBranchScopes = normalizeRepositoryBranchScopes(
+      repoIds,
+      parseRepositoryBranchScopesParam(repositoryBranchScopesParam),
+    );
 
     // 如果用户没有任何仓库，返回 0
     if (repoIds.length === 0) {
       return 0;
     }
 
-    const events = await prisma.event.findMany({
-      where: { repositoryId: { in: repoIds } },
-      select: { id: true },
-    });
-    const eventIds = events.map((e: { id: string }) => e.id);
-
-    // 如果没有事件，返回 0
-    if (eventIds.length === 0) {
-      return 0;
-    }
-
     return prisma.approval.count({
       where: {
-        eventId: { in: eventIds },
         status: ApprovalStatus.PENDING,
+        event: buildEventScopeWhere(repoIds, repositoryBranchScopes),
       },
     });
   }
@@ -256,6 +283,14 @@ export class ApprovalService {
         reviewedAt: new Date(),
       },
     });
+  }
+
+  /**
+   * 删除审批记录
+   */
+  async delete(approvalId: string): Promise<void> {
+    await prisma.approval.delete({ where: { id: approvalId } });
+    this.logger.log(`approval_deleted id=${approvalId}`);
   }
 
   /**

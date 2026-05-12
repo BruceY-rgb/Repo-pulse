@@ -1,10 +1,45 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaClient, Platform, Repository } from '@repo-pulse/database';
+import { PrismaClient, Platform, Repository, EventType } from '@repo-pulse/database';
 import { randomBytes } from 'crypto';
-import { GithubService } from './services/github.service';
-import { GitlabService } from './services/gitlab.service';
+import { GithubBranchInfo, GithubService } from './services/github.service';
+import { GitlabBranchInfo, GitlabService } from './services/gitlab.service';
 import { CreateRepositoryDto, UpdateRepositoryDto } from './dto/repository.dto';
+import { EventService } from '../event/event.service';
+
+interface SyncSummary {
+  repositoryId: string;
+  createdCount: number;
+  skippedCount: number;
+  updatedCount: number;
+  failedSources: string[];
+  lastSyncAt: string;
+}
+
+export interface RepositoryBranchOption {
+  name: string;
+  isDefault: boolean;
+  isObserved: boolean;
+  isProtected?: boolean;
+  lastCommitSha?: string;
+}
+
+interface NormalizedSyncEvent {
+  type: EventType;
+  action: string;
+  title: string;
+  body?: string;
+  author: string;
+  authorAvatar?: string;
+  externalId: string;
+  externalUrl?: string;
+  branch?: string;
+  sourceBranch?: string;
+  targetBranch?: string;
+  branches?: string[];
+  occurredAt: Date;
+  metadata: Record<string, unknown>;
+}
 
 @Injectable()
 export class RepositoryService {
@@ -15,20 +50,14 @@ export class RepositoryService {
     private readonly configService: ConfigService,
     private readonly githubService: GithubService,
     private readonly gitlabService: GitlabService,
+    private readonly eventService: EventService,
   ) {
     this.prisma = new PrismaClient();
   }
 
-  /**
-   * 添加仓库并注册 Webhook
-   * @param userId 当前用户 ID
-   * @param dto 仓库信息
-   * @param userOAuthToken 当前用户的 GitHub/GitLab OAuth Token，用于以用户身份注册 Webhook
-   */
   async create(userId: string, dto: CreateRepositoryDto, userOAuthToken?: string) {
     const { platform, owner, repo } = dto;
 
-    // 1. 获取仓库基本信息
     let repoInfo: {
       externalId: string;
       name: string;
@@ -57,10 +86,8 @@ export class RepositoryService {
       };
     }
 
-    // 2. 生成仓库专属 Webhook Secret（使用加密安全的随机数）
     const webhookSecret = this.generateWebhookSecret();
 
-    // 3. 创建或更新仓库记录
     const repository = await this.prisma.repository.upsert({
       where: {
         platform_externalId: {
@@ -83,7 +110,6 @@ export class RepositoryService {
       },
     });
 
-    // 4. 关联用户与仓库
     await this.prisma.userRepository.upsert({
       where: {
         userId_repositoryId: {
@@ -99,7 +125,6 @@ export class RepositoryService {
       },
     });
 
-    // 5. 注册 Webhook（使用 API_URL 生成回调地址）
     const apiUrl = this.configService.get<string>('API_URL', 'http://localhost:3001');
     try {
       if (platform === Platform.GITHUB) {
@@ -111,7 +136,6 @@ export class RepositoryService {
           webhookSecret,
           userOAuthToken,
         );
-        // 保存 webhookId 以便后续删除
         if (webhookId) {
           await this.prisma.repository.update({
             where: { id: repository.id },
@@ -124,7 +148,6 @@ export class RepositoryService {
       }
     } catch (error) {
       this.logger.error(`Failed to register webhook for ${repoInfo.fullName}`, error);
-      // Webhook 注册失败不影响仓库记录的创建，但需要记录日志
     }
 
     this.logger.log(`Repository ${repoInfo.fullName} added successfully for user ${userId}`);
@@ -160,7 +183,7 @@ export class RepositoryService {
       include: {
         events: {
           take: 10,
-          orderBy: { createdAt: 'desc' },
+          orderBy: { occurredAt: 'desc' },
         },
         users: {
           include: {
@@ -178,10 +201,108 @@ export class RepositoryService {
     });
 
     if (!repository) {
-      throw new NotFoundException('仓库不存在');
+      throw new NotFoundException('Repository not found');
     }
 
     return repository as Repository & Record<string, unknown>;
+  }
+
+  async getBranches(userId: string, id: string): Promise<RepositoryBranchOption[]> {
+    const repository = await this.prisma.repository.findUnique({
+      where: { id },
+      include: {
+        users: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                githubAccessToken: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!repository) {
+      throw new NotFoundException('Repository not found');
+    }
+
+    const membership = repository.users.find((entry) => entry.userId === userId);
+    if (!membership) {
+      throw new ForbiddenException('You do not have access to this repository');
+    }
+
+    const [owner, repo] = this.parseRepositoryPath(repository.fullName);
+    const tokenOwner = repository.users.find((entry) => entry.user.githubAccessToken);
+
+    let providerBranches: Array<GithubBranchInfo | GitlabBranchInfo> = [];
+    try {
+      if (repository.platform === Platform.GITHUB) {
+        providerBranches = await this.githubService.getBranches(
+          owner,
+          repo,
+          tokenOwner?.user.githubAccessToken || undefined,
+        );
+      } else {
+        providerBranches = await this.gitlabService.getBranches(owner, repo);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to fetch provider branches for ${repository.fullName}, falling back to observed branches`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+
+    const observedEvents = await this.prisma.event.findMany({
+      where: { repositoryId: id },
+      select: {
+        branch: true,
+        sourceBranch: true,
+        targetBranch: true,
+        branches: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+
+    const observedBranches = observedEvents.flatMap((event) =>
+      [...event.branches, event.branch, event.sourceBranch, event.targetBranch].filter(
+        (branch): branch is string => Boolean(branch),
+      ),
+    );
+
+    const branchMap = new Map<string, RepositoryBranchOption>();
+    const ensureBranch = (name: string) => {
+      const existing = branchMap.get(name);
+      if (existing) {
+        return existing;
+      }
+
+      const next: RepositoryBranchOption = {
+        name,
+        isDefault: name === repository.defaultBranch,
+        isObserved: false,
+      };
+      branchMap.set(name, next);
+      return next;
+    };
+
+    for (const branch of providerBranches) {
+      const option = ensureBranch(branch.name);
+      option.isProtected = branch.isProtected;
+      option.lastCommitSha = branch.lastCommitSha;
+    }
+
+    ensureBranch(repository.defaultBranch);
+
+    for (const branch of observedBranches) {
+      ensureBranch(branch).isObserved = true;
+    }
+
+    return Array.from(branchMap.values()).sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
   }
 
   async update(id: string, dto: UpdateRepositoryDto) {
@@ -191,24 +312,210 @@ export class RepositoryService {
     });
   }
 
-  async delete(id: string) {
-    await this.prisma.repository.update({
+  async delete(userId: string, id: string) {
+    const repository = await this.prisma.repository.findUnique({
       where: { id },
-      data: { isActive: false },
+      include: {
+        users: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                githubAccessToken: true,
+              },
+            },
+          },
+        },
+      },
     });
+
+    if (!repository) {
+      throw new NotFoundException('Repository not found');
+    }
+
+    const membership = repository.users.find((entry) => entry.userId === userId);
+    if (!membership) {
+      throw new ForbiddenException('You do not have access to this repository');
+    }
+
+    const [owner, repo] = this.parseRepositoryPath(repository.fullName);
+    const tokenOwner = repository.users.find((entry) => entry.user.githubAccessToken);
+
+    if (repository.webhookId) {
+      try {
+        if (repository.platform === Platform.GITHUB) {
+          await this.githubService.deleteWebhook(
+            owner,
+            repo,
+            repository.webhookId,
+            tokenOwner?.user.githubAccessToken || undefined,
+          );
+        } else {
+          await this.gitlabService.deleteWebhook(owner, repo, Number(repository.webhookId));
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown_error';
+        this.logger.warn(
+          `Failed to clean up webhook for repository ${repository.fullName}: ${message}`,
+        );
+      }
+    }
+
+    await this.prisma.repository.delete({
+      where: { id },
+    });
+
+    this.logger.log(`Repository ${repository.fullName} deleted by user ${userId}`);
     return { success: true };
   }
 
-  async sync(id: string) {
-    const repository = await this.findById(id);
-
-    // TODO: Phase 2.2 — 实现从 GitHub/GitLab 同步历史事件
-    await this.prisma.repository.update({
+  async sync(id: string, options?: { daysBack?: number }): Promise<SyncSummary> {
+    const repository = await this.prisma.repository.findUnique({
       where: { id },
-      data: { lastSyncAt: new Date() },
+      include: {
+        users: {
+          include: {
+            user: {
+              select: {
+                githubAccessToken: true,
+                githubRefreshToken: true,
+              },
+            },
+          },
+        },
+      },
     });
 
-    return repository;
+    if (!repository) {
+      throw new NotFoundException('Repository not found');
+    }
+
+    const [owner, repo] = this.parseRepositoryPath(repository.fullName);
+    const daysBack = options?.daysBack ?? 7;
+    const sinceDate = repository.lastSyncAt ?? new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
+    const since = sinceDate.toISOString();
+    const failedSources: string[] = [];
+    let createdCount = 0;
+    let skippedCount = 0;
+    let updatedCount = 0;
+    let successfulSources = 0;
+
+    if (repository.platform === Platform.GITHUB) {
+      const tokenOwner = repository.users.find((entry) => entry.user.githubAccessToken);
+      if (!tokenOwner?.user.githubAccessToken) {
+        failedSources.push('github_token_missing');
+      } else {
+        const branches = await this.githubService.getBranches(
+          owner,
+          repo,
+          tokenOwner.user.githubAccessToken || undefined,
+        );
+        const branchNames = branches.length > 0
+          ? branches.map((branch) => branch.name)
+          : [repository.defaultBranch];
+        const commitSources = branchNames.map(
+          (branchName) => ({
+            name: `github_commits:${branchName}`,
+            fetch: () =>
+              this.githubService.getCommits(
+                owner,
+                repo,
+                { branch: branchName, since },
+                tokenOwner.user.githubAccessToken || undefined,
+              ),
+            normalize: (item: unknown) => this.normalizeGithubCommit(item, branchName),
+          }),
+        );
+        const sources = [
+          ...commitSources,
+          {
+            name: 'github_pull_requests',
+            fetch: () =>
+              this.githubService.getPullRequests(
+                owner,
+                repo,
+                'all',
+                tokenOwner.user.githubAccessToken || undefined,
+              ),
+            normalize: (item: unknown) => this.normalizeGithubPullRequest(item, sinceDate),
+          },
+          {
+            name: 'github_issues',
+            fetch: () =>
+              this.githubService.getIssues(
+                owner,
+                repo,
+                'all',
+                tokenOwner.user.githubAccessToken || undefined,
+              ),
+            normalize: (item: unknown) => this.normalizeGithubIssue(item, sinceDate),
+          },
+        ];
+
+        const summary = await this.syncSources(repository.id, sources, failedSources);
+        createdCount += summary.createdCount;
+        skippedCount += summary.skippedCount;
+        updatedCount += summary.updatedCount;
+        successfulSources += summary.successfulSources;
+      }
+    } else {
+      const branches = await this.gitlabService.getBranches(owner, repo);
+      const branchNames = branches.length > 0
+        ? branches.map((branch) => branch.name)
+        : [repository.defaultBranch];
+      const commitSources = branchNames.map(
+        (branchName) => ({
+          name: `gitlab_commits:${branchName}`,
+          fetch: () =>
+            this.gitlabService.getCommits(owner, repo, {
+              branch: branchName,
+              since,
+            }),
+          normalize: (item: unknown) => this.normalizeGitlabCommit(item, branchName),
+        }),
+      );
+      const sources = [
+        ...commitSources,
+        {
+          name: 'gitlab_merge_requests',
+          fetch: () => this.gitlabService.getMergeRequests(owner, repo, 'all'),
+          normalize: (item: unknown) => this.normalizeGitlabMergeRequest(item, sinceDate),
+        },
+        {
+          name: 'gitlab_issues',
+          fetch: () => this.gitlabService.getIssues(owner, repo, 'all'),
+          normalize: (item: unknown) => this.normalizeGitlabIssue(item, sinceDate),
+        },
+      ];
+
+      const summary = await this.syncSources(repository.id, sources, failedSources);
+      createdCount += summary.createdCount;
+      skippedCount += summary.skippedCount;
+      updatedCount += summary.updatedCount;
+      successfulSources += summary.successfulSources;
+    }
+
+    const completedAt =
+      successfulSources > 0 ? new Date() : repository.lastSyncAt || new Date(sinceDate);
+    if (successfulSources > 0) {
+      await this.prisma.repository.update({
+        where: { id },
+        data: { lastSyncAt: completedAt },
+      });
+    }
+
+    this.logger.log(
+      `repository_sync_completed repositoryId=${id} createdCount=${createdCount} updatedCount=${updatedCount} skippedCount=${skippedCount} failedSources=${failedSources.join(',') || 'none'}`,
+    );
+
+    return {
+      repositoryId: id,
+      createdCount,
+      skippedCount,
+      updatedCount,
+      failedSources,
+      lastSyncAt: completedAt.toISOString(),
+    };
   }
 
   async getUserRepositories(userId: string) {
@@ -236,15 +543,12 @@ export class RepositoryService {
     }));
   }
 
-  /**
-   * 获取用户自己的 GitHub 仓库列表（使用用户 OAuth Token）
-   */
   async searchUserRepositories(
     userOAuthToken: string,
     userRefreshToken?: string,
   ) {
     if (!userOAuthToken) {
-      this.logger.warn('未提供用户 OAuth Token，无法获取用户仓库');
+      this.logger.warn('No user OAuth token available for repository lookup');
       return [];
     }
 
@@ -268,15 +572,12 @@ export class RepositoryService {
     }));
   }
 
-  /**
-   * 获取用户 Star 的仓库（使用用户 OAuth Token）
-   */
   async searchStarredRepositories(
     userOAuthToken: string,
     userRefreshToken?: string,
   ) {
     if (!userOAuthToken) {
-      this.logger.warn('未提供用户 OAuth Token，无法获取 starred 仓库');
+      this.logger.warn('No user OAuth token available for starred repository lookup');
       return [];
     }
 
@@ -300,9 +601,397 @@ export class RepositoryService {
     }));
   }
 
-  /**
-   * 使用加密安全的随机数生成仓库专属 Webhook Secret
-   */
+  private async syncSources(
+    repositoryId: string,
+    sources: Array<{
+      name: string;
+      fetch: () => Promise<unknown[]>;
+      normalize: (item: unknown) => NormalizedSyncEvent | null;
+    }>,
+    failedSources: string[],
+  ): Promise<{
+    createdCount: number;
+    skippedCount: number;
+    updatedCount: number;
+    successfulSources: number;
+  }> {
+    let createdCount = 0;
+    let skippedCount = 0;
+    let updatedCount = 0;
+    let successfulSources = 0;
+
+    for (const source of sources) {
+      try {
+        const items = await source.fetch();
+        successfulSources += 1;
+        for (const item of items) {
+          const normalized = source.normalize(item);
+          if (!normalized) {
+            skippedCount += 1;
+            continue;
+          }
+
+          const existing = await this.eventService.findByExternalId(
+            repositoryId,
+            normalized.externalId,
+          );
+          if (existing) {
+            const branches = this.resolveBranches(normalized.branches, [
+              normalized.branch,
+              normalized.sourceBranch,
+              normalized.targetBranch,
+            ]);
+            const existingBranches = existing.branches ?? [];
+            const mergedBranches = this.mergeBranches(existingBranches, branches);
+            if (mergedBranches.length > existingBranches.length) {
+              await this.prisma.event.update({
+                where: { id: existing.id },
+                data: { branches: mergedBranches },
+              });
+              updatedCount += 1;
+            } else {
+              skippedCount += 1;
+            }
+            continue;
+          }
+
+          const branches = this.resolveBranches(normalized.branches, [
+            normalized.branch,
+            normalized.sourceBranch,
+            normalized.targetBranch,
+          ]);
+
+          await this.eventService.create({
+            repositoryId,
+            type: normalized.type,
+            action: normalized.action,
+            title: normalized.title,
+            body: normalized.body,
+            author: normalized.author,
+            authorAvatar: normalized.authorAvatar,
+            externalId: normalized.externalId,
+            externalUrl: normalized.externalUrl,
+            branch: normalized.branch,
+            sourceBranch: normalized.sourceBranch,
+            targetBranch: normalized.targetBranch,
+            branches,
+            occurredAt: normalized.occurredAt,
+            metadata: normalized.metadata,
+          });
+          createdCount += 1;
+        }
+      } catch (error) {
+        failedSources.push(source.name);
+        const message = error instanceof Error ? error.message : 'unknown_error';
+        this.logger.error(
+          `Failed to sync source ${source.name} for repository ${repositoryId}: ${message}`,
+        );
+      }
+    }
+
+    return { createdCount, skippedCount, updatedCount, successfulSources };
+  }
+
+  private resolveBranches(
+    explicitBranches: string[] | undefined,
+    fallbackBranches: Array<string | undefined>,
+  ): string[] {
+    const rawBranches = explicitBranches && explicitBranches.length > 0
+      ? explicitBranches
+      : fallbackBranches;
+
+    return Array.from(
+      new Set(
+        rawBranches
+          .filter((branch): branch is string => typeof branch === 'string')
+          .map((branch) => branch.trim())
+          .filter(Boolean),
+      ),
+    );
+  }
+
+  private mergeBranches(existingBranches: string[], incomingBranches: string[]): string[] {
+    return this.resolveBranches([...existingBranches, ...incomingBranches], []);
+  }
+
+  private parseRepositoryPath(fullName: string): [string, string] {
+    const separatorIndex = fullName.lastIndexOf('/');
+    if (separatorIndex === -1) {
+      return [fullName, fullName];
+    }
+
+    return [fullName.slice(0, separatorIndex), fullName.slice(separatorIndex + 1)];
+  }
+
+  private normalizeGithubCommit(item: unknown, branch: string): NormalizedSyncEvent | null {
+    const commit = item as {
+      sha?: string;
+      html_url?: string;
+      commit?: {
+        message?: string;
+        author?: { name?: string; date?: string };
+      };
+      author?: { login?: string; avatar_url?: string };
+    };
+
+    if (!commit.sha) {
+      return null;
+    }
+
+    return {
+      type: EventType.PUSH,
+      action: 'sync',
+      title: `Push sync (${branch}): ${commit.sha.slice(0, 7)}`,
+      body: commit.commit?.message,
+      author: commit.author?.login || commit.commit?.author?.name || 'unknown',
+      authorAvatar: commit.author?.avatar_url,
+      externalId: commit.sha,
+      externalUrl: commit.html_url,
+      branch,
+      branches: [branch],
+      occurredAt: new Date(commit.commit?.author?.date || new Date()),
+      metadata: { source: 'repository_sync', provider: 'github', branch },
+    };
+  }
+
+  private normalizeGithubPullRequest(item: unknown, sinceDate: Date): NormalizedSyncEvent | null {
+    const pr = item as {
+      id?: number;
+      title?: string;
+      body?: string | null;
+      html_url?: string;
+      state?: string;
+      merged_at?: string | null;
+      closed_at?: string | null;
+      updated_at?: string;
+      created_at?: string;
+      head?: { ref?: string };
+      base?: { ref?: string };
+      user?: { login?: string; avatar_url?: string };
+      number?: number;
+    };
+
+    if (!pr.id || !this.isRecentEnough(pr.updated_at ?? pr.created_at, sinceDate)) {
+      return null;
+    }
+
+    const merged = Boolean(pr.merged_at);
+    const type = merged
+      ? EventType.PR_MERGED
+      : pr.state === 'closed'
+        ? EventType.PR_CLOSED
+        : EventType.PR_OPENED;
+
+    return {
+      type,
+      action: merged ? 'merged' : pr.state === 'closed' ? 'closed' : 'opened',
+      title: pr.title || 'Pull request sync',
+      body: pr.body || undefined,
+      author: pr.user?.login || 'unknown',
+      authorAvatar: pr.user?.avatar_url,
+      externalId: `gh-pr-${pr.id}`,
+      externalUrl: pr.html_url,
+      branch: pr.base?.ref,
+      sourceBranch: pr.head?.ref,
+      targetBranch: pr.base?.ref,
+      branches: this.resolveBranches(undefined, [pr.head?.ref, pr.base?.ref]),
+      occurredAt: new Date(
+        merged
+          ? pr.merged_at || pr.closed_at || pr.updated_at || pr.created_at || new Date().toISOString()
+          : pr.state === 'closed'
+            ? pr.closed_at || pr.updated_at || pr.created_at || new Date().toISOString()
+            : pr.created_at || pr.updated_at || new Date().toISOString(),
+      ),
+      metadata: {
+        source: 'repository_sync',
+        provider: 'github',
+        prNumber: pr.number,
+      },
+    };
+  }
+
+  private normalizeGithubIssue(item: unknown, sinceDate: Date): NormalizedSyncEvent | null {
+    const issue = item as {
+      id?: number;
+      title?: string;
+      body?: string | null;
+      html_url?: string;
+      state?: string;
+      closed_at?: string | null;
+      updated_at?: string;
+      created_at?: string;
+      number?: number;
+      user?: { login?: string; avatar_url?: string };
+      pull_request?: unknown;
+    };
+
+    if (issue.pull_request || !issue.id || !this.isRecentEnough(issue.updated_at ?? issue.created_at, sinceDate)) {
+      return null;
+    }
+
+    return {
+      type: issue.state === 'closed' ? EventType.ISSUE_CLOSED : EventType.ISSUE_OPENED,
+      action: issue.state === 'closed' ? 'closed' : 'opened',
+      title: issue.title || 'Issue sync',
+      body: issue.body || undefined,
+      author: issue.user?.login || 'unknown',
+      authorAvatar: issue.user?.avatar_url,
+      externalId: `gh-issue-${issue.id}`,
+      externalUrl: issue.html_url,
+      branches: [],
+      occurredAt: new Date(
+        issue.state === 'closed'
+          ? issue.closed_at || issue.updated_at || issue.created_at || new Date().toISOString()
+          : issue.created_at || issue.updated_at || new Date().toISOString(),
+      ),
+      metadata: {
+        source: 'repository_sync',
+        provider: 'github',
+        issueNumber: issue.number,
+      },
+    };
+  }
+
+  private normalizeGitlabCommit(item: unknown, branch: string): NormalizedSyncEvent | null {
+    const commit = item as {
+      id?: string;
+      message?: string;
+      web_url?: string;
+      author_name?: string;
+      authored_date?: string;
+      committed_date?: string;
+      created_at?: string;
+    };
+
+    if (!commit.id) {
+      return null;
+    }
+
+    return {
+      type: EventType.PUSH,
+      action: 'sync',
+      title: `Push sync (${branch}): ${commit.id.slice(0, 7)}`,
+      body: commit.message,
+      author: commit.author_name || 'unknown',
+      externalId: commit.id,
+      externalUrl: commit.web_url,
+      branch,
+      branches: [branch],
+      occurredAt: new Date(
+        commit.authored_date || commit.committed_date || commit.created_at || new Date(),
+      ),
+      metadata: { source: 'repository_sync', provider: 'gitlab', branch },
+    };
+  }
+
+  private normalizeGitlabMergeRequest(
+    item: unknown,
+    sinceDate: Date,
+  ): NormalizedSyncEvent | null {
+    const mr = item as {
+      id?: number;
+      title?: string;
+      description?: string | null;
+      web_url?: string;
+      state?: string;
+      merged_at?: string | null;
+      closed_at?: string | null;
+      updated_at?: string;
+      created_at?: string;
+      source_branch?: string;
+      target_branch?: string;
+      author?: { username?: string; avatar_url?: string };
+      iid?: number;
+    };
+
+    if (!mr.id || !this.isRecentEnough(mr.updated_at ?? mr.created_at, sinceDate)) {
+      return null;
+    }
+
+    const merged = Boolean(mr.merged_at);
+    const type = merged
+      ? EventType.PR_MERGED
+      : mr.state === 'closed'
+        ? EventType.PR_CLOSED
+        : EventType.PR_OPENED;
+
+    return {
+      type,
+      action: merged ? 'merged' : mr.state === 'closed' ? 'closed' : 'opened',
+      title: mr.title || 'Merge request sync',
+      body: mr.description || undefined,
+      author: mr.author?.username || 'unknown',
+      authorAvatar: mr.author?.avatar_url,
+      externalId: `gl-mr-${mr.id}`,
+      externalUrl: mr.web_url,
+      branch: mr.target_branch,
+      sourceBranch: mr.source_branch,
+      targetBranch: mr.target_branch,
+      branches: this.resolveBranches(undefined, [mr.source_branch, mr.target_branch]),
+      occurredAt: new Date(
+        merged
+          ? mr.merged_at || mr.closed_at || mr.updated_at || mr.created_at || new Date().toISOString()
+          : mr.state === 'closed'
+            ? mr.closed_at || mr.updated_at || mr.created_at || new Date().toISOString()
+            : mr.created_at || mr.updated_at || new Date().toISOString(),
+      ),
+      metadata: {
+        source: 'repository_sync',
+        provider: 'gitlab',
+        mrIid: mr.iid,
+      },
+    };
+  }
+
+  private normalizeGitlabIssue(item: unknown, sinceDate: Date): NormalizedSyncEvent | null {
+    const issue = item as {
+      id?: number;
+      title?: string;
+      description?: string | null;
+      web_url?: string;
+      state?: string;
+      closed_at?: string | null;
+      updated_at?: string;
+      created_at?: string;
+      author?: { username?: string; avatar_url?: string };
+      iid?: number;
+    };
+
+    if (!issue.id || !this.isRecentEnough(issue.updated_at ?? issue.created_at, sinceDate)) {
+      return null;
+    }
+
+    return {
+      type: issue.state === 'closed' ? EventType.ISSUE_CLOSED : EventType.ISSUE_OPENED,
+      action: issue.state === 'closed' ? 'closed' : 'opened',
+      title: issue.title || 'Issue sync',
+      body: issue.description || undefined,
+      author: issue.author?.username || 'unknown',
+      authorAvatar: issue.author?.avatar_url,
+      externalId: `gl-issue-${issue.id}`,
+      externalUrl: issue.web_url,
+      branches: [],
+      occurredAt: new Date(
+        issue.state === 'closed'
+          ? issue.closed_at || issue.updated_at || issue.created_at || new Date().toISOString()
+          : issue.created_at || issue.updated_at || new Date().toISOString(),
+      ),
+      metadata: {
+        source: 'repository_sync',
+        provider: 'gitlab',
+        issueIid: issue.iid,
+      },
+    };
+  }
+
+  private isRecentEnough(dateValue: string | undefined, sinceDate: Date): boolean {
+    if (!dateValue) {
+      return false;
+    }
+
+    return new Date(dateValue).getTime() >= sinceDate.getTime();
+  }
+
   private generateWebhookSecret(): string {
     return randomBytes(32).toString('hex');
   }

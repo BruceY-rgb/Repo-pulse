@@ -127,6 +127,7 @@ export class WebhookService {
       platform,
       eventType,
       payload,
+      receivedAt: new Date().toISOString(),
     });
 
     this.logger.log(`Queued ${eventType} event for repository ${repositoryId}`);

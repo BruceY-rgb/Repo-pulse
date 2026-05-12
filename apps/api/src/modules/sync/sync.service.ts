@@ -220,7 +220,13 @@ export class SyncService {
               title: commit.commit?.message?.split('\n')[0] || 'Push',
               body: commit.commit?.message || '',
               author: commit.commit?.author?.name || commit.commit?.author?.login || 'Unknown',
-              createdAt: new Date(commit.commit?.author?.date || new Date()),
+              branch: repository.defaultBranch,
+              branches: [repository.defaultBranch],
+              occurredAt: new Date(commit.commit?.author?.date || new Date()),
+              metadata: {
+                source: 'legacy_history_sync',
+                provider: 'github',
+              },
             },
           });
           commits++;
@@ -263,7 +269,19 @@ export class SyncService {
               title: pr.title,
               body: pr.body || '',
               author: pr.user?.login || 'Unknown',
-              createdAt: new Date(pr.created_at),
+              branch: pr.base?.ref,
+              sourceBranch: pr.head?.ref,
+              targetBranch: pr.base?.ref,
+              branches: [pr.head?.ref, pr.base?.ref].filter(
+                (branch): branch is string => Boolean(branch),
+              ),
+              occurredAt: new Date(
+                pr.merged_at || (pr.state === 'closed' ? pr.closed_at : null) || pr.created_at,
+              ),
+              metadata: {
+                source: 'legacy_history_sync',
+                provider: 'github',
+              },
             },
           });
           prs++;
@@ -302,7 +320,16 @@ export class SyncService {
               title: issue.title,
               body: issue.body || '',
               author: issue.user?.login || 'Unknown',
-              createdAt: new Date(issue.created_at),
+              branches: [],
+              occurredAt: new Date(
+                issue.state === 'closed'
+                  ? issue.closed_at || issue.updated_at || issue.created_at
+                  : issue.created_at,
+              ),
+              metadata: {
+                source: 'legacy_history_sync',
+                provider: 'github',
+              },
             },
           });
           issues++;

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ElementType, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type ElementType, type FormEvent } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   BookOpen,
@@ -50,6 +50,10 @@ import {
   useLogoutMutation,
 } from '@/hooks/queries/use-auth-queries';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useUnreadNotificationCountQuery } from '@/hooks/queries/use-notification-queries';
+import { useRepositoryListQuery } from '@/hooks/queries/use-repository-queries';
+import { approvalService } from '@/services/approval.service';
+import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
 
 interface NavItem {
   path: string;
@@ -67,18 +71,42 @@ export function Layout() {
   const [searchKeyword, setSearchKeyword] = useState('');
   const { data: user, isLoading: isUserLoading } = useCurrentUserQuery();
   const logoutMutation = useLogoutMutation();
+  const repositoriesQuery = useRepositoryListQuery();
+  const unreadNotificationCountQuery = useUnreadNotificationCountQuery();
+  const repositoryIds = useMemo(
+    () => (repositoriesQuery.data ?? []).map((repository) => repository.id),
+    [repositoriesQuery.data],
+  );
+  const unreadNotificationCount = unreadNotificationCountQuery.data?.count ?? 0;
+  const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
+
+  useEffect(function () {
+    function refresh() {
+      approvalService.getPendingCount().then(function (r) { setPendingApprovalCount(r?.count ?? 0); }).catch(function () {});
+    }
+    refresh();
+    window.addEventListener('approval-updated', refresh);
+    return function () { window.removeEventListener('approval-updated', refresh); };
+  }, []);
+
+  useRepositoryRealtimeSubscription(repositoryIds);
 
   const navItems = useMemo<NavItem[]>(
     () => [
       { path: '/dashboard', labelKey: 'app.nav.dashboard', icon: LayoutDashboard },
       { path: '/repositories', labelKey: 'app.nav.repositories', icon: GitBranch },
       { path: '/analysis', labelKey: 'app.nav.analysis', icon: Brain },
-      { path: '/approvals', labelKey: 'app.nav.approvals', icon: CheckSquare },
-      { path: '/notifications', labelKey: 'app.nav.notifications', icon: Bell, badgeCount: 0 },
+      { path: '/approvals', labelKey: 'app.nav.approvals', icon: CheckSquare, badgeCount: pendingApprovalCount },
+      {
+        path: '/notifications',
+        labelKey: 'app.nav.notifications',
+        icon: Bell,
+        badgeCount: unreadNotificationCount,
+      },
       { path: '/reports', labelKey: 'app.nav.reports', icon: FileText },
       { path: '/settings', labelKey: 'app.nav.settings', icon: Settings },
     ],
-    [],
+    [unreadNotificationCount, pendingApprovalCount],
   );
 
   const handleLogout = async () => {

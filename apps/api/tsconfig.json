@@ -21,7 +21,8 @@
     "resolveJsonModule": true,
     "types": ["node", "jest"], 
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@modules/*": ["./src/modules/*"]
     }
   },
   "include": ["src/**/*", "test/**/*", "**/*spec.ts"], 

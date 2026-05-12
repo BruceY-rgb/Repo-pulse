@@ -5,9 +5,10 @@ import { RepositoryService } from './repository.service';
 import { GithubService } from './services/github.service';
 import { GitlabService } from './services/gitlab.service';
 import { UserModule } from '../user/user.module';
+import { EventModule } from '../event/event.module';
 
 @Module({
-  imports: [ConfigModule, UserModule],
+  imports: [ConfigModule, UserModule, EventModule],
   controllers: [RepositoryController],
   providers: [RepositoryService, GithubService, GitlabService],
   exports: [RepositoryService],

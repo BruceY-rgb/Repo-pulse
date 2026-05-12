@@ -1,10 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Inject } from '@nestjs/common';
 import { prisma, Notification, NotificationChannel, NotificationStatus } from '@repo-pulse/database';
 import { EmailChannel } from './channels/email.channel';
 import { DingTalkChannel } from './channels/dingtalk.channel';
 import { FeishuChannel } from './channels/feishu.channel';
 import { WebhookChannel } from './channels/webhook.channel';
+import { ChannelSendResult } from './channels/shared';
+import { SendNotificationDto, UpdateNotificationPreferencesDto } from './dto/notification.dto';
+import {
+  buildEventScopeWhere,
+  normalizeRepositoryBranchScopes,
+  parseRepositoryBranchScopesParam,
+} from '../../common/utils/repository-branch-scope';
 
 export interface NotificationPreferences {
   channels: NotificationChannel[];
@@ -14,18 +20,21 @@ export interface NotificationPreferences {
     analysisComplete: boolean;
     weeklyReport: boolean;
   };
-  webhookUrl?: string;
-  email?: string;
+  webhookUrl: string | null;
+  email: string | null;
 }
 
-export interface SendNotificationDto {
-  userId: string;
-  eventId?: string;
-  channel: NotificationChannel;
-  title: string;
-  content: string;
-  metadata?: Record<string, unknown>;
-}
+const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
+  channels: [NotificationChannel.IN_APP],
+  events: {
+    highRisk: true,
+    prUpdates: true,
+    analysisComplete: true,
+    weeklyReport: false,
+  },
+  webhookUrl: null,
+  email: null,
+};
 
 @Injectable()
 export class NotificationService {
@@ -38,9 +47,36 @@ export class NotificationService {
     private readonly webhookChannel: WebhookChannel,
   ) {}
 
-  /**
-   * 获取用户通知偏好
-   */
+  private async resolveRepositoryIds(
+    userId: string,
+    repositoryIdsParam?: string,
+  ): Promise<string[]> {
+    const userRepos = await prisma.userRepository.findMany({
+      where: { userId },
+      select: { repositoryId: true },
+    });
+
+    const accessibleRepositoryIds = userRepos.map(
+      (repository: { repositoryId: string }) => repository.repositoryId,
+    );
+
+    if (!repositoryIdsParam) {
+      return accessibleRepositoryIds;
+    }
+
+    const requestedRepositoryIds = repositoryIdsParam
+      .split(',')
+      .map((repositoryId) => repositoryId.trim())
+      .filter(Boolean);
+
+    if (requestedRepositoryIds.length === 0) {
+      return [];
+    }
+
+    const accessibleRepositoryIdSet = new Set(accessibleRepositoryIds);
+    return requestedRepositoryIds.filter((repositoryId) => accessibleRepositoryIdSet.has(repositoryId));
+  }
+
   async getPreferences(userId: string): Promise<NotificationPreferences> {
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -48,27 +84,30 @@ export class NotificationService {
     });
 
     const prefs = (user?.preferences as Record<string, unknown>) || {};
+    const eventPrefs = (prefs.notificationEvents as Record<string, unknown>) || {};
+
     return {
-      channels: (prefs.notificationChannels as NotificationChannel[]) || [
-        NotificationChannel.IN_APP,
-      ],
-      events: (prefs.notificationEvents as NotificationPreferences['events']) || {
-        highRisk: true,
-        prUpdates: true,
-        analysisComplete: true,
-        weeklyReport: false,
+      channels:
+        (prefs.notificationChannels as NotificationChannel[] | undefined) ??
+        DEFAULT_NOTIFICATION_PREFERENCES.channels,
+      events: {
+        ...DEFAULT_NOTIFICATION_PREFERENCES.events,
+        ...eventPrefs,
       },
-      webhookUrl: prefs.notificationWebhookUrl as string | undefined,
-      email: prefs.notificationEmail as string | undefined,
+      webhookUrl:
+        typeof prefs.notificationWebhookUrl === 'string'
+          ? (prefs.notificationWebhookUrl as string)
+          : null,
+      email:
+        typeof prefs.notificationEmail === 'string'
+          ? (prefs.notificationEmail as string)
+          : null,
     };
   }
 
-  /**
-   * 更新用户通知偏好
-   */
   async updatePreferences(
     userId: string,
-    prefs: Partial<NotificationPreferences>,
+    prefs: UpdateNotificationPreferencesDto,
   ): Promise<NotificationPreferences> {
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -76,14 +115,24 @@ export class NotificationService {
     });
 
     const currentPrefs = (user?.preferences as Record<string, unknown>) || {};
+    const existing = await this.getPreferences(userId);
 
-    const updatedPrefs = {
+    const updatedPrefs: Record<string, unknown> = {
       ...currentPrefs,
-      notificationChannels: prefs.channels,
-      notificationEvents: prefs.events,
-      notificationWebhookUrl: prefs.webhookUrl,
-      notificationEmail: prefs.email,
+      notificationChannels: prefs.channels ?? existing.channels,
+      notificationEvents: {
+        ...existing.events,
+        ...(prefs.events || {}),
+      },
     };
+
+    if (prefs.webhookUrl !== undefined) {
+      updatedPrefs.notificationWebhookUrl = prefs.webhookUrl;
+    }
+
+    if (prefs.email !== undefined) {
+      updatedPrefs.notificationEmail = prefs.email;
+    }
 
     await prisma.user.update({
       where: { id: userId },
@@ -93,15 +142,11 @@ export class NotificationService {
     return this.getPreferences(userId);
   }
 
-  /**
-   * 发送通知
-   */
   async send(dto: SendNotificationDto): Promise<Notification> {
     this.logger.log(
       `Sending notification to user ${dto.userId} via ${dto.channel}: ${dto.title}`,
     );
 
-    // 创建通知记录
     const notification = await prisma.notification.create({
       data: {
         userId: dto.userId,
@@ -114,35 +159,49 @@ export class NotificationService {
       },
     });
 
-    // 根据渠道发送
     try {
-      const success = await this.sendViaChannel(dto);
+      const result = await this.sendViaChannel(dto);
+      const nextStatus = result.success
+        ? NotificationStatus.SENT
+        : NotificationStatus.FAILED;
+      const sentAt = result.success ? new Date() : null;
+      const nextMetadata = {
+        ...(dto.metadata || {}),
+        ...(result.metadata || {}),
+        ...(result.failureReason ? { failureReason: result.failureReason } : {}),
+      };
 
-      // 更新发送状态
       await prisma.notification.update({
         where: { id: notification.id },
         data: {
-          status: success ? NotificationStatus.SENT : NotificationStatus.FAILED,
-          sentAt: success ? new Date() : null,
+          status: nextStatus,
+          sentAt,
+          metadata: nextMetadata as any,
         },
       });
 
       this.logger.log(
-        `Notification ${notification.id} sent via ${dto.channel}: ${success ? 'success' : 'failed'}`,
+        `${result.success ? 'notification_sent' : 'notification_failed'} notificationId=${notification.id} channel=${dto.channel} userId=${dto.userId}`,
       );
 
-      return { ...notification, status: success ? NotificationStatus.SENT : NotificationStatus.FAILED };
+      return {
+        ...notification,
+        status: nextStatus,
+        sentAt,
+        metadata: nextMetadata as any,
+      };
     } catch (error) {
-      this.logger.error(
-        `Failed to send notification ${notification.id}`,
-        error,
-      );
+      this.logger.error(`Failed to send notification ${notification.id}`, error);
 
       await prisma.notification.update({
         where: { id: notification.id },
         data: {
           status: NotificationStatus.FAILED,
-          metadata: { error: (error as Error).message },
+          metadata: {
+            ...(dto.metadata || {}),
+            failureReason: 'notification_send_exception',
+            error: error instanceof Error ? error.message : 'unknown_error',
+          } as any,
         },
       });
 
@@ -150,10 +209,7 @@ export class NotificationService {
     }
   }
 
-  /**
-   * 根据渠道发送
-   */
-  private async sendViaChannel(dto: SendNotificationDto): Promise<boolean> {
+  private async sendViaChannel(dto: SendNotificationDto): Promise<ChannelSendResult> {
     const user = await prisma.user.findUnique({
       where: { id: dto.userId },
       select: { preferences: true },
@@ -191,18 +247,14 @@ export class NotificationService {
         });
 
       case NotificationChannel.IN_APP:
-        // 应用内通知已在创建记录时完成
-        return true;
+        return { success: true };
 
       default:
         this.logger.warn(`Unknown notification channel: ${dto.channel}`);
-        return false;
+        return { success: false, failureReason: 'notification_channel_unknown' };
     }
   }
 
-  /**
-   * 获取用户通知列表
-   */
   async getUserNotifications(
     userId: string,
     options?: {
@@ -211,7 +263,7 @@ export class NotificationService {
       offset?: number;
     },
   ): Promise<{ notifications: Notification[]; total: number }> {
-    const where: Record<string, unknown> = { userId };
+    const where: Record<string, unknown> = { userId, channel: NotificationChannel.IN_APP };
 
     if (options?.status) {
       where.status = options.status;
@@ -237,9 +289,6 @@ export class NotificationService {
     return { notifications, total };
   }
 
-  /**
-   * 标记通知为已读
-   */
   async markAsRead(notificationId: string, userId: string): Promise<void> {
     const notification = await prisma.notification.findFirst({
       where: { id: notificationId, userId },
@@ -255,9 +304,6 @@ export class NotificationService {
     });
   }
 
-  /**
-   * 标记所有通知为已读
-   */
   async markAllAsRead(userId: string): Promise<void> {
     await prisma.notification.updateMany({
       where: { userId, readAt: null },
@@ -265,9 +311,6 @@ export class NotificationService {
     });
   }
 
-  /**
-   * 删除通知
-   */
   async deleteNotification(notificationId: string, userId: string): Promise<void> {
     const notification = await prisma.notification.findFirst({
       where: { id: notificationId, userId },
@@ -282,14 +325,29 @@ export class NotificationService {
     });
   }
 
-  /**
-   * 获取未读通知数量
-   */
-  async getUnreadCount(userId: string): Promise<number> {
+  async getUnreadCount(
+    userId: string,
+    repositoryIdsParam?: string,
+    repositoryBranchScopesParam?: string,
+  ): Promise<number> {
+    const repositoryIds = await this.resolveRepositoryIds(userId, repositoryIdsParam);
+    const repositoryBranchScopes = normalizeRepositoryBranchScopes(
+      repositoryIds,
+      parseRepositoryBranchScopesParam(repositoryBranchScopesParam),
+    );
+
+    if (repositoryIds.length === 0) {
+      return 0;
+    }
+
     return prisma.notification.count({
       where: {
         userId,
+        channel: NotificationChannel.IN_APP,
         readAt: null,
+        event: {
+          ...buildEventScopeWhere(repositoryIds, repositoryBranchScopes),
+        },
       },
     });
   }

@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   GitPullRequest,
   GitCommit,
+  ChevronDown,
+  ChevronRight,
   AlertCircle,
   TrendingUp,
   Clock,
@@ -14,12 +16,25 @@ import {
   ArrowDownRight,
   MoreHorizontal,
   RefreshCcw,
+  ChevronsUpDown,
+  Loader2,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Command,
+  CommandInput,
+  CommandList,
+} from '@/components/ui/command';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { Progress } from '@/components/ui/progress';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   AreaChart,
   Area,
@@ -36,6 +51,8 @@ import {
 } from 'recharts';
 import gsap from 'gsap';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useMonitoringScopePreferences } from '@/hooks/use-monitoring-scope-preferences';
+import { EventContextChips } from '@/components/shared/EventContextChips';
 import {
   useDashboardRecentEventsQuery,
   useDashboardRepositoriesQuery,
@@ -43,30 +60,11 @@ import {
   usePendingApprovalsCountQuery,
   useUnreadNotificationsCountQuery,
 } from '@/hooks/queries/use-dashboard-queries';
+import { useRepositoryBranchesQuery } from '@/hooks/queries/use-repository-queries';
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
-
-const activityData = [
-  { name: 'Mon', commits: 45, prs: 12, issues: 8 },
-  { name: 'Tue', commits: 52, prs: 15, issues: 6 },
-  { name: 'Wed', commits: 38, prs: 10, issues: 12 },
-  { name: 'Thu', commits: 65, prs: 18, issues: 5 },
-  { name: 'Fri', commits: 48, prs: 14, issues: 9 },
-  { name: 'Sat', commits: 25, prs: 5, issues: 3 },
-  { name: 'Sun', commits: 18, prs: 3, issues: 2 },
-];
-
-const riskDistribution = [
-  { name: 'Low', value: 65, color: '#238636' },
-  { name: 'Medium', value: 25, color: '#f0883e' },
-  { name: 'High', value: 10, color: '#f85149' },
-];
-
-const doraMetrics = [
-  { label: 'Deployment Frequency', value: '4.2/day', target: '5/day', progress: 84 },
-  { label: 'Lead Time for Changes', value: '2.1 days', target: '2 days', progress: 95 },
-  { label: 'Change Failure Rate', value: '8.5%', target: '5%', progress: 59 },
-  { label: 'Time to Recovery', value: '45 min', target: '30 min', progress: 67 },
-];
+import { useDashboardActivity } from '@/hooks/use-dashboard';
+import { normalizeBranchOption } from '@/services/repository.service';
+import type { Repository, RepositoryBranchScopeMap, RepositoryBranchScopeOption } from '@/types/api';
 
 function toRelativeTime(dateString: string, language: 'en' | 'zh') {
   const now = Date.now();
@@ -98,26 +96,444 @@ function getRiskByType(type: string): 'low' | 'medium' | 'high' {
   return 'low';
 }
 
+function areStringArraysEqual(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function findRepositoriesBySelection(repositories: Repository[], selectedRepositoryIds: string[]) {
+  const repositoryMap = new Map(repositories.map((repository) => [repository.id, repository]));
+
+  return selectedRepositoryIds
+    .map((repositoryId) => repositoryMap.get(repositoryId))
+    .filter((repository): repository is Repository => Boolean(repository));
+}
+
+function formatBranchSummary(branches: string[], fallbackLabel: string) {
+  if (branches.length === 0) {
+    return fallbackLabel;
+  }
+
+  if (branches.length === 1) {
+    return branches[0];
+  }
+
+  return `${branches[0]} +${branches.length - 1}`;
+}
+
+function areRepositoryBranchScopesEqual(
+  left: RepositoryBranchScopeMap,
+  right: RepositoryBranchScopeMap,
+) {
+  const leftEntries = Object.entries(left).sort(([leftKey], [rightKey]) =>
+    leftKey.localeCompare(rightKey),
+  );
+  const rightEntries = Object.entries(right).sort(([leftKey], [rightKey]) =>
+    leftKey.localeCompare(rightKey),
+  );
+
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+
+  return leftEntries.every(([repositoryId, branches], index) => {
+    const [rightRepositoryId, rightBranches] = rightEntries[index];
+    return (
+      repositoryId === rightRepositoryId &&
+      areStringArraysEqual(branches, rightBranches)
+    );
+  });
+}
+
+interface ScopeRepositoryItemProps {
+  repo: Repository;
+  checked: boolean;
+  expanded: boolean;
+  branchSummary: string;
+  selectedBranches: string[];
+  allBranchesLabel: string;
+  notInScopeLabel: string;
+  onToggleRepository: (repositoryId: string) => void;
+  onToggleExpanded: (repositoryId: string) => void;
+  onToggleBranch: (repositoryId: string, branchName: string) => void;
+  onResetBranches: (repositoryId: string) => void;
+  t: (key: string) => string;
+}
+
+function ScopeRepositoryItem({
+  repo,
+  checked,
+  expanded,
+  branchSummary,
+  selectedBranches,
+  allBranchesLabel,
+  notInScopeLabel,
+  onToggleRepository,
+  onToggleExpanded,
+  onToggleBranch,
+  onResetBranches,
+  t,
+}: ScopeRepositoryItemProps) {
+  const branchesQuery = useRepositoryBranchesQuery(repo.id, expanded);
+  const branchOptions = (branchesQuery.data ?? [])
+    .map((branch) => normalizeBranchOption(branch))
+    .filter((branch): branch is RepositoryBranchScopeOption => Boolean(branch));
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-[var(--github-border)]/80 bg-white/[0.02]">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <button
+          type="button"
+          className="flex flex-1 items-center gap-3 text-left"
+          onClick={() => onToggleRepository(repo.id)}
+        >
+          <Checkbox checked={checked} className="pointer-events-none" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-white">{repo.fullName}</p>
+            <p className="truncate text-xs text-[var(--github-text-secondary)]">
+              {checked ? branchSummary : notInScopeLabel}
+            </p>
+          </div>
+        </button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-lg text-[var(--github-text-secondary)] hover:bg-white/5 hover:text-white"
+          onClick={() => onToggleExpanded(repo.id)}
+        >
+          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </Button>
+      </div>
+
+      {expanded ? (
+        <div className="space-y-3 border-t border-[var(--github-border)]/80 bg-black/10 px-4 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--github-text-secondary)]">
+                {t('dashboard.scope.branches.title')}
+              </p>
+              <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
+                {t('dashboard.scope.branches.description')}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-lg px-2 text-xs text-[var(--github-accent)] hover:bg-[var(--github-accent)]/10 hover:text-white"
+              onClick={() => onResetBranches(repo.id)}
+            >
+              {allBranchesLabel}
+            </Button>
+          </div>
+
+          {branchesQuery.isLoading ? (
+            <div className="flex items-center gap-2 rounded-xl border border-[var(--github-border)]/70 bg-white/[0.03] px-3 py-3 text-sm text-[var(--github-text-secondary)]">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {t('dashboard.scope.branches.loading')}
+            </div>
+          ) : branchOptions.length === 0 ? (
+            <div className="rounded-xl border border-[var(--github-border)]/70 bg-white/[0.03] px-3 py-3 text-sm text-[var(--github-text-secondary)]">
+              {t('dashboard.scope.branches.empty')}
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              {branchOptions.map((branch) => {
+                const branchChecked = selectedBranches.includes(branch.name);
+
+                return (
+                  <button
+                    key={`${repo.id}-${branch.name}`}
+                    type="button"
+                    className="flex items-center gap-3 rounded-xl border border-[var(--github-border)]/70 bg-white/[0.02] px-3 py-2 text-left transition-colors hover:border-[var(--github-accent)]/40 hover:bg-white/[0.05]"
+                    onClick={() => onToggleBranch(repo.id, branch.name)}
+                  >
+                    <Checkbox checked={branchChecked} className="pointer-events-none" />
+                    <span className="min-w-0 flex-1 truncate text-sm text-white">{branch.name}</span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      {branch.isDefault ? (
+                        <span className="rounded-full bg-[var(--github-accent)]/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--github-accent)]">
+                          default
+                        </span>
+                      ) : null}
+                      {branch.isObserved && !branch.isDefault && !branch.lastCommitSha ? (
+                        <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
+                          observed-only
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function Dashboard() {
   const cardsRef = useRef<HTMLDivElement>(null);
   const { t, language } = useLanguage();
 
   const repositoriesQuery = useDashboardRepositoriesQuery();
-  const selectedRepository = repositoriesQuery.data?.[0];
-  const repositoryId = selectedRepository?.id;
+  const {
+    currentUserQuery,
+    monitoringScope,
+    persistMonitoringScope,
+  } = useMonitoringScopePreferences();
+  const { isLoading: isCurrentUserLoading } = currentUserQuery;
+  const repos = useMemo(
+    () => repositoriesQuery.data ?? [],
+    [repositoriesQuery.data],
+  );
+  const [isScopePopoverOpen, setIsScopePopoverOpen] = useState(false);
+  const [scopeTab, setScopeTab] = useState<'selected' | 'all'>('selected');
+  const [scopeSearchValue, setScopeSearchValue] = useState('');
+  const [expandedRepositoryIds, setExpandedRepositoryIds] = useState<string[]>([]);
+  const availableRepositoryIds = useMemo(() => repos.map((repository) => repository.id), [repos]);
+  const availableRepositoryIdSet = useMemo(
+    () => new Set(availableRepositoryIds),
+    [availableRepositoryIds],
+  );
+  const monitoredRepositoryIds = useMemo(
+    () => (monitoringScope.repositoryIds ?? []).filter((repositoryId) => availableRepositoryIdSet.has(repositoryId)),
+    [availableRepositoryIdSet, monitoringScope.repositoryIds],
+  );
+  const selectedRepositories = useMemo(
+    () => findRepositoriesBySelection(repos, monitoredRepositoryIds),
+    [monitoredRepositoryIds, repos],
+  );
+  const repositoryBranchScopes = useMemo(
+    () => monitoringScope.repositoryBranchScopes ?? {},
+    [monitoringScope.repositoryBranchScopes],
+  );
+  const normalizedRepositoryBranchScopes = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(repositoryBranchScopes)
+          .filter(([repositoryId]) => availableRepositoryIdSet.has(repositoryId))
+          .map(([repositoryId, branches]) => [
+            repositoryId,
+            Array.from(new Set(branches)).sort((left, right) => left.localeCompare(right)),
+          ]),
+      ),
+    [availableRepositoryIdSet, repositoryBranchScopes],
+  );
+  const repositoriesForCurrentScopeTab = useMemo(
+    () => (scopeTab === 'selected' ? selectedRepositories : repos),
+    [repos, scopeTab, selectedRepositories],
+  );
+  const filteredRepositoriesForCurrentScopeTab = useMemo(() => {
+    const normalizedKeyword = scopeSearchValue.trim().toLowerCase();
+    if (!normalizedKeyword) {
+      return repositoriesForCurrentScopeTab;
+    }
 
-  const statsQuery = useDashboardStatsQuery(repositoryId);
-  const recentEventsQuery = useDashboardRecentEventsQuery(repositoryId);
-  const pendingApprovalsQuery = usePendingApprovalsCountQuery();
-  const unreadNotificationsQuery = useUnreadNotificationsCountQuery();
+    return repositoriesForCurrentScopeTab.filter((repository) =>
+      repository.fullName.toLowerCase().includes(normalizedKeyword) ||
+      repository.name.toLowerCase().includes(normalizedKeyword),
+    );
+  }, [repositoriesForCurrentScopeTab, scopeSearchValue]);
+  const hasAvailableRepositories = repos.length > 0;
+  const hasSelection = monitoredRepositoryIds.length > 0;
 
-  useRepositoryRealtimeSubscription(repositoryId);
+  const persistMonitoredRepositoryIds = (repositoryIds: string[]) => {
+    void persistMonitoringScope({
+      repositoryIds,
+      branchNames: [],
+      repositoryBranchScopes: normalizedRepositoryBranchScopes,
+    });
+  };
+  const persistMonitoredRepositoryIdsInEffect = useEffectEvent((repositoryIds: string[]) => {
+    persistMonitoredRepositoryIds(repositoryIds);
+  });
 
-  const hasRepository = Boolean(repositoryId);
-  const totalRepositories = repositoriesQuery.data?.length ?? 0;
+  useEffect(() => {
+    if (repositoriesQuery.isLoading || isCurrentUserLoading) {
+      return;
+    }
+
+    const rawRepositoryIds = monitoringScope.repositoryIds ?? [];
+    if (!areStringArraysEqual(rawRepositoryIds, monitoredRepositoryIds)) {
+      persistMonitoredRepositoryIdsInEffect(monitoredRepositoryIds);
+    }
+  }, [
+    isCurrentUserLoading,
+    monitoredRepositoryIds,
+    monitoringScope.repositoryIds,
+    repositoriesQuery.isLoading,
+  ]);
+
+  useEffect(() => {
+    if (repositoriesQuery.isLoading || isCurrentUserLoading) {
+      return;
+    }
+
+    if (
+      !areRepositoryBranchScopesEqual(
+        repositoryBranchScopes,
+        normalizedRepositoryBranchScopes,
+      )
+    ) {
+      void persistMonitoringScope({
+        repositoryIds: monitoredRepositoryIds,
+        branchNames: [],
+        repositoryBranchScopes: normalizedRepositoryBranchScopes,
+      });
+    }
+  }, [
+    isCurrentUserLoading,
+    monitoredRepositoryIds,
+    normalizedRepositoryBranchScopes,
+    persistMonitoringScope,
+    repositoriesQuery.isLoading,
+    repositoryBranchScopes,
+  ]);
+
+  const statsQuery = useDashboardStatsQuery(
+    monitoredRepositoryIds,
+    normalizedRepositoryBranchScopes,
+  );
+  const recentEventsQuery = useDashboardRecentEventsQuery(
+    monitoredRepositoryIds,
+    normalizedRepositoryBranchScopes,
+  );
+  const pendingApprovalsQuery = usePendingApprovalsCountQuery(
+    monitoredRepositoryIds,
+    normalizedRepositoryBranchScopes,
+  );
+  const unreadNotificationsQuery = useUnreadNotificationsCountQuery(
+    monitoredRepositoryIds,
+    normalizedRepositoryBranchScopes,
+  );
+
+  // 周活动数据 - 来自后端 /dashboard/activity
+  const activityQuery = useDashboardActivity(
+    7,
+    monitoredRepositoryIds,
+    normalizedRepositoryBranchScopes,
+  );
+  const activityData = useMemo(() => {
+    const data = activityQuery.data ?? [];
+    return data.map(item => ({ name: item.date, commits: item.commits, prs: item.prs, issues: item.issues }));
+  }, [activityQuery.data]);
+
+  // 风险分布 - 从事件类型动态计算
+  const riskDistribution = useMemo(() => {
+    const byType = statsQuery.data?.byType ?? [];
+    let low = 0, medium = 0, high = 0;
+    for (const item of byType) {
+      if (item.type.includes('PUSH') || item.type.includes('RELEASE')) high += item.count;
+      else if (item.type.includes('PR') || item.type.includes('ISSUE')) medium += item.count;
+      else low += item.count;
+    }
+    return [
+      { name: 'Low', value: low || 1, color: '#238636' },
+      { name: 'Medium', value: medium || 1, color: '#f0883e' },
+      { name: 'High', value: high || 1, color: '#f85149' },
+    ];
+  }, [statsQuery.data?.byType]);
+
+  // DORA 指标 - 后端暂无 API，暂用占位数据
+  const doraMetrics = [
+    { label: 'Deployment Frequency', value: '--', target: '--', progress: 0 },
+    { label: 'Lead Time for Changes', value: '--', target: '--', progress: 0 },
+    { label: 'Change Failure Rate', value: '--', target: '--', progress: 0 },
+    { label: 'Time to Recovery', value: '--', target: '--', progress: 0 },
+  ];
+
+  useRepositoryRealtimeSubscription(monitoredRepositoryIds);
+
+  const totalRepositories = monitoredRepositoryIds.length;
   const totalEvents = statsQuery.data?.total ?? 0;
   const pendingApprovals = pendingApprovalsQuery.data?.count ?? 0;
   const unreadNotifications = unreadNotificationsQuery.data?.count ?? 0;
+  const hasWeeklyActivity = activityData.some(
+    (item) => item.commits > 0 || item.prs > 0 || item.issues > 0,
+  );
+  const weeklyActivityEmptyMessage = totalEvents > 0
+    ? t('dashboard.activity.emptyWithHistory')
+    : t('dashboard.activity.empty');
+  const scopeSummary = hasSelection
+    ? selectedRepositories.length === 0
+      ? t('dashboard.scope.placeholder')
+      : selectedRepositories.length === 1
+      ? selectedRepositories[0].fullName
+      : `${selectedRepositories[0]?.fullName ?? t('dashboard.repo.fallback')} +${selectedRepositories.length - 1}`
+    : t('dashboard.scope.placeholder');
+
+  const applySelection = (nextRepositoryIds: string[]) => {
+    const nextRepositoryIdSet = new Set(nextRepositoryIds);
+    const normalizedSelection = availableRepositoryIds.filter((repositoryId) =>
+      nextRepositoryIdSet.has(repositoryId),
+    );
+
+    void persistMonitoringScope({
+      repositoryIds: normalizedSelection,
+      branchNames: [],
+      repositoryBranchScopes: normalizedRepositoryBranchScopes,
+    });
+  };
+
+  const toggleRepository = (repositoryId: string) => {
+    const nextRepositoryIds = monitoredRepositoryIds.includes(repositoryId)
+      ? monitoredRepositoryIds.filter((id) => id !== repositoryId)
+      : [...monitoredRepositoryIds, repositoryId];
+
+    applySelection(nextRepositoryIds);
+  };
+
+  const selectAllRepositories = () => {
+    applySelection(availableRepositoryIds);
+  };
+
+  const clearSelectedRepositories = () => {
+    applySelection([]);
+  };
+
+  const toggleExpandedRepository = (repositoryId: string) => {
+    setExpandedRepositoryIds((current) =>
+      current.includes(repositoryId)
+        ? current.filter((id) => id !== repositoryId)
+        : [...current, repositoryId],
+    );
+  };
+
+  const toggleRepositoryBranch = (repositoryId: string, branchName: string) => {
+    const repositoryIds = monitoredRepositoryIds.includes(repositoryId)
+      ? monitoredRepositoryIds
+      : [...monitoredRepositoryIds, repositoryId];
+    const currentBranches = normalizedRepositoryBranchScopes[repositoryId] ?? [];
+    const nextBranches = currentBranches.includes(branchName)
+      ? currentBranches.filter((branch) => branch !== branchName)
+      : [...currentBranches, branchName].sort((left, right) => left.localeCompare(right));
+
+    void persistMonitoringScope({
+      repositoryIds,
+      branchNames: [],
+      repositoryBranchScopes: {
+        ...normalizedRepositoryBranchScopes,
+        [repositoryId]: nextBranches,
+      },
+    });
+  };
+
+  const resetRepositoryBranches = (repositoryId: string) => {
+    if (!monitoredRepositoryIds.includes(repositoryId)) {
+      return;
+    }
+
+    void persistMonitoringScope({
+      repositoryIds: monitoredRepositoryIds,
+      branchNames: [],
+      repositoryBranchScopes: {
+        ...normalizedRepositoryBranchScopes,
+        [repositoryId]: [],
+      },
+    });
+  };
 
   const statsCards = useMemo(
     () => [
@@ -163,16 +579,16 @@ export function Dashboard() {
 
   const recentActivity = useMemo(() => {
     const events = recentEventsQuery.data?.items ?? [];
-    return events.map((event, index) => ({
-      id: index + 1,
+    return events.map((event) => ({
+      id: event.id,
       type: event.type,
       title: event.title,
-      repo: selectedRepository?.fullName ?? t('dashboard.repo.fallback'),
-      author: event.author,
-      time: toRelativeTime(event.createdAt, language),
+      author: event.author || 'Unknown',
+      time: toRelativeTime(event.occurredAt ?? event.createdAt, language),
       risk: getRiskByType(event.type),
+      event,
     }));
-  }, [language, recentEventsQuery.data?.items, selectedRepository?.fullName, t]);
+  }, [language, recentEventsQuery.data?.items]);
 
   useEffect(() => {
     if (cardsRef.current) {
@@ -198,10 +614,132 @@ export function Dashboard() {
           <p className="mt-1 text-sm text-[var(--github-text-secondary)]">
             {t('dashboard.hero.description')}
           </p>
-          {hasRepository ? (
-            <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
-              {t('dashboard.scope.label')}: {selectedRepository?.fullName}
-            </p>
+          {hasAvailableRepositories ? (
+            <div className="mt-1 flex items-center gap-2">
+              <span className="text-xs text-[var(--github-text-secondary)]">
+                {t('dashboard.scope.label')}:
+              </span>
+              <Popover
+                open={isScopePopoverOpen}
+                onOpenChange={(open) => {
+                  setIsScopePopoverOpen(open);
+                  if (open) {
+                    setScopeTab(hasSelection ? 'selected' : 'all');
+                    setScopeSearchValue('');
+                  }
+                }}
+              >
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="h-7 min-w-[220px] justify-between border-[var(--github-border)] bg-transparent px-2 text-xs text-[var(--github-text-secondary)]"
+                  >
+                    <span className="truncate">{scopeSummary}</span>
+                    <ChevronsUpDown className="h-3.5 w-3.5 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  className="w-[380px] overflow-hidden rounded-2xl border-[var(--github-border)] bg-[#151922] p-0 shadow-2xl"
+                >
+                  <Command className="rounded-none bg-transparent">
+                    <div className="border-b border-[var(--github-border)]/80 p-3 pb-2">
+                      <CommandInput
+                        value={scopeSearchValue}
+                        onValueChange={setScopeSearchValue}
+                        placeholder={t('dashboard.scope.searchPlaceholder')}
+                        wrapperClassName="h-12 rounded-2xl border border-[var(--github-border)] bg-white/[0.03] px-4 text-foreground shadow-inner shadow-black/10 transition-[background-color,box-shadow,border-color] focus-within:border-[var(--github-border)] focus-within:bg-white/[0.05] focus-within:ring-1 focus-within:ring-[var(--github-accent)]/35 focus-within:shadow-[0_0_0_4px_rgba(255,77,0,0.08)]"
+                        className="h-10 border-0 py-0 text-base placeholder:text-[var(--github-text-secondary)] focus-visible:outline-none focus-visible:ring-0"
+                      />
+                    </div>
+                    <div className="border-b border-[var(--github-border)]/80 px-3 py-2">
+                      <Tabs
+                        value={scopeTab}
+                        onValueChange={(value) => setScopeTab(value as 'selected' | 'all')}
+                        className="gap-0"
+                      >
+                        <TabsList className="h-9 w-full rounded-xl bg-white/[0.04] p-1">
+                          <TabsTrigger
+                            value="selected"
+                            className="rounded-lg border border-transparent text-xs text-[var(--github-text-secondary)] transition-colors hover:text-white data-[state=active]:border-[var(--github-accent)]/60 data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white data-[state=active]:shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]"
+                          >
+                            {t('dashboard.scope.tabs.selected')}
+                            <span className="ml-1 text-[10px] opacity-80">
+                              {selectedRepositories.length}
+                            </span>
+                          </TabsTrigger>
+                          <TabsTrigger
+                            value="all"
+                            className="rounded-lg border border-transparent text-xs text-[var(--github-text-secondary)] transition-colors hover:text-white data-[state=active]:border-[var(--github-accent)]/60 data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white data-[state=active]:shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]"
+                          >
+                            {t('dashboard.scope.tabs.all')}
+                            <span className="ml-1 text-[10px] opacity-80">{repos.length}</span>
+                          </TabsTrigger>
+                        </TabsList>
+                      </Tabs>
+                    </div>
+                    <div className="flex items-center justify-between border-b border-[var(--github-border)]/80 px-3 py-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 rounded-lg px-2 text-xs text-[var(--github-text-secondary)] hover:bg-white/5 hover:text-white"
+                        onClick={selectAllRepositories}
+                        type="button"
+                      >
+                        {t('dashboard.scope.selectAll')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 rounded-lg px-2 text-xs text-[var(--github-text-secondary)] hover:bg-white/5 hover:text-white"
+                        onClick={clearSelectedRepositories}
+                        type="button"
+                      >
+                        {t('dashboard.scope.clear')}
+                      </Button>
+                    </div>
+                    <CommandList className="max-h-[320px] px-2 py-2">
+                      {filteredRepositoriesForCurrentScopeTab.length === 0 ? (
+                        <div className="py-6 text-center text-sm text-[var(--github-text-secondary)]">
+                          {scopeTab === 'selected'
+                            ? t('dashboard.scope.emptySelectedTab')
+                            : t('dashboard.scope.noSearchResult')}
+                        </div>
+                      ) : (
+                        <div className="space-y-2 p-1">
+                          {filteredRepositoriesForCurrentScopeTab.map((repo) => {
+                            const checked = monitoredRepositoryIds.includes(repo.id);
+                            const selectedBranches = normalizedRepositoryBranchScopes[repo.id] ?? [];
+                            const branchSummary = formatBranchSummary(
+                              selectedBranches,
+                              t('dashboard.scope.row.allBranches'),
+                            );
+
+                            return (
+                              <ScopeRepositoryItem
+                                key={repo.id}
+                                repo={repo}
+                                checked={checked}
+                                expanded={expandedRepositoryIds.includes(repo.id)}
+                                branchSummary={branchSummary}
+                                selectedBranches={selectedBranches}
+                                allBranchesLabel={t('dashboard.scope.row.allBranches')}
+                                notInScopeLabel={t('dashboard.scope.row.notInScope')}
+                                onToggleRepository={toggleRepository}
+                                onToggleExpanded={toggleExpandedRepository}
+                                onToggleBranch={toggleRepositoryBranch}
+                                onResetBranches={resetRepositoryBranches}
+                                t={t}
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
           ) : null}
         </div>
         <div className="flex items-center gap-3">
@@ -215,7 +753,26 @@ export function Dashboard() {
         </div>
       </div>
 
-      {!hasRepository && !repositoriesQuery.isLoading ? (
+      {repositoriesQuery.isError ? (
+        <Card className="card-github">
+          <CardContent className="flex items-center justify-between gap-4 p-4">
+            <div className="text-sm text-red-400">{t('dashboard.error.partialLoadFailed')}</div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => {
+                repositoriesQuery.refetch();
+              }}
+            >
+              <RefreshCcw className="h-4 w-4" />
+              {t('dashboard.error.retry')}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!hasAvailableRepositories && !repositoriesQuery.isLoading && !repositoriesQuery.isError ? (
         <Card className="card-github">
           <CardContent className="flex items-center justify-between p-5">
             <p className="text-sm text-[var(--github-text-secondary)]">
@@ -228,7 +785,22 @@ export function Dashboard() {
         </Card>
       ) : null}
 
-      <div ref={cardsRef} className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {hasAvailableRepositories && !hasSelection && !repositoriesQuery.isLoading ? (
+        <Card className="card-github">
+          <CardContent className="flex items-center justify-between gap-4 p-5">
+            <p className="text-sm text-[var(--github-text-secondary)]">
+              {t('dashboard.scope.emptySelection')}
+            </p>
+            <Button className="btn-x-primary" type="button" onClick={selectAllRepositories}>
+              {t('dashboard.scope.selectAll')}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {hasSelection ? (
+        <>
+          <div ref={cardsRef} className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         {statsCards.map((stat) => {
           const Icon = stat.icon;
           return (
@@ -251,23 +823,28 @@ export function Dashboard() {
             </Card>
           );
         })}
-      </div>
+          </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="card-github lg:col-span-2">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-base font-semibold text-white">
-                <Activity className="h-4 w-4 text-[var(--github-accent)]" />
-                {t('dashboard.sections.weeklyActivity')}
-              </CardTitle>
+              <div>
+                <CardTitle className="flex items-center gap-2 text-base font-semibold text-white">
+                  <Activity className="h-4 w-4 text-[var(--github-accent)]" />
+                  {t('dashboard.sections.weeklyActivity')}
+                </CardTitle>
+                <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
+                  {t('dashboard.activity.window')}
+                </p>
+              </div>
               <Button variant="ghost" size="icon" className="h-8 w-8 text-[var(--github-text-secondary)]">
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="h-64">
+            <div className="relative h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={activityData}>
                   <defs>
@@ -283,11 +860,21 @@ export function Dashboard() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#30363d" vertical={false} />
                   <XAxis dataKey="name" stroke="#8b949e" fontSize={12} tickLine={false} axisLine={false} />
                   <YAxis stroke="#8b949e" fontSize={12} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px' }} />
+                  <Tooltip contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px', color: '#e6edf3' }} itemStyle={{ color: '#e6edf3' }} />
                   <Area type="monotone" dataKey="commits" stroke="#ff4d00" strokeWidth={2} fillOpacity={1} fill="url(#colorCommits)" />
                   <Area type="monotone" dataKey="prs" stroke="#58a6ff" strokeWidth={2} fillOpacity={1} fill="url(#colorPrs)" />
                 </AreaChart>
               </ResponsiveContainer>
+              {!hasWeeklyActivity ? (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6">
+                  <div className="max-w-md rounded-2xl border border-[var(--github-border)]/80 bg-[#161b22]/90 px-4 py-3 text-center shadow-xl backdrop-blur">
+                    <p className="text-sm font-medium text-white">{t('dashboard.activity.emptyTitle')}</p>
+                    <p className="mt-1 text-xs leading-5 text-[var(--github-text-secondary)]">
+                      {weeklyActivityEmptyMessage}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -308,7 +895,7 @@ export function Dashboard() {
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px' }} />
+                  <Tooltip contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px', color: '#e6edf3' }} itemStyle={{ color: '#e6edf3' }} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -328,9 +915,9 @@ export function Dashboard() {
             </div>
           </CardContent>
         </Card>
-      </div>
+          </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card className="card-github">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-base font-semibold text-white">
@@ -386,10 +973,8 @@ export function Dashboard() {
                       <div className={`mt-2 h-2 w-2 flex-shrink-0 rounded-full ${activity.risk === 'high' ? 'bg-red-400' : activity.risk === 'medium' ? 'bg-yellow-400' : 'bg-green-400'}`} />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm text-white">{activity.title}</p>
-                        <div className="mt-1 flex items-center gap-2">
-                          <Badge variant="secondary" className="bg-[var(--github-border)] text-xs text-[var(--github-text-secondary)]">
-                            {activity.repo}
-                          </Badge>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <EventContextChips event={activity.event} className="min-w-0 max-w-full" />
                           <span className="text-xs text-[var(--github-text-secondary)]">{activity.time}</span>
                         </div>
                       </div>
@@ -409,9 +994,9 @@ export function Dashboard() {
             </div>
           </CardContent>
         </Card>
-      </div>
+          </div>
 
-      <Card className="card-github">
+          <Card className="card-github">
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base font-semibold text-white">
             <Users className="h-4 w-4 text-[var(--github-accent)]" />
@@ -419,42 +1004,59 @@ export function Dashboard() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="h-64">
+          <div className="relative h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={activityData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#30363d" vertical={false} />
                 <XAxis dataKey="name" stroke="#8b949e" fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis stroke="#8b949e" fontSize={12} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px' }} />
+                <Tooltip contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px', color: '#e6edf3' }} itemStyle={{ color: '#e6edf3' }} />
                 <Bar dataKey="commits" fill="#ff4d00" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="issues" fill="#f85149" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+            {!hasWeeklyActivity ? (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6">
+                <div className="max-w-md rounded-2xl border border-[var(--github-border)]/80 bg-[#161b22]/90 px-4 py-3 text-center shadow-xl backdrop-blur">
+                  <p className="text-sm font-medium text-white">{t('dashboard.activity.emptyTitle')}</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--github-text-secondary)]">
+                    {weeklyActivityEmptyMessage}
+                  </p>
+                </div>
+              </div>
+            ) : null}
           </div>
         </CardContent>
-      </Card>
+          </Card>
 
-      {repositoriesQuery.isError || (hasRepository && (statsQuery.isError || recentEventsQuery.isError)) ? (
-        <Card className="card-github">
-          <CardContent className="flex items-center justify-between gap-4 p-4">
-            <div className="text-sm text-red-400">{t('dashboard.error.partialLoadFailed')}</div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              onClick={() => {
-                repositoriesQuery.refetch();
-                statsQuery.refetch();
-                recentEventsQuery.refetch();
-                pendingApprovalsQuery.refetch();
-                unreadNotificationsQuery.refetch();
-              }}
-            >
-              <RefreshCcw className="h-4 w-4" />
-              {t('dashboard.error.retry')}
-            </Button>
-          </CardContent>
-        </Card>
+          {(statsQuery.isError ||
+            recentEventsQuery.isError ||
+            activityQuery.isError ||
+            pendingApprovalsQuery.isError ||
+            unreadNotificationsQuery.isError) ? (
+            <Card className="card-github">
+              <CardContent className="flex items-center justify-between gap-4 p-4">
+                <div className="text-sm text-red-400">{t('dashboard.error.partialLoadFailed')}</div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => {
+                    repositoriesQuery.refetch();
+                    statsQuery.refetch();
+                    recentEventsQuery.refetch();
+                    activityQuery.refetch();
+                    pendingApprovalsQuery.refetch();
+                    unreadNotificationsQuery.refetch();
+                  }}
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                  {t('dashboard.error.retry')}
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
+        </>
       ) : null}
     </div>
   );

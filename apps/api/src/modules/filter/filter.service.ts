@@ -241,4 +241,20 @@ export class FilterService {
     // 默认不拦截
     return { action: FilterAction.INCLUDE };
   }
+
+  /**
+   * 检查用户是否有活跃规则引用了指定字段。
+   * 用于判断是否需要等待 AI 分析结果再做通知决策。
+   */
+  async hasRuleReferencingField(userId: string, field: string): Promise<boolean> {
+    const rules = await prisma.filterRule.findMany({
+      where: { userId, isActive: true },
+      select: { conditions: true },
+    });
+
+    return rules.some((rule) => {
+      const conditions = (rule.conditions as Array<{ field: string }>) || [];
+      return conditions.some((c) => c.field === field);
+    });
+  }
 }

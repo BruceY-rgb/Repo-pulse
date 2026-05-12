@@ -1,15 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { prisma, EventType } from '@repo-pulse/database';
+import {
+  buildEventScopeWhere,
+  normalizeRepositoryBranchScopes,
+  parseRepositoryBranchScopesParam,
+} from '../../common/utils/repository-branch-scope';
 
 @Injectable()
 export class DashboardService {
   private readonly logger = new Logger(DashboardService.name);
 
-  /**
-   * 获取概览统计数据
-   */
-  async getOverview(userId: string) {
-    // 获取用户的所有仓库
+  private async resolveRepositoryIds(
+    userId: string,
+    repositoryIdsParam?: string,
+  ): Promise<string[]> {
     const repositories = await prisma.repository.findMany({
       where: {
         users: { some: { userId } },
@@ -17,7 +21,39 @@ export class DashboardService {
       select: { id: true },
     });
 
-    const repositoryIds = repositories.map((r: { id: string }) => r.id);
+    const accessibleRepositoryIds = repositories.map((repository: { id: string }) => repository.id);
+
+    if (!repositoryIdsParam) {
+      return accessibleRepositoryIds;
+    }
+
+    const requestedRepositoryIds = repositoryIdsParam
+      .split(',')
+      .map((repositoryId) => repositoryId.trim())
+      .filter(Boolean);
+
+    if (requestedRepositoryIds.length === 0) {
+      return [];
+    }
+
+    const accessibleRepositoryIdSet = new Set(accessibleRepositoryIds);
+    return requestedRepositoryIds.filter((repositoryId) => accessibleRepositoryIdSet.has(repositoryId));
+  }
+
+  /**
+   * 获取概览统计数据
+   */
+  async getOverview(
+    userId: string,
+    repositoryIdsParam?: string,
+    repositoryBranchScopesParam?: string,
+  ) {
+    const repositoryIds = await this.resolveRepositoryIds(userId, repositoryIdsParam);
+    const repositoryBranchScopes = normalizeRepositoryBranchScopes(
+      repositoryIds,
+      parseRepositoryBranchScopesParam(repositoryBranchScopesParam),
+    );
+    const eventScopeWhere = buildEventScopeWhere(repositoryIds, repositoryBranchScopes);
 
     if (repositoryIds.length === 0) {
       return {
@@ -31,7 +67,7 @@ export class DashboardService {
     // 统计 Open PRs
     const openPRs = await prisma.event.count({
       where: {
-        repositoryId: { in: repositoryIds },
+        ...eventScopeWhere,
         type: EventType.PR_OPENED,
       },
     });
@@ -41,16 +77,16 @@ export class DashboardService {
     today.setHours(0, 0, 0, 0);
     const commitsToday = await prisma.event.count({
       where: {
-        repositoryId: { in: repositoryIds },
+        ...eventScopeWhere,
         type: EventType.PUSH,
-        createdAt: { gte: today },
+        occurredAt: { gte: today },
       },
     });
 
     // 统计 Open Issues
     const openIssues = await prisma.event.count({
       where: {
-        repositoryId: { in: repositoryIds },
+        ...eventScopeWhere,
         type: EventType.ISSUE_OPENED,
       },
     });
@@ -66,15 +102,17 @@ export class DashboardService {
   /**
    * 获取活动图表数据
    */
-  async getActivity(userId: string, days: number = 7) {
-    const repositories = await prisma.repository.findMany({
-      where: {
-        users: { some: { userId } },
-      },
-      select: { id: true },
-    });
-
-    const repositoryIds = repositories.map((r: { id: string }) => r.id);
+  async getActivity(
+    userId: string,
+    days: number = 7,
+    repositoryIdsParam?: string,
+    repositoryBranchScopesParam?: string,
+  ) {
+    const repositoryIds = await this.resolveRepositoryIds(userId, repositoryIdsParam);
+    const repositoryBranchScopes = normalizeRepositoryBranchScopes(
+      repositoryIds,
+      parseRepositoryBranchScopesParam(repositoryBranchScopesParam),
+    );
 
     if (repositoryIds.length === 0) {
       // 返回空数据
@@ -95,12 +133,12 @@ export class DashboardService {
 
     const events = await prisma.event.findMany({
       where: {
-        repositoryId: { in: repositoryIds },
-        createdAt: { gte: startDate },
+        ...buildEventScopeWhere(repositoryIds, repositoryBranchScopes),
+        occurredAt: { gte: startDate },
       },
       select: {
         type: true,
-        createdAt: true,
+        occurredAt: true,
       },
     });
 
@@ -117,7 +155,11 @@ export class DashboardService {
 
     // 统计事件
     for (const event of events) {
-      const key = event.createdAt.toLocaleDateString('en-US', { weekday: 'short' });
+      if (!event.occurredAt) {
+        continue;
+      }
+
+      const key = event.occurredAt.toLocaleDateString('en-US', { weekday: 'short' });
       const current = activityMap.get(key);
       if (current) {
         if (event.type === EventType.PUSH) {
@@ -146,16 +188,36 @@ export class DashboardService {
   /**
    * 获取最近活动
    */
-  async getRecentActivity(userId: string, limit: number = 10) {
+  async getRecentActivity(
+    userId: string,
+    limit: number = 10,
+    repositoryIdsParam?: string,
+    repositoryBranchScopesParam?: string,
+  ) {
     const repositories = await prisma.repository.findMany({
       where: {
         users: { some: { userId } },
       },
-      select: { id: true, name: true },
+      select: { id: true, name: true, fullName: true },
     });
 
-    const repositoryIds = repositories.map((r: { id: string; name: string }) => r.id);
-    const repoMap = new Map(repositories.map((r: { id: string; name: string }) => [r.id, r.name]));
+    const accessibleRepositoryIdSet = new Set(
+      await this.resolveRepositoryIds(userId, repositoryIdsParam),
+    );
+    const repositoriesInScope = repositories.filter((repository) =>
+      accessibleRepositoryIdSet.has(repository.id),
+    );
+    const repositoryIds = repositoriesInScope.map((repository) => repository.id);
+    const repositoryBranchScopes = normalizeRepositoryBranchScopes(
+      repositoryIds,
+      parseRepositoryBranchScopesParam(repositoryBranchScopesParam),
+    );
+    const repoMap = new Map(
+      repositoriesInScope.map((repository) => [
+        repository.id,
+        repository.fullName || repository.name,
+      ]),
+    );
 
     if (repositoryIds.length === 0) {
       return [];
@@ -163,9 +225,9 @@ export class DashboardService {
 
     const events = await prisma.event.findMany({
       where: {
-        repositoryId: { in: repositoryIds },
+        ...buildEventScopeWhere(repositoryIds, repositoryBranchScopes),
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { occurredAt: 'desc' },
       take: limit,
       select: {
         id: true,
@@ -173,19 +235,40 @@ export class DashboardService {
         action: true,
         title: true,
         author: true,
-        createdAt: true,
+        occurredAt: true,
         repositoryId: true,
+        branch: true,
+        sourceBranch: true,
+        targetBranch: true,
+        branches: true,
       },
     });
 
-    return events.map((event: { id: string; type: string; action: string | null; title: string | null; author: string | null; repositoryId: string; createdAt: Date }) => ({
+    return events.map((event: {
+      id: string;
+      type: string;
+      action: string | null;
+      title: string | null;
+      author: string | null;
+      repositoryId: string;
+      occurredAt: Date | null;
+      branch: string | null;
+      sourceBranch: string | null;
+      targetBranch: string | null;
+      branches: string[];
+    }) => ({
       id: event.id,
       type: event.type,
       action: event.action,
       title: event.title,
       author: event.author,
       repo: repoMap.get(event.repositoryId) || 'Unknown',
-      time: this.getRelativeTime(event.createdAt),
+      branch: event.branch,
+      sourceBranch: event.sourceBranch,
+      targetBranch: event.targetBranch,
+      branches: event.branches,
+      occurredAt: event.occurredAt?.toISOString() ?? null,
+      time: this.getRelativeTime(event.occurredAt ?? new Date()),
     }));
   }
 

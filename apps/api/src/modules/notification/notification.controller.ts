@@ -5,18 +5,14 @@ import {
   Delete,
   Body,
   Param,
-  ParseUUIDPipe,
   Query,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import {
-  NotificationService,
-  NotificationPreferences,
-  SendNotificationDto,
-} from './notification.service';
-import type { Notification, NotificationStatus, NotificationChannel } from '@repo-pulse/database';
+import { NotificationService, NotificationPreferences } from './notification.service';
+import { SendNotificationDto, UpdateNotificationPreferencesDto } from './dto/notification.dto';
+import type { Notification, NotificationStatus } from '@repo-pulse/database';
 
 @Controller('notifications')
 @UseGuards(AuthGuard('jwt'))
@@ -39,7 +35,7 @@ export class NotificationController {
   @Post('preferences')
   async updatePreferences(
     @CurrentUser() user: { sub: string },
-    @Body() prefs: Partial<NotificationPreferences>,
+    @Body() prefs: UpdateNotificationPreferencesDto,
   ): Promise<NotificationPreferences> {
     return this.notificationService.updatePreferences(user.sub, prefs);
   }
@@ -67,8 +63,10 @@ export class NotificationController {
   @Get('unread-count')
   async getUnreadCount(
     @CurrentUser() user: { sub: string },
+    @Query('repositoryIds') repositoryIds?: string,
+    @Query('branchScopes') branchScopes?: string,
   ): Promise<{ count: number }> {
-    const count = await this.notificationService.getUnreadCount(user.sub);
+    const count = await this.notificationService.getUnreadCount(user.sub, repositoryIds, branchScopes);
     return { count };
   }
 
@@ -78,7 +76,7 @@ export class NotificationController {
   @Post(':id/read')
   async markAsRead(
     @CurrentUser() user: { sub: string },
-    @Param('id', ParseUUIDPipe) notificationId: string,
+    @Param('id') notificationId: string,
   ): Promise<{ success: boolean }> {
     await this.notificationService.markAsRead(notificationId, user.sub);
     return { success: true };
@@ -101,7 +99,7 @@ export class NotificationController {
   @Delete(':id')
   async deleteNotification(
     @CurrentUser() user: { sub: string },
-    @Param('id', ParseUUIDPipe) notificationId: string,
+    @Param('id') notificationId: string,
   ): Promise<{ success: boolean }> {
     await this.notificationService.deleteNotification(notificationId, user.sub);
     return { success: true };

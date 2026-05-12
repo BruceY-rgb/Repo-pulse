@@ -3,12 +3,18 @@ import { Logger, BadRequestException } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PrismaClient, EventType } from '@repo-pulse/database';
 import { EventService } from './event.service';
+import {
+  mergeMetadata,
+  resolveGithubWebhookOccurredAt,
+  resolveGitlabWebhookOccurredAt,
+} from './event-time.util';
 
 interface WebhookEventJob {
   repositoryId: string;
   platform: 'github' | 'gitlab';
   eventType: string;
   payload: Record<string, unknown>;
+  receivedAt?: string;
 }
 
 @Processor('webhook-events')
@@ -23,6 +29,7 @@ export class EventProcessor extends WorkerHost {
 
   async process(job: Job<WebhookEventJob>): Promise<void> {
     const { repositoryId, platform, eventType, payload } = job.data;
+    const receivedAt = job.data.receivedAt ? new Date(job.data.receivedAt) : new Date();
 
     this.logger.log(`Processing ${eventType} event for repository ${repositoryId}`);
 
@@ -38,6 +45,10 @@ export class EventProcessor extends WorkerHost {
 
       // 标准化事件数据
       const eventData = this.normalizeEventData(platform, eventType, payload);
+      const timeResolution =
+        platform === 'github'
+          ? resolveGithubWebhookOccurredAt(eventData.type, payload, receivedAt)
+          : resolveGitlabWebhookOccurredAt(eventData.type, payload, receivedAt);
 
       // 存储事件
       await this.eventService.create({
@@ -50,8 +61,12 @@ export class EventProcessor extends WorkerHost {
         authorAvatar: eventData.authorAvatar,
         externalId,
         externalUrl: eventData.externalUrl,
-        metadata: eventData.metadata,
+        branch: eventData.branch,
+        sourceBranch: eventData.sourceBranch,
+        targetBranch: eventData.targetBranch,
+        metadata: mergeMetadata(eventData.metadata, timeResolution.metadataPatch),
         rawPayload: payload,
+        occurredAt: timeResolution.occurredAt,
       });
 
       this.logger.log(`Event ${externalId} processed successfully`);
@@ -126,6 +141,9 @@ export class EventProcessor extends WorkerHost {
     author: string;
     authorAvatar?: string;
     externalUrl?: string;
+    branch?: string;
+    sourceBranch?: string;
+    targetBranch?: string;
     metadata: Record<string, unknown>;
   } {
     if (platform === 'github') {
@@ -146,6 +164,9 @@ export class EventProcessor extends WorkerHost {
     author: string;
     authorAvatar?: string;
     externalUrl?: string;
+    branch?: string;
+    sourceBranch?: string;
+    targetBranch?: string;
     metadata: Record<string, unknown>;
   } {
     const repo = payload.repository as { full_name: string } | undefined;
@@ -163,6 +184,7 @@ export class EventProcessor extends WorkerHost {
           author: commits?.[0]?.author?.name || sender?.login || 'unknown',
           authorAvatar: sender?.avatar_url,
           externalUrl: undefined,
+          branch: ref?.replace('refs/heads/', ''),
           metadata: {
             branch: ref?.replace('refs/heads/', ''),
             commitsCount: commits?.length || 0,
@@ -185,6 +207,9 @@ export class EventProcessor extends WorkerHost {
           author: pr?.user?.login || 'unknown',
           authorAvatar: pr?.user?.avatar_url,
           externalUrl: pr?.html_url,
+          branch: (payload.pull_request as { base?: { ref?: string } } | undefined)?.base?.ref,
+          sourceBranch: (payload.pull_request as { head?: { ref?: string } } | undefined)?.head?.ref,
+          targetBranch: (payload.pull_request as { base?: { ref?: string } } | undefined)?.base?.ref,
           metadata: {
             prNumber: pr?.number,
           },
@@ -207,6 +232,9 @@ export class EventProcessor extends WorkerHost {
           author: pr?.user?.login || 'unknown',
           authorAvatar: pr?.user?.avatar_url,
           externalUrl: pr?.html_url,
+          branch: (payload.pull_request as { base?: { ref?: string } } | undefined)?.base?.ref,
+          sourceBranch: (payload.pull_request as { head?: { ref?: string } } | undefined)?.head?.ref,
+          targetBranch: (payload.pull_request as { base?: { ref?: string } } | undefined)?.base?.ref,
           metadata: {
             prNumber: pr?.number,
             mergedAt: pr?.merged_at,
@@ -229,6 +257,9 @@ export class EventProcessor extends WorkerHost {
           author: pr?.user?.login || 'unknown',
           authorAvatar: pr?.user?.avatar_url,
           externalUrl: pr?.html_url,
+          branch: (payload.pull_request as { base?: { ref?: string } } | undefined)?.base?.ref,
+          sourceBranch: (payload.pull_request as { head?: { ref?: string } } | undefined)?.head?.ref,
+          targetBranch: (payload.pull_request as { base?: { ref?: string } } | undefined)?.base?.ref,
           metadata: {
             prNumber: pr?.number,
           },
@@ -250,6 +281,9 @@ export class EventProcessor extends WorkerHost {
           author: review?.user?.login || sender?.login || 'unknown',
           authorAvatar: review?.user?.avatar_url || sender?.avatar_url,
           externalUrl: pr?.html_url,
+          branch: (payload.pull_request as { base?: { ref?: string } } | undefined)?.base?.ref,
+          sourceBranch: (payload.pull_request as { head?: { ref?: string } } | undefined)?.head?.ref,
+          targetBranch: (payload.pull_request as { base?: { ref?: string } } | undefined)?.base?.ref,
           metadata: {
             prNumber: pr?.number,
           },
@@ -347,6 +381,7 @@ export class EventProcessor extends WorkerHost {
           author: sender?.login || 'unknown',
           authorAvatar: sender?.avatar_url,
           externalUrl: undefined,
+          branch: ref,
           metadata: {
             branch: ref,
           },
@@ -362,6 +397,7 @@ export class EventProcessor extends WorkerHost {
           author: sender?.login || 'unknown',
           authorAvatar: sender?.avatar_url,
           externalUrl: undefined,
+          branch: ref,
           metadata: {
             branch: ref,
             refType,
@@ -392,6 +428,9 @@ export class EventProcessor extends WorkerHost {
     author: string;
     authorAvatar?: string;
     externalUrl?: string;
+    branch?: string;
+    sourceBranch?: string;
+    targetBranch?: string;
     metadata: Record<string, unknown>;
   } {
     const project = payload.project as { path_with_namespace: string; web_url: string } | undefined;
@@ -410,6 +449,7 @@ export class EventProcessor extends WorkerHost {
           author: commits?.[0]?.author?.name || user?.username || 'unknown',
           authorAvatar: user?.avatar_url,
           externalUrl: project?.web_url,
+          branch: ref?.replace('refs/heads/', ''),
           metadata: {
             branch: ref?.replace('refs/heads/', ''),
             commitsCount: commits?.length || 0,
@@ -425,6 +465,9 @@ export class EventProcessor extends WorkerHost {
           author: String(objectAttributes?.author_id || user?.username || 'unknown'),
           authorAvatar: user?.avatar_url,
           externalUrl: String(objectAttributes?.url || project?.web_url),
+          branch: String(objectAttributes?.target_branch || '') || undefined,
+          sourceBranch: String(objectAttributes?.source_branch || '') || undefined,
+          targetBranch: String(objectAttributes?.target_branch || '') || undefined,
           metadata: {
             mrIid: objectAttributes?.iid,
           },
@@ -439,6 +482,9 @@ export class EventProcessor extends WorkerHost {
           author: String(objectAttributes?.author_id || user?.username || 'unknown'),
           authorAvatar: user?.avatar_url,
           externalUrl: String(objectAttributes?.url || project?.web_url),
+          branch: String(objectAttributes?.target_branch || '') || undefined,
+          sourceBranch: String(objectAttributes?.source_branch || '') || undefined,
+          targetBranch: String(objectAttributes?.target_branch || '') || undefined,
           metadata: {
             mrIid: objectAttributes?.iid,
           },
@@ -453,6 +499,9 @@ export class EventProcessor extends WorkerHost {
           author: String(objectAttributes?.author_id || user?.username || 'unknown'),
           authorAvatar: user?.avatar_url,
           externalUrl: String(objectAttributes?.url || project?.web_url),
+          branch: String(objectAttributes?.target_branch || '') || undefined,
+          sourceBranch: String(objectAttributes?.source_branch || '') || undefined,
+          targetBranch: String(objectAttributes?.target_branch || '') || undefined,
           metadata: {
             mrIid: objectAttributes?.iid,
           },
@@ -468,6 +517,9 @@ export class EventProcessor extends WorkerHost {
           author: user?.username || 'unknown',
           authorAvatar: user?.avatar_url,
           externalUrl: String(objectAttributes?.url || project?.web_url),
+          branch: String(objectAttributes?.target_branch || '') || undefined,
+          sourceBranch: String(objectAttributes?.source_branch || '') || undefined,
+          targetBranch: String(objectAttributes?.target_branch || '') || undefined,
           metadata: {
             mrIid: objectAttributes?.iid,
           },
