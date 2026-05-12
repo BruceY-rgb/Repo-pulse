@@ -93,6 +93,14 @@ export const approvalService = {
   },
 
   /**
+   * 删除审批记录
+   */
+  async deleteApproval(approvalId: string): Promise<{ success: boolean }> {
+    const { data } = await apiClient.delete<ApiResponse<{ success: boolean }>>(`/approvals/${approvalId}`);
+    return data.data;
+  },
+
+  /**
    * 编辑后审批
    */
   async editAndApprove(approvalId: string, editedContent: string, comment?: string): Promise<Approval> {

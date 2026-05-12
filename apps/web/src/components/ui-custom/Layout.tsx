@@ -1,4 +1,4 @@
-import { useMemo, useState, type ElementType, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type ElementType, type FormEvent } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   BookOpen,
@@ -52,6 +52,7 @@ import {
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useUnreadNotificationCountQuery } from '@/hooks/queries/use-notification-queries';
 import { useRepositoryListQuery } from '@/hooks/queries/use-repository-queries';
+import { approvalService } from '@/services/approval.service';
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
 
 interface NavItem {
@@ -77,6 +78,16 @@ export function Layout() {
     [repositoriesQuery.data],
   );
   const unreadNotificationCount = unreadNotificationCountQuery.data?.count ?? 0;
+  const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
+
+  useEffect(function () {
+    function refresh() {
+      approvalService.getPendingCount().then(function (r) { setPendingApprovalCount(r?.count ?? 0); }).catch(function () {});
+    }
+    refresh();
+    window.addEventListener('approval-updated', refresh);
+    return function () { window.removeEventListener('approval-updated', refresh); };
+  }, []);
 
   useRepositoryRealtimeSubscription(repositoryIds);
 
@@ -85,7 +96,7 @@ export function Layout() {
       { path: '/dashboard', labelKey: 'app.nav.dashboard', icon: LayoutDashboard },
       { path: '/repositories', labelKey: 'app.nav.repositories', icon: GitBranch },
       { path: '/analysis', labelKey: 'app.nav.analysis', icon: Brain },
-      { path: '/approvals', labelKey: 'app.nav.approvals', icon: CheckSquare },
+      { path: '/approvals', labelKey: 'app.nav.approvals', icon: CheckSquare, badgeCount: pendingApprovalCount },
       {
         path: '/notifications',
         labelKey: 'app.nav.notifications',
@@ -95,7 +106,7 @@ export function Layout() {
       { path: '/reports', labelKey: 'app.nav.reports', icon: FileText },
       { path: '/settings', labelKey: 'app.nav.settings', icon: Settings },
     ],
-    [unreadNotificationCount],
+    [unreadNotificationCount, pendingApprovalCount],
   );
 
   const handleLogout = async () => {

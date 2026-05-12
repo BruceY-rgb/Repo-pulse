@@ -75,4 +75,11 @@ export const analysisService = {
     >(`/ai/trigger/${eventId}`, { force });
     return data.data;
   },
+
+  async deleteAnalysis(analysisId: string): Promise<{ success: boolean }> {
+    const { data } = await apiClient.delete<
+      ApiResponse<{ success: boolean }>
+    >(`/ai/analysis/${analysisId}`);
+    return data.data;
+  },
 };

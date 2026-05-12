@@ -2,11 +2,12 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Param,
-  ParseUUIDPipe,
   Query,
   UseGuards,
   Body,
+  NotFoundException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -53,7 +54,7 @@ export class ApprovalController {
    */
   @Get(':id')
   async getById(
-    @Param('id', ParseUUIDPipe) approvalId: string,
+    @Param('id') approvalId: string,
   ): Promise<Approval | null> {
     return this.approvalService.getById(approvalId);
   }
@@ -63,11 +64,11 @@ export class ApprovalController {
    */
   @Post(':id/approve')
   async approve(
-    @CurrentUser() user: { userId: string },
-    @Param('id', ParseUUIDPipe) approvalId: string,
+    @CurrentUser() user: { sub: string },
+    @Param('id') approvalId: string,
     @Body() body: { comment?: string },
   ): Promise<Approval> {
-    return this.approvalService.approve(approvalId, user.userId, body.comment);
+    return this.approvalService.approve(approvalId, user.sub, body.comment);
   }
 
   /**
@@ -75,11 +76,22 @@ export class ApprovalController {
    */
   @Post(':id/reject')
   async reject(
-    @CurrentUser() user: { userId: string },
-    @Param('id', ParseUUIDPipe) approvalId: string,
+    @CurrentUser() user: { sub: string },
+    @Param('id') approvalId: string,
     @Body() body: { comment?: string },
   ): Promise<Approval> {
-    return this.approvalService.reject(approvalId, user.userId, body.comment);
+    return this.approvalService.reject(approvalId, user.sub, body.comment);
+  }
+
+  /**
+   * 删除审批记录
+   */
+  @Delete(':id')
+  async delete(@Param('id') approvalId: string) {
+    const approval = await this.approvalService.getById(approvalId);
+    if (!approval) throw new NotFoundException('Approval not found');
+    await this.approvalService.delete(approvalId);
+    return { success: true };
   }
 
   /**
@@ -87,13 +99,13 @@ export class ApprovalController {
    */
   @Post(':id/edit')
   async editAndApprove(
-    @CurrentUser() user: { userId: string },
-    @Param('id', ParseUUIDPipe) approvalId: string,
+    @CurrentUser() user: { sub: string },
+    @Param('id') approvalId: string,
     @Body() body: { editedContent: string; comment?: string },
   ): Promise<Approval> {
     return this.approvalService.editAndApprove(
       approvalId,
-      user.userId,
+      user.sub,
       body.editedContent,
       body.comment,
     );
