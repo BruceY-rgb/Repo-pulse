@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, startTransition } from 'react';
 import {
   GitPullRequest,
   CheckCircle,
@@ -44,7 +44,7 @@ function ListPanel({ status, selectedId, onSelect, onDelete }: { status: Approva
       .finally(function () { setLoading(false); });
   }, [status]);
 
-  useEffect(function () { load(); }, [load]);
+  useEffect(function () { startTransition(() => { load(); }); }, [load]);
 
   if (loading) return <div className="flex items-center justify-center py-16"><Spinner className="h-8 w-8 text-[var(--github-accent)]" /></div>;
   if (items.length === 0) return <div className="text-center py-16"><GitPullRequest className="w-16 h-16 mx-auto mb-4 text-[var(--github-text-secondary)]" /><h3 className="text-lg font-medium text-white mb-2">No {status.toLowerCase()} approvals</h3></div>;

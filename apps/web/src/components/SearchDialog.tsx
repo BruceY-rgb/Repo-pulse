@@ -60,10 +60,6 @@ export function SearchDialog({ isOpen, onClose, onSectionChange }: SearchDialogP
     : searchData;
 
   useEffect(() => {
-    setSelectedIndex(0);
-  }, [query]);
-
-  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return;
 
@@ -113,7 +109,7 @@ export function SearchDialog({ isOpen, onClose, onSectionChange }: SearchDialogP
             <Input
               placeholder="Search documentation..."
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => { setQuery(e.target.value); setSelectedIndex(0); }}
               className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
               autoFocus
             />

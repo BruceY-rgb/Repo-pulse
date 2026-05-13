@@ -134,6 +134,18 @@ const translations: Record<Language, Record<string, string>> = {
     'app.nav.notifications': 'Notifications',
     'app.nav.reports': 'Reports',
     'app.nav.settings': 'Settings',
+    'app.nav.chats': 'Chats',
+    'app.nav.feed': 'Feed',
+    'app.nav.discover': 'Discover',
+    'app.nav.inbox': 'Inbox',
+
+    // Agent workbench
+    'app.layout.agent.workbench': 'Agent Workbench',
+    'app.layout.agent.placeholder': 'No suggestion yet',
+    'app.layout.agent.empty': 'Click Inspect on an event to start analysis',
+
+    // Feed
+    'app.feed.empty': 'Activity feed from followed repositories will appear here.',
 
     // Auth
     'auth.login.title': 'Sign in to Repo-Pulse',
@@ -741,6 +753,18 @@ const translations: Record<Language, Record<string, string>> = {
     'app.nav.notifications': '通知',
     'app.nav.reports': '报告',
     'app.nav.settings': '设置',
+    'app.nav.chats': '会话',
+    'app.nav.feed': '动态',
+    'app.nav.discover': '发现',
+    'app.nav.inbox': '待处理',
+
+    // Agent workbench (Chinese)
+    'app.layout.agent.workbench': 'Agent 工作台',
+    'app.layout.agent.placeholder': '暂无建议',
+    'app.layout.agent.empty': '点击事件的 Inspect 开始分析',
+
+    // Feed (Chinese)
+    'app.feed.empty': '关注仓库的动态将在这里显示',
 
     // Auth
     'auth.login.title': '登录 Repo-Pulse',
@@ -1241,6 +1265,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useLanguage() {
   const context = useContext(LanguageContext);
   if (context === undefined) {

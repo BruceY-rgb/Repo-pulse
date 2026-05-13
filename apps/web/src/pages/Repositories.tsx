@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, startTransition } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -117,7 +117,9 @@ export function Repositories() {
   }, [searchInput]);
 
   useEffect(() => {
-    setKeyword(searchParams.get('keyword') ?? '');
+    startTransition(() => {
+      setKeyword(searchParams.get('keyword') ?? '');
+    });
   }, [searchParams]);
 
   const repositories = useMemo(

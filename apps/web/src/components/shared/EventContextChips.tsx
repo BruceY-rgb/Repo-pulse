@@ -10,6 +10,7 @@ interface EventContextChipsProps {
   className?: string;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function formatEventType(type?: string | null) {
   if (!type) {
     return null;
@@ -22,6 +23,7 @@ export function formatEventType(type?: string | null) {
     .join(' ');
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function buildBranchLabels(
   event?: Pick<Event, 'branch' | 'sourceBranch' | 'targetBranch' | 'branches'> | null,
 ) {

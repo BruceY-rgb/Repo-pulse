@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, startTransition } from 'react';
 
 interface UseSSEOptions<T> {
   url: string;
@@ -29,10 +29,12 @@ export function useSSE<T = string>(options: UseSSEOptions<T>): SSEReturn<T> {
   useEffect(() => {
     if (!enabled) return;
 
-    setIsLoading(true);
-    setError(null);
-    setIsComplete(false);
-    setData(null);
+    startTransition(() => {
+      setIsLoading(true);
+      setError(null);
+      setIsComplete(false);
+      setData(null);
+    });
 
     const eventSource = new EventSource(url);
     eventSourceRef.current = eventSource;
@@ -55,7 +57,7 @@ export function useSSE<T = string>(options: UseSSEOptions<T>): SSEReturn<T> {
             onComplete?.();
           }
         }
-      } catch (e) {
+      } catch {
         // 如果不是 JSON，直接作为字符串处理
         setData(event.data as T);
       }
