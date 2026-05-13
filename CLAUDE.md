@@ -112,3 +112,55 @@ Repo-Pulse 是一个 AI 驱动的代码仓库监控与管理平台，采用 Mono
 - **feature/xxx** - 功能分支，基于 develop 创建
 - **release/x.y** - 发布分支
 - **hotfix/x.y.z** - 热修复分支
+- **develop-electron** - Electron 桌面端集成分支，基于 develop
+- **feature/electron-xxx** - Electron 相关功能分支，基于 develop-electron 创建
+
+---
+
+# Electron 桌面端施工契约
+
+> 本章节为 develop-electron 分支的会话级施工约束，所有 Electron 相关开发必须遵守。
+
+## 1. 分支管理规范
+
+- **develop-electron** 是本次施工的集成分支，禁止直接在上面提交代码
+- 每个独立功能点必须从 develop-electron 创建对应的 feature 分支：
+  - `feature/electron-shell` — Electron 主进程 + 预加载 + 打包配置
+  - `feature/slack-layout` — Slack 风格四栏布局组件
+  - `feature/light-theme` — 浅色主题 CSS 变量替换
+  - `feature/kbar-search` — kbar 命令面板搜索
+  - `feature/electron-navigation` — 路由重组 + 导航联动
+- 每个 feature 分支完成后，合并回 develop-electron，交由用户审核验收
+- 验收通过后方可继续下一个 feature 分支
+
+## 2. 施工粒度与审核机制
+
+- 每次只修改一个逻辑相关的功能点
+- 每完成一个 feature 分支的施工，必须：
+  1. 运行 `pnpm --filter web typecheck` 和 `pnpm --filter web lint`
+  2. 运行 `pnpm --filter desktop typecheck`（如涉及 Electron）
+  3. 向用户汇报变更摘要
+  4. 等待用户验收确认
+- 用户验收通过后，合并到 develop-electron，然后创建下一个 feature 分支
+
+## 3. UI/UX 约束
+
+- 禁止使用任何 emoji（包括图标、文案、注释）
+- 左侧导航栏必须支持折叠/展开切换
+- 中间列表面板和右侧面板必须支持拖拽调整宽度（使用 react-resizable-panels）
+- 全局搜索功能使用 kbar 库实现（Cmd+K / Ctrl+K 命令面板）
+- 所有组件优先使用 kbar 的 useRegisterActions 动态注册搜索动作
+
+## 4. 复用优先原则
+
+- 现有页面组件（Dashboard/Repositories/Notifications/Settings/Approvals/AIAnalysis）内部逻辑一字不改
+- 所有 TanStack Query hooks、API services、WebSocket hooks 保持不变
+- 仅在外层布局（Layout → SlackLayout）和路由结构层面进行重组
+
+## 5. Electron 安全约束
+
+- contextIsolation: true
+- nodeIntegration: false
+- 通过 preload + contextBridge 暴露最小 IPC API
+- 外部链接使用 shell.openExternal
+- 禁止在 renderer 暴露 Node.js API 或敏感 Token
