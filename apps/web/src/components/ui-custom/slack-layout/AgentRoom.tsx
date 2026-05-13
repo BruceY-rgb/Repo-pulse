@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Bell,
   LayoutDashboard,
@@ -16,7 +18,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
 import { useRepositoryListQuery } from '@/hooks/queries/use-repository-queries';
 import { useDashboardRecentEventsQuery } from '@/hooks/queries/use-dashboard-queries';
-import type { Repository } from '@/types/api';
+import { cn } from '@/lib/utils';
+import type { Event, Repository } from '@/types/api';
 
 function avatarUrlForRepo(repo: Repository): string {
   const owner = repo.fullName.split('/')[0];
@@ -99,6 +102,289 @@ function EmptyState({ repo }: { repo: Repository }) {
         Repository events will appear here once webhooks are connected.
       </p>
     </div>
+  );
+}
+
+function authorFallback(author: string): string {
+  return author.trim().charAt(0).toUpperCase() || 'U';
+}
+
+function avatarUrlForAuthor(author: string, authorAvatar?: string | null): string | undefined {
+  if (authorAvatar) return authorAvatar;
+
+  const login = author.trim();
+  if (!/^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i.test(login)) {
+    return undefined;
+  }
+
+  return `https://github.com/${encodeURIComponent(login)}.png`;
+}
+
+function linkifyBareUrls(markdown: string): string {
+  return markdown.replace(
+    /(^|\s)((?:https?:\/\/|www\.)[^\s<>()]+[^\s<>().,!?;:'"`])/g,
+    (match, prefix: string, url: string) => {
+      const href = url.startsWith('www.') ? `https://${url}` : url;
+      return `${prefix}[${url}](${href})`;
+    },
+  );
+}
+
+const RAW_HTML_START = /<(details|summary|p|ul|ol|li|h[1-6]|a|blockquote|code|pre|strong|em|br|hr)\b/i;
+const ALLOWED_HTML_TAGS = new Set([
+  'a',
+  'blockquote',
+  'br',
+  'code',
+  'details',
+  'em',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'hr',
+  'li',
+  'ol',
+  'p',
+  'pre',
+  'span',
+  'strong',
+  'summary',
+  'ul',
+]);
+const ALLOWED_HTML_ATTRS = new Set(['href', 'title', 'open']);
+
+function isSafeUrl(value: string): boolean {
+  return /^(https?:|mailto:|#|\/)/i.test(value);
+}
+
+function sanitizeGithubHtml(html: string): string {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${html}</div>`, 'text/html');
+
+  const sanitizeNode = (node: Node) => {
+    Array.from(node.childNodes).forEach((child) => {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const element = child as HTMLElement;
+        const tagName = element.tagName.toLowerCase();
+
+        if (!ALLOWED_HTML_TAGS.has(tagName)) {
+          element.replaceWith(...Array.from(element.childNodes));
+          return;
+        }
+
+        Array.from(element.attributes).forEach((attribute) => {
+          const name = attribute.name.toLowerCase();
+          const value = attribute.value;
+
+          if (!ALLOWED_HTML_ATTRS.has(name) || name.startsWith('on')) {
+            element.removeAttribute(attribute.name);
+            return;
+          }
+
+          if (name === 'href' && !isSafeUrl(value)) {
+            element.removeAttribute(attribute.name);
+          }
+        });
+
+        if (tagName === 'a') {
+          element.setAttribute('target', '_blank');
+          element.setAttribute('rel', 'noreferrer');
+        }
+
+        sanitizeNode(element);
+      }
+    });
+  };
+
+  sanitizeNode(doc.body);
+  return doc.body.firstElementChild?.innerHTML ?? '';
+}
+
+function MarkdownRenderer({ children }: { children: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        a: ({ ...props }) => (
+          <a
+            {...props}
+            className="text-[#58a6ff] underline decoration-[#58a6ff]/40 underline-offset-2 transition-colors hover:text-[#79c0ff] hover:decoration-[#79c0ff]"
+            target="_blank"
+            rel="noreferrer"
+          />
+        ),
+        img: ({ ...props }) => (
+          <img
+            {...props}
+            className="my-2 max-h-20 max-w-full rounded border border-border bg-background object-contain"
+          />
+        ),
+        code: ({ className, children, ...props }) => {
+          const isBlock = className?.includes('language-');
+          if (isBlock) {
+            return (
+              <code
+                {...props}
+                className="block overflow-x-auto rounded-md bg-background px-3 py-2 text-xs text-foreground"
+              >
+                {children}
+              </code>
+            );
+          }
+
+          return (
+            <code
+              {...props}
+              className="rounded bg-background px-1 py-0.5 text-[0.92em] text-foreground"
+            >
+              {children}
+            </code>
+          );
+        },
+      }}
+    >
+      {linkifyBareUrls(children)}
+    </ReactMarkdown>
+  );
+}
+
+function MarkdownBubble({ children }: { children: string }) {
+  const htmlStart = children.search(RAW_HTML_START);
+
+  if (htmlStart === -1) {
+    return <MarkdownRenderer>{children}</MarkdownRenderer>;
+  }
+
+  const markdownPrefix = children.slice(0, htmlStart).trim();
+  const htmlContent = children.slice(htmlStart);
+
+  return (
+    <>
+      {markdownPrefix && <MarkdownRenderer>{markdownPrefix}</MarkdownRenderer>}
+      <div
+        className="github-html [&_a]:text-[#58a6ff] [&_a]:underline [&_a]:decoration-[#58a6ff]/40 [&_a]:underline-offset-2 [&_a:hover]:text-[#79c0ff] [&_a:hover]:decoration-[#79c0ff] [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_code]:rounded [&_code]:bg-background [&_code]:px-1 [&_code]:py-0.5 [&_details]:my-2 [&_details]:rounded-lg [&_details]:border [&_details]:border-border [&_details]:bg-background/40 [&_details]:px-3 [&_details]:py-2 [&_summary]:cursor-pointer [&_summary]:font-medium"
+        dangerouslySetInnerHTML={{ __html: sanitizeGithubHtml(htmlContent) }}
+      />
+    </>
+  );
+}
+
+function isLongMessage(markdown: string): boolean {
+  return markdown.length > 1200 || markdown.split(/\r?\n/).length > 18;
+}
+
+function hasTruncatedMarker(markdown: string): boolean {
+  return /(?:\.\.\.\s*)?\(?\[?truncated\]?\)?/i.test(markdown);
+}
+
+function extractFullChangelogUrl(markdown: string): string | null {
+  const htmlChangelogMatch = markdown.match(
+    /full\s+changelog[\s\S]{0,400}?<a\s+href="([^"]+)"/i,
+  );
+  if (htmlChangelogMatch?.[1]) {
+    return htmlChangelogMatch[1];
+  }
+
+  const fullChangelogMatch = markdown.match(
+    /full\s+changelog\s*:?\s*(https?:\/\/[^\s<>()"']+)/i,
+  );
+
+  return fullChangelogMatch?.[1] ?? null;
+}
+
+function fullSourceUrlForEvent(event: Event, markdown: string): string | null {
+  return extractFullChangelogUrl(markdown) ?? event.externalUrl ?? null;
+}
+
+function EventMessage({ event }: { event: Event }) {
+  const [expanded, setExpanded] = useState(false);
+  const risk = getRiskLevel(event.type);
+  const markdown = [event.title, event.body].filter(Boolean).join('\n\n');
+  const shouldCollapse = isLongMessage(markdown);
+  const isTruncated = hasTruncatedMarker(markdown);
+  const sourceUrl = isTruncated ? fullSourceUrlForEvent(event, markdown) : null;
+
+  return (
+    <article className="group flex items-start gap-3 px-5 py-4 transition-colors hover:bg-secondary/30">
+      <Avatar className="h-9 w-9 shrink-0 rounded-lg">
+        <AvatarImage
+          src={avatarUrlForAuthor(event.author, event.authorAvatar)}
+          className="object-cover"
+        />
+        <AvatarFallback className="rounded-lg bg-muted text-xs font-semibold text-muted-foreground">
+          {authorFallback(event.author)}
+        </AvatarFallback>
+      </Avatar>
+
+      <div className="min-w-0 flex-1">
+        <div className="mb-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="truncate text-sm font-semibold text-foreground">
+            {event.author || 'unknown'}
+          </span>
+          {event.occurredAt && (
+            <span className="text-xs text-muted-foreground">
+              {formatTime(event.occurredAt)}
+            </span>
+          )}
+          <Badge
+            variant={riskBadgeVariant(risk)}
+            className="h-4 px-1.5 py-0 text-[10px]"
+          >
+            {risk}
+          </Badge>
+          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            {event.type.replace(/_/g, ' ')}
+          </span>
+        </div>
+
+        <div className="max-w-3xl rounded-xl rounded-tl-sm border border-border bg-card/80 px-4 py-3 shadow-sm">
+          <div className="relative">
+            <div
+              className={cn(
+                'prose prose-invert max-w-none text-sm leading-relaxed prose-p:my-2 prose-headings:my-2 prose-headings:text-foreground prose-strong:text-foreground prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-2 prose-pre:bg-transparent prose-pre:p-0 prose-code:before:content-none prose-code:after:content-none',
+                shouldCollapse && !expanded && 'max-h-72 overflow-hidden',
+              )}
+            >
+              <MarkdownBubble>{markdown}</MarkdownBubble>
+            </div>
+            {shouldCollapse && !expanded && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-card via-card/90 to-transparent" />
+            )}
+          </div>
+          {shouldCollapse && (
+            <button
+              type="button"
+              className="mt-3 text-sm font-medium text-[#58a6ff] transition-colors hover:text-[#79c0ff] hover:underline"
+              onClick={() => setExpanded((current) => !current)}
+            >
+              {expanded ? 'Show less' : 'Show more'}
+            </button>
+          )}
+          {isTruncated && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
+              <span>This message was truncated upstream.</span>
+              {sourceUrl ? (
+                <a
+                  href={sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-[#58a6ff] underline decoration-[#58a6ff]/40 underline-offset-2 transition-colors hover:text-[#79c0ff]"
+                >
+                  View full changelog
+                </a>
+              ) : (
+                <span className="text-muted-foreground">
+                  No source link was provided.
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -204,54 +490,14 @@ export function AgentRoom() {
       </div>
 
       {/* Event stream */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         {events.length === 0 ? (
           <EmptyState repo={repo} />
         ) : (
-          <div className="divide-y divide-border">
-            {events.map((event) => {
-              const risk = getRiskLevel(event.type);
-              return (
-                <div
-                  key={event.id}
-                  className="flex items-start gap-3 px-4 py-3 hover:bg-secondary/50 transition-colors"
-                >
-                  <div className="h-8 w-8 shrink-0 rounded-lg bg-muted flex items-center justify-center">
-                    <span className="text-xs font-bold text-muted-foreground">
-                      {event.type.charAt(0).toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <Badge
-                        variant={riskBadgeVariant(risk)}
-                        className="text-[10px] px-1.5 py-0 h-4"
-                      >
-                        {risk}
-                      </Badge>
-                      <span className="text-sm font-medium text-foreground truncate">
-                        {event.title}
-                      </span>
-                    </div>
-                    {event.body && (
-                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                        {event.body}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-2 mt-1.5">
-                      {event.occurredAt && (
-                        <span className="text-[10px] text-muted-foreground">
-                          {formatTime(event.occurredAt)}
-                        </span>
-                      )}
-                      <span className="text-[10px] text-muted-foreground uppercase">
-                        {event.type.replace(/_/g, ' ')}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="py-2">
+            {events.map((event) => (
+              <EventMessage key={event.id} event={event} />
+            ))}
           </div>
         )}
       </ScrollArea>
