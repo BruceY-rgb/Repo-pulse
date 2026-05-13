@@ -10,6 +10,15 @@
       "cache": false,
       "persistent": true
     },
+    "desktop:dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true
+    },
+    "desktop:build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "release/**"]
+    },
     "lint": {
       "dependsOn": ["^build"]
     },

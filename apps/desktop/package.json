@@ -1,0 +1,22 @@
+{
+  "name": "@repo-pulse/desktop",
+  "private": true,
+  "version": "0.0.0",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "vite build --config vite.main.config.ts && mkdir -p dist/preload && cp src/preload/index.js dist/preload/ && ELECTRON_IS_DEV=1 electron .",
+    "build": "tsc --noEmit && vite build --config vite.main.config.ts && mkdir -p dist/preload && cp src/preload/index.js dist/preload/",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "@types/node": "^25.7.0",
+    "electron": "^36.0.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.4"
+  }
+}

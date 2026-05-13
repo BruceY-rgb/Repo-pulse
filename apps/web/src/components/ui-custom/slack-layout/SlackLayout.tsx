@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { Panel, Group, Separator } from 'react-resizable-panels';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { GlobalNav } from './GlobalNav';
 import { MiddlePanel } from './MiddlePanel';
@@ -37,12 +37,12 @@ export function SlackLayout() {
     <TooltipProvider>
       <div className="flex h-screen overflow-hidden">
         <GlobalNav />
-        <PanelGroup direction="horizontal" className="flex-1">
+        <Group direction="horizontal" className="flex-1">
           {/* Middle panel: context-sensitive list */}
           <Panel defaultSize={17} minSize={12} maxSize={30} className="min-w-0">
             <MiddlePanel section={activeSection} className="h-full" />
           </Panel>
-          <PanelResizeHandle className="w-1 bg-border hover:bg-primary/30 transition-colors active:bg-primary/50" />
+          <Separator className="w-1 bg-border hover:bg-primary/30 transition-colors active:bg-primary/50" />
 
           {/* Main content area */}
           <Panel defaultSize={rightPanelOpen ? 50 : 83} minSize={40} className="min-w-0 bg-background">
@@ -54,7 +54,7 @@ export function SlackLayout() {
           {/* Right panel handle (only visible when right panel is open) */}
           {rightPanelOpen && (
             <>
-              <PanelResizeHandle className="w-1 bg-border hover:bg-primary/30 transition-colors active:bg-primary/50" />
+              <Separator className="w-1 bg-border hover:bg-primary/30 transition-colors active:bg-primary/50" />
               <Panel defaultSize={27} minSize={20} maxSize={45} className="min-w-0">
                 <RightPanel
                   open={rightPanelOpen}
@@ -64,7 +64,7 @@ export function SlackLayout() {
               </Panel>
             </>
           )}
-        </PanelGroup>
+        </Group>
       </div>
     </TooltipProvider>
   );
