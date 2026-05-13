@@ -1,11 +1,17 @@
+import { useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   BarChart3,
+  ChevronLeft,
+  ChevronRight,
   FileText,
+  Inbox,
   Lock,
   MessageSquare,
   Plus,
+  Rss,
   Search,
+  Settings,
   Users,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -23,6 +29,9 @@ import type { Repository } from '@/types/api';
 
 interface MiddlePanelProps {
   section: string;
+  collapsed?: boolean;
+  onCollapse?: () => void;
+  onExpand?: () => void;
   className?: string;
 }
 
@@ -91,8 +100,8 @@ function ConversationItem({
   return (
     <button
       className={cn(
-        'w-full flex items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-secondary',
-        isActive && 'bg-primary/5 border-l-2 border-l-primary',
+        'w-full flex items-start gap-3 border-l-2 border-l-transparent px-4 py-3 pr-7 text-left transition-colors hover:bg-secondary',
+        isActive && 'bg-primary/5 border-l-primary',
       )}
       onClick={onClick}
     >
@@ -109,7 +118,7 @@ function ConversationItem({
 
       {/* Content */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-1.5">
           <span className="text-sm font-medium text-foreground truncate">
             {repo.name}
           </span>
@@ -132,9 +141,9 @@ function ConversationItem({
       </div>
 
       {/* Meta */}
-      <div className="flex flex-col items-end gap-1 shrink-0">
+      <div className="flex w-8 shrink-0 flex-col items-end gap-1">
         {repo.lastSyncAt && (
-          <span className="text-[10px] text-muted-foreground">
+          <span className="whitespace-nowrap text-[10px] text-muted-foreground">
             {formatRelativeTime(repo.lastSyncAt)}
           </span>
         )}
@@ -147,14 +156,118 @@ function ConversationItem({
   );
 }
 
-export function MiddlePanel({ section, className }: MiddlePanelProps) {
+function MemberSearchResult({
+  repo,
+  onClick,
+}: {
+  repo: Repository;
+  onClick: () => void;
+}) {
+  const gradient = repoGradient(repo.fullName);
+  const owner = repo.fullName.split('/')[0];
+  const isPrivate = repo.fullName.split('/').length <= 2 && owner.length < 10;
+
+  return (
+    <button
+      className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors hover:bg-secondary"
+      onClick={onClick}
+    >
+      <Avatar className="h-8 w-8 shrink-0 rounded-md">
+        <AvatarImage src={avatarUrlForRepo(repo)} className="object-cover" />
+        <AvatarFallback
+          className="rounded-md text-xs font-semibold text-white"
+          style={{ background: gradient }}
+        >
+          {repo.name.charAt(0).toUpperCase()}
+        </AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-sm font-medium text-foreground">
+            {repo.name}
+          </span>
+          {isPrivate ? (
+            <Lock className="h-3 w-3 shrink-0 text-muted-foreground" />
+          ) : (
+            <Users className="h-3 w-3 shrink-0 text-muted-foreground" />
+          )}
+        </div>
+        <p className="truncate text-xs text-muted-foreground">{repo.fullName}</p>
+      </div>
+    </button>
+  );
+}
+
+export function MiddlePanel({
+  section,
+  collapsed = false,
+  onCollapse,
+  onExpand,
+  className,
+}: MiddlePanelProps) {
   const { t } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
   const reposQuery = useRepositoryListQuery();
   const unreadCountQuery = useUnreadNotificationCountQuery();
+  const [memberSearchQuery, setMemberSearchQuery] = useState('');
   const repositories = reposQuery.data ?? [];
   const unreadCount = unreadCountQuery.data?.count ?? 0;
+
+  const memberSearchResults = useMemo(() => {
+    const query = memberSearchQuery.trim().toLowerCase();
+    if (!query) return [];
+
+    return repositories.filter((repo) => {
+      const owner = repo.fullName.split('/')[0] ?? '';
+      return [repo.name, repo.fullName, owner, repo.platform]
+        .join(' ')
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [repositories, memberSearchQuery]);
+  const hasMemberSearch = memberSearchQuery.trim().length > 0;
+
+  const renderCollapseButton = () => (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-7 w-7 shrink-0"
+      onClick={onCollapse}
+      aria-label="Collapse secondary sidebar"
+    >
+      <ChevronLeft className="h-4 w-4" />
+    </Button>
+  );
+
+  const renderCollapsedContent = () => {
+    const activeEntry = [
+      { id: 'chats', icon: MessageSquare },
+      { id: 'feed', icon: Rss },
+      { id: 'discover', icon: Search },
+      { id: 'inbox', icon: Inbox },
+      { id: 'reports', icon: FileText },
+      { id: 'settings', icon: Settings },
+    ].find((entry) => entry.id === section);
+    const Icon = activeEntry?.icon ?? MessageSquare;
+
+    return (
+      <div className="flex h-full flex-col items-center border-r border-border bg-card py-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={onExpand}
+          aria-label="Expand secondary sidebar"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+        <div className="mt-3 flex h-8 w-8 items-center justify-center rounded-lg bg-secondary text-muted-foreground">
+          <Icon className="h-4 w-4" />
+        </div>
+      </div>
+    );
+  };
 
   const renderContent = () => {
     switch (section) {
@@ -163,12 +276,53 @@ export function MiddlePanel({ section, className }: MiddlePanelProps) {
           <>
             <div className="flex items-center justify-between px-4 py-3 shrink-0">
               <h2 className="font-semibold text-sm">{t('app.nav.chats')}</h2>
-              <Button variant="ghost" size="icon" className="h-7 w-7">
-                <Plus className="h-4 w-4" />
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="icon" className="h-7 w-7">
+                  <Plus className="h-4 w-4" />
+                </Button>
+                {renderCollapseButton()}
+              </div>
             </div>
             <Separator />
-            <ScrollArea className="flex-1">
+            <div className="p-3 shrink-0">
+              <div className="relative rounded-lg">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={memberSearchQuery}
+                  onChange={(event) => setMemberSearchQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      setMemberSearchQuery('');
+                    }
+                  }}
+                  placeholder="Search members..."
+                  aria-label="Search members"
+                  className="h-9 pl-8 text-sm"
+                />
+              </div>
+              {hasMemberSearch && (
+                <div className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-lg scrollbar-thin">
+                  {memberSearchResults.length === 0 ? (
+                    <div className="px-3 py-3 text-center text-sm text-muted-foreground">
+                      No members found
+                    </div>
+                  ) : (
+                    memberSearchResults.map((repo) => (
+                      <MemberSearchResult
+                        key={repo.id}
+                        repo={repo}
+                        onClick={() => {
+                          navigate(`/chats/${repo.id}`);
+                          setMemberSearchQuery('');
+                        }}
+                      />
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+            <Separator />
+            <ScrollArea className="min-h-0 flex-1">
               {reposQuery.isLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <Spinner className="h-5 w-5" />
@@ -199,11 +353,12 @@ export function MiddlePanel({ section, className }: MiddlePanelProps) {
       case 'feed':
         return (
           <>
-            <div className="px-4 py-3 shrink-0">
+            <div className="flex items-center justify-between px-4 py-3 shrink-0">
               <h2 className="font-semibold text-sm">{t('app.nav.feed')}</h2>
+              {renderCollapseButton()}
             </div>
             <Separator />
-            <ScrollArea className="flex-1">
+            <ScrollArea className="min-h-0 flex-1">
               <div className="p-4 text-sm text-muted-foreground text-center">
                 {t('app.feed.empty')}
               </div>
@@ -214,8 +369,9 @@ export function MiddlePanel({ section, className }: MiddlePanelProps) {
       case 'discover':
         return (
           <>
-            <div className="px-4 py-3 shrink-0">
+            <div className="flex items-center justify-between px-4 py-3 shrink-0">
               <h2 className="font-semibold text-sm">{t('app.nav.discover')}</h2>
+              {renderCollapseButton()}
             </div>
             <Separator />
             <div className="p-3">
@@ -234,7 +390,7 @@ export function MiddlePanel({ section, className }: MiddlePanelProps) {
               </div>
             </div>
             <Separator />
-            <ScrollArea className="flex-1">
+            <ScrollArea className="min-h-0 flex-1">
               <div className="p-4 text-sm text-muted-foreground text-center">
                 Search for repositories to follow.
               </div>
@@ -247,14 +403,17 @@ export function MiddlePanel({ section, className }: MiddlePanelProps) {
           <>
             <div className="flex items-center justify-between px-4 py-3 shrink-0">
               <h2 className="font-semibold text-sm">{t('app.nav.inbox')}</h2>
-              {unreadCount > 0 && (
-                <Badge variant="default" className="text-[10px] px-1.5 py-0">
-                  {unreadCount}
-                </Badge>
-              )}
+              <div className="flex items-center gap-1">
+                {unreadCount > 0 && (
+                  <Badge variant="default" className="text-[10px] px-1.5 py-0">
+                    {unreadCount}
+                  </Badge>
+                )}
+                {renderCollapseButton()}
+              </div>
             </div>
             <Separator />
-            <ScrollArea className="flex-1">
+            <ScrollArea className="min-h-0 flex-1">
               <div className="space-y-0.5 p-2">
                 <button
                   className={cn(
@@ -284,11 +443,12 @@ export function MiddlePanel({ section, className }: MiddlePanelProps) {
       case 'reports':
         return (
           <>
-            <div className="px-4 py-3 shrink-0">
+            <div className="flex items-center justify-between px-4 py-3 shrink-0">
               <h2 className="font-semibold text-sm">{t('app.nav.reports')}</h2>
+              {renderCollapseButton()}
             </div>
             <Separator />
-            <ScrollArea className="flex-1">
+            <ScrollArea className="min-h-0 flex-1">
               <div className="space-y-0.5 p-2">
                 {[
                   { id: 'weekly', labelKey: 'reports.title.weekly' },
@@ -312,11 +472,12 @@ export function MiddlePanel({ section, className }: MiddlePanelProps) {
       case 'settings':
         return (
           <>
-            <div className="px-4 py-3 shrink-0">
+            <div className="flex items-center justify-between px-4 py-3 shrink-0">
               <h2 className="font-semibold text-sm">{t('app.nav.settings')}</h2>
+              {renderCollapseButton()}
             </div>
             <Separator />
-            <ScrollArea className="flex-1">
+            <ScrollArea className="min-h-0 flex-1">
               <div className="space-y-0.5 p-2">
                 {[
                   { id: 'profile', labelKey: 'settings.tabs.profile' },
@@ -344,8 +505,8 @@ export function MiddlePanel({ section, className }: MiddlePanelProps) {
   };
 
   return (
-    <div className={cn('flex flex-col h-full bg-card', className)}>
-      {renderContent()}
+    <div className={cn('flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-card', className)}>
+      {collapsed ? renderCollapsedContent() : renderContent()}
     </div>
   );
 }

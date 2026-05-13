@@ -43,7 +43,7 @@ export function GlobalNav() {
   const location = useLocation();
   const navigate = useNavigate();
   const { t } = useLanguage();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const { data: user, isLoading: isUserLoading } = useCurrentUserQuery();
   const logoutMutation = useLogoutMutation();
 
@@ -52,7 +52,7 @@ export function GlobalNav() {
   )?.id;
 
   const handleLogout = async () => {
-    await logoutMutation.mutateAsync();
+    await logoutMutation.mutateAsync(undefined);
   };
 
   const userInitials = user
@@ -66,22 +66,19 @@ export function GlobalNav() {
   return (
     <aside
       className={cn(
-        'flex flex-col items-center h-screen border-r border-border bg-card transition-all duration-200 shrink-0',
-        collapsed ? 'w-0 border-r-0 overflow-hidden' : 'w-14',
+        'flex h-dvh shrink-0 flex-col border-r border-border bg-card transition-[width] duration-200',
+        collapsed ? 'w-14 items-center' : 'w-52',
       )}
+      aria-label="Global navigation"
     >
       {/* Collapse toggle */}
-      <div
-        className={cn(
-          'flex justify-center w-full pt-2',
-          collapsed && 'absolute -right-8 top-2 z-10',
-        )}
-      >
+      <div className={cn('flex w-full pt-2', collapsed ? 'justify-center' : 'justify-end px-3')}>
         <Button
           variant="ghost"
           size="icon"
           className="h-8 w-8"
           onClick={() => setCollapsed(!collapsed)}
+          aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
         >
           {collapsed ? (
             <ChevronRight className="h-4 w-4" />
@@ -91,13 +88,15 @@ export function GlobalNav() {
         </Button>
       </div>
 
-      {!collapsed && (
+      {collapsed ? (
         <>
           {/* Logo */}
           <div className="flex justify-center pt-3 pb-4">
-            <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground text-xs font-bold">RP</span>
-            </div>
+            <img
+              src="/logo.png"
+              alt="Repo Pulse"
+              className="h-8 w-8 rounded-lg object-contain"
+            />
           </div>
 
           {/* Navigation icons */}
@@ -135,7 +134,7 @@ export function GlobalNav() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Avatar className="h-8 w-8 cursor-pointer">
-                    <AvatarImage src={user?.avatarUrl ?? undefined} />
+                    <AvatarImage src={user?.avatar ?? undefined} />
                     <AvatarFallback>{userInitials}</AvatarFallback>
                   </Avatar>
                 </TooltipTrigger>
@@ -149,6 +148,69 @@ export function GlobalNav() {
               size="icon"
               className="h-8 w-8 text-muted-foreground hover:text-destructive"
               onClick={handleLogout}
+              aria-label="Log out"
+            >
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Logo */}
+          <div className="flex items-center gap-3 px-4 pt-3 pb-4">
+            <img
+              src="/logo.png"
+              alt="Repo Pulse"
+              className="h-8 w-8 shrink-0 rounded-lg object-contain"
+            />
+            <span className="truncate text-sm font-semibold text-foreground">Repo Pulse</span>
+          </div>
+
+          {/* Navigation items */}
+          <nav className="flex-1 flex flex-col gap-1 px-3">
+            {NAV_ENTRIES.map((entry) => {
+              const isActive = activeSection === entry.id;
+              return (
+                <Button
+                  key={entry.id}
+                  variant="ghost"
+                  className={cn(
+                    'h-9 w-full justify-start gap-3 rounded-lg px-3 text-muted-foreground transition-colors',
+                    isActive && 'bg-primary/10 text-primary',
+                  )}
+                  onClick={() => navigate(entry.path)}
+                >
+                  <entry.icon className="h-4 w-4 shrink-0" />
+                  <span className="truncate text-sm">{t(entry.labelKey)}</span>
+                </Button>
+              );
+            })}
+          </nav>
+
+          {/* User avatar */}
+          <div className="flex items-center gap-3 px-4 pb-4">
+            {isUserLoading ? (
+              <Spinner className="h-6 w-6" />
+            ) : (
+              <Avatar className="h-8 w-8 shrink-0">
+                <AvatarImage src={user?.avatar ?? undefined} />
+                <AvatarFallback>{userInitials}</AvatarFallback>
+              </Avatar>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-foreground">
+                {user?.name ?? t('app.user.unknown')}
+              </p>
+              {user?.email && (
+                <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+              onClick={handleLogout}
+              aria-label="Log out"
             >
               <LogOut className="h-4 w-4" />
             </Button>
