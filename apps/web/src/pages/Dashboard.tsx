@@ -18,6 +18,7 @@ import {
   RefreshCcw,
   ChevronsUpDown,
   Loader2,
+  Search,
 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -33,7 +34,15 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   AreaChart,
@@ -60,11 +69,12 @@ import {
   usePendingApprovalsCountQuery,
   useUnreadNotificationsCountQuery,
 } from '@/hooks/queries/use-dashboard-queries';
+import { eventService } from '@/services/event.service';
 import { useRepositoryBranchesQuery } from '@/hooks/queries/use-repository-queries';
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
 import { useDashboardActivity } from '@/hooks/use-dashboard';
 import { normalizeBranchOption } from '@/services/repository.service';
-import type { Repository, RepositoryBranchScopeMap, RepositoryBranchScopeOption } from '@/types/api';
+import type { Event, Repository, RepositoryBranchScopeMap, RepositoryBranchScopeOption } from '@/types/api';
 
 function toRelativeTime(dateString: string, language: 'en' | 'zh') {
   const now = Date.now();
@@ -292,6 +302,11 @@ export function Dashboard() {
   const [scopeTab, setScopeTab] = useState<'selected' | 'all'>('selected');
   const [scopeSearchValue, setScopeSearchValue] = useState('');
   const [expandedRepositoryIds, setExpandedRepositoryIds] = useState<string[]>([]);
+  const [isActivitySheetOpen, setIsActivitySheetOpen] = useState(false);
+  const [allEvents, setAllEvents] = useState<Event[]>([]);
+  const [allEventsLoading, setAllEventsLoading] = useState(false);
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [riskFilter, setRiskFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all');
   const availableRepositoryIds = useMemo(() => repos.map((repository) => repository.id), [repos]);
   const availableRepositoryIdSet = useMemo(
     () => new Set(availableRepositoryIds),
@@ -590,6 +605,24 @@ export function Dashboard() {
     }));
   }, [language, recentEventsQuery.data?.items]);
 
+  const filteredEvents = useMemo(() => {
+    let result = allEvents;
+    if (riskFilter !== 'all') {
+      result = result.filter((event) => getRiskByType(event.type) === riskFilter);
+    }
+    if (searchKeyword.trim()) {
+      const kw = searchKeyword.toLowerCase();
+      result = result.filter(
+        (event) =>
+          event.title.toLowerCase().includes(kw) ||
+          event.author.toLowerCase().includes(kw) ||
+          (event.branch && event.branch.toLowerCase().includes(kw)) ||
+          (event.repository?.name && event.repository.name.toLowerCase().includes(kw)),
+      );
+    }
+    return result;
+  }, [allEvents, riskFilter, searchKeyword]);
+
   useEffect(() => {
     if (cardsRef.current) {
       gsap.fromTo(
@@ -741,15 +774,6 @@ export function Dashboard() {
               </Popover>
             </div>
           ) : null}
-        </div>
-        <div className="flex items-center gap-3">
-          <Button variant="outline" className="border-[var(--github-border)] text-sm">
-            {t('dashboard.filters.last7Days')}
-          </Button>
-          <Button className="btn-x-primary gap-2 text-sm">
-            <Activity className="h-4 w-4" />
-            {t('dashboard.actions.liveView')}
-          </Button>
         </div>
       </div>
 
@@ -959,9 +983,99 @@ export function Dashboard() {
                 <Zap className="h-4 w-4 text-[var(--github-accent)]" />
                 {t('dashboard.sections.recentActivity')}
               </CardTitle>
-              <Button variant="ghost" size="sm" className="text-xs text-[var(--github-accent)]">
-                {t('dashboard.actions.viewAll')}
-              </Button>
+              <Sheet open={isActivitySheetOpen} onOpenChange={(open) => {
+                setIsActivitySheetOpen(open);
+                if (open && allEvents.length === 0) {
+                  setAllEventsLoading(true);
+                  setSearchKeyword('');
+                  setRiskFilter('all');
+                  eventService.getAll(monitoredRepositoryIds, normalizedRepositoryBranchScopes, {
+                    page: 1,
+                    pageSize: 100,
+                    sortBy: 'occurredAt',
+                    sortOrder: 'desc',
+                  })
+                    .then((res) => setAllEvents(res.items))
+                    .finally(() => setAllEventsLoading(false));
+                }
+              }}>
+                <SheetTrigger asChild>
+                  <Button variant="ghost" size="sm" className="text-xs text-[var(--github-accent)]">
+                    {t('dashboard.actions.viewAll')}
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
+                  <SheetHeader>
+                    <SheetTitle>{t('dashboard.sections.recentActivity')}</SheetTitle>
+                  </SheetHeader>
+
+                  {/* Search */}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--github-text-secondary)]" />
+                    <Input
+                      value={searchKeyword}
+                      onChange={(e) => setSearchKeyword(e.target.value)}
+                      placeholder="Search events..."
+                      className="bg-[var(--github-surface)] border-[var(--github-border)] pl-9"
+                    />
+                  </div>
+
+                  {/* Risk filter chips */}
+                  <div className="flex gap-2">
+                    {(['all', 'high', 'medium', 'low'] as const).map((level) => (
+                      <button
+                        key={level}
+                        onClick={() => setRiskFilter(level)}
+                        className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                          riskFilter === level
+                            ? 'bg-[var(--github-accent)] text-white'
+                            : 'bg-[var(--github-surface)] text-[var(--github-text-secondary)] hover:text-white'
+                        }`}
+                      >
+                        {level === 'all' ? 'All' : level.charAt(0).toUpperCase() + level.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Event list */}
+                  <div className="flex-1 space-y-3 overflow-y-auto pb-4">
+                    {allEventsLoading ? (
+                      <div className="flex items-center justify-center py-12">
+                        <Loader2 className="h-6 w-6 animate-spin text-[var(--github-accent)]" />
+                      </div>
+                    ) : filteredEvents.length > 0 ? (
+                      filteredEvents.map((event) => {
+                        const risk = getRiskByType(event.type);
+                        return (
+                          <div key={event.id} className="cursor-pointer rounded-lg bg-white/5 p-3 transition-colors hover:bg-white/10">
+                            <div className="flex items-start gap-3">
+                              <div className={`mt-2 h-2 w-2 flex-shrink-0 rounded-full ${risk === 'high' ? 'bg-red-400' : risk === 'medium' ? 'bg-yellow-400' : 'bg-green-400'}`} />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm text-white">{event.title}</p>
+                                <div className="mt-1 flex flex-wrap items-center gap-2">
+                                  <EventContextChips event={event} className="min-w-0 max-w-full" />
+                                  <span className="text-xs text-[var(--github-text-secondary)]">
+                                    {toRelativeTime(event.occurredAt ?? event.createdAt, language)}
+                                  </span>
+                                </div>
+                              </div>
+                              <Avatar className="h-6 w-6">
+                                <AvatarFallback className="bg-[var(--github-accent)] text-xs text-white">
+                                  {(event.author || 'U').split(' ').map((word) => word[0]).join('')}
+                                </AvatarFallback>
+                              </Avatar>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="rounded-lg border border-[var(--github-border)] p-4 text-sm text-[var(--github-text-secondary)]">
+                        {t('dashboard.events.empty')}
+                      </div>
+                    )}
+                  </div>
+                </SheetContent>
+              </Sheet>
             </div>
           </CardHeader>
           <CardContent>

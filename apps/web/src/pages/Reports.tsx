@@ -228,19 +228,19 @@ export function Reports() {
                     <TabsList className="bg-[var(--github-surface)] border border-[var(--github-border)]">
                       <TabsTrigger
                         value="activity"
-                        className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+                        className=""
                       >
                         {t('reports.charts.activity')}
                       </TabsTrigger>
                       <TabsTrigger
                         value="issues"
-                        className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+                        className=""
                       >
                         {t('reports.charts.issues')}
                       </TabsTrigger>
                       <TabsTrigger
                         value="trends"
-                        className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+                        className=""
                       >
                         {t('reports.charts.trends')}
                       </TabsTrigger>

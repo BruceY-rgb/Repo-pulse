@@ -162,9 +162,9 @@ export function Approvals() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="bg-[var(--github-surface)] border border-[var(--github-border)]">
-          <TabsTrigger value="pending" className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"><Clock className="w-4 h-4 mr-2" />Pending {pendingCount > 0 && (<Badge className="ml-1 bg-[var(--github-accent)] text-white text-xs">{pendingCount}</Badge>)}</TabsTrigger>
-          <TabsTrigger value="approved" className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"><CheckCircle className="w-4 h-4 mr-2" />Approved</TabsTrigger>
-          <TabsTrigger value="rejected" className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"><XCircle className="w-4 h-4 mr-2" />Rejected</TabsTrigger>
+          <TabsTrigger value="pending"><Clock className="w-4 h-4 mr-2" />Pending {pendingCount > 0 && (<Badge className="ml-1 bg-[var(--github-accent)] text-white text-xs">{pendingCount}</Badge>)}</TabsTrigger>
+          <TabsTrigger value="approved"><CheckCircle className="w-4 h-4 mr-2" />Approved</TabsTrigger>
+          <TabsTrigger value="rejected"><XCircle className="w-4 h-4 mr-2" />Rejected</TabsTrigger>
         </TabsList>
 
         <TabsContent value="pending" className="mt-4">
