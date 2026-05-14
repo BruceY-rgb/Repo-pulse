@@ -211,7 +211,7 @@ export function MiddlePanel({
   const reposQuery = useRepositoryListQuery();
   const unreadCountQuery = useUnreadNotificationCountQuery();
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
-  const repositories = reposQuery.data ?? [];
+  const repositories = useMemo(() => reposQuery.data ?? [], [reposQuery.data]);
   const unreadCount = unreadCountQuery.data?.count ?? 0;
 
   const memberSearchResults = useMemo(() => {

@@ -36,8 +36,8 @@ export const authService = {
   /**
    * 获取 GitHub OAuth 运行时配置
    */
-  async getGithubOAuthRuntimeConfig(): Promise<{ callbackUrl: string }> {
-    const { data } = await apiClient.get<ApiResponse<{ callbackUrl: string }>>('/auth/github/config');
+  async getGithubOAuthRuntimeConfig(): Promise<{ callbackUrl: string; devBypassEnabled: boolean }> {
+    const { data } = await apiClient.get<ApiResponse<{ callbackUrl: string; devBypassEnabled: boolean }>>('/auth/github/config');
     return data.data;
   },
 
@@ -56,6 +56,14 @@ export const authService = {
       clientId,
       clientSecret,
     });
+    return data;
+  },
+
+  /**
+   * 本地开发专用：使用后端 GITHUB_TOKEN 创建真实 Cookie session
+   */
+  async createDevGithubSession(): Promise<{ message: string }> {
+    const { data } = await apiClient.post<{ message: string }>('/auth/dev/github-session');
     return data;
   },
 

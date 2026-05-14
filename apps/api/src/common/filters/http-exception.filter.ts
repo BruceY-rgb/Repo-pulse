@@ -103,13 +103,35 @@ function extractOAuthErrorReason(exception: unknown): string | null {
   }
 
   const oauthError = (exception as {
-    oauthError?: { data?: unknown };
+    oauthError?: { code?: unknown; data?: unknown; message?: unknown };
   }).oauthError;
 
-  if (!oauthError || typeof oauthError.data !== 'string') {
+  if (!oauthError) {
     return null;
   }
 
-  const params = new URLSearchParams(oauthError.data);
-  return params.get('error') || null;
+  if (typeof oauthError.data === 'string') {
+    const params = new URLSearchParams(oauthError.data);
+    const oauthReason = params.get('error');
+    if (oauthReason) {
+      return oauthReason;
+    }
+  }
+
+  const networkErrorText = [
+    typeof oauthError.code === 'string' ? oauthError.code : null,
+    typeof oauthError.message === 'string' ? oauthError.message : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  if (/ETIMEDOUT|timed out|timeout/i.test(networkErrorText)) {
+    return 'github_token_timeout';
+  }
+
+  if (/ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|network/i.test(networkErrorText)) {
+    return 'github_network_unreachable';
+  }
+
+  return null;
 }

@@ -123,7 +123,7 @@ function avatarUrlForAuthor(author: string, authorAvatar?: string | null): strin
 function linkifyBareUrls(markdown: string): string {
   return markdown.replace(
     /(^|\s)((?:https?:\/\/|www\.)[^\s<>()]+[^\s<>().,!?;:'"`])/g,
-    (match, prefix: string, url: string) => {
+    (_match, prefix: string, url: string) => {
       const href = url.startsWith('www.') ? `https://${url}` : url;
       return `${prefix}[${url}](${href})`;
     },

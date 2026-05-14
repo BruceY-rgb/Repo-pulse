@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   GitPullRequest,
@@ -64,7 +64,7 @@ import { useRepositoryBranchesQuery } from '@/hooks/queries/use-repository-queri
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
 import { useDashboardActivity } from '@/hooks/use-dashboard';
 import { normalizeBranchOption } from '@/services/repository.service';
-import type { Repository, RepositoryBranchScopeMap, RepositoryBranchScopeOption } from '@/types/api';
+import type { Repository, RepositoryBranchScopeOption } from '@/types/api';
 
 function toRelativeTime(dateString: string, language: 'en' | 'zh') {
   const now = Date.now();
@@ -96,10 +96,6 @@ function getRiskByType(type: string): 'low' | 'medium' | 'high' {
   return 'low';
 }
 
-function areStringArraysEqual(left: string[], right: string[]) {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
 function findRepositoriesBySelection(repositories: Repository[], selectedRepositoryIds: string[]) {
   const repositoryMap = new Map(repositories.map((repository) => [repository.id, repository]));
 
@@ -118,30 +114,6 @@ function formatBranchSummary(branches: string[], fallbackLabel: string) {
   }
 
   return `${branches[0]} +${branches.length - 1}`;
-}
-
-function areRepositoryBranchScopesEqual(
-  left: RepositoryBranchScopeMap,
-  right: RepositoryBranchScopeMap,
-) {
-  const leftEntries = Object.entries(left).sort(([leftKey], [rightKey]) =>
-    leftKey.localeCompare(rightKey),
-  );
-  const rightEntries = Object.entries(right).sort(([leftKey], [rightKey]) =>
-    leftKey.localeCompare(rightKey),
-  );
-
-  if (leftEntries.length !== rightEntries.length) {
-    return false;
-  }
-
-  return leftEntries.every(([repositoryId, branches], index) => {
-    const [rightRepositoryId, rightBranches] = rightEntries[index];
-    return (
-      repositoryId === rightRepositoryId &&
-      areStringArraysEqual(branches, rightBranches)
-    );
-  });
 }
 
 interface ScopeRepositoryItemProps {
@@ -278,12 +250,7 @@ export function Dashboard() {
   const { t, language } = useLanguage();
 
   const repositoriesQuery = useDashboardRepositoriesQuery();
-  const {
-    currentUserQuery,
-    monitoringScope,
-    persistMonitoringScope,
-  } = useMonitoringScopePreferences();
-  const { isLoading: isCurrentUserLoading } = currentUserQuery;
+  const { monitoringScope, persistMonitoringScope } = useMonitoringScopePreferences();
   const repos = useMemo(
     () => repositoriesQuery.data ?? [],
     [repositoriesQuery.data],
@@ -338,59 +305,6 @@ export function Dashboard() {
   }, [repositoriesForCurrentScopeTab, scopeSearchValue]);
   const hasAvailableRepositories = repos.length > 0;
   const hasSelection = monitoredRepositoryIds.length > 0;
-
-  const persistMonitoredRepositoryIds = (repositoryIds: string[]) => {
-    void persistMonitoringScope({
-      repositoryIds,
-      branchNames: [],
-      repositoryBranchScopes: normalizedRepositoryBranchScopes,
-    });
-  };
-  const persistMonitoredRepositoryIdsInEffect = useEffectEvent((repositoryIds: string[]) => {
-    persistMonitoredRepositoryIds(repositoryIds);
-  });
-
-  useEffect(() => {
-    if (repositoriesQuery.isLoading || isCurrentUserLoading) {
-      return;
-    }
-
-    const rawRepositoryIds = monitoringScope.repositoryIds ?? [];
-    if (!areStringArraysEqual(rawRepositoryIds, monitoredRepositoryIds)) {
-      persistMonitoredRepositoryIdsInEffect(monitoredRepositoryIds);
-    }
-  }, [
-    isCurrentUserLoading,
-    monitoredRepositoryIds,
-    monitoringScope.repositoryIds,
-    repositoriesQuery.isLoading,
-  ]);
-
-  useEffect(() => {
-    if (repositoriesQuery.isLoading || isCurrentUserLoading) {
-      return;
-    }
-
-    if (
-      !areRepositoryBranchScopesEqual(
-        repositoryBranchScopes,
-        normalizedRepositoryBranchScopes,
-      )
-    ) {
-      void persistMonitoringScope({
-        repositoryIds: monitoredRepositoryIds,
-        branchNames: [],
-        repositoryBranchScopes: normalizedRepositoryBranchScopes,
-      });
-    }
-  }, [
-    isCurrentUserLoading,
-    monitoredRepositoryIds,
-    normalizedRepositoryBranchScopes,
-    persistMonitoringScope,
-    repositoriesQuery.isLoading,
-    repositoryBranchScopes,
-  ]);
 
   const statsQuery = useDashboardStatsQuery(
     monitoredRepositoryIds,

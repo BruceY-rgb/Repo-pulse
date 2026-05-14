@@ -15,6 +15,7 @@ export interface User {
   email: string;
   name: string;
   avatar: string | null;
+  githubId?: string | null;
   role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'VIEWER';
   preferences: UserPreferences;
   createdAt: string;

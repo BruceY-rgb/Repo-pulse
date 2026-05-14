@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
 import * as bcrypt from 'bcrypt';
 import { UserService } from '../user/user.service';
 import { SyncService } from '../sync/sync.service';
@@ -15,6 +16,21 @@ export interface JwtPayload {
 export interface TokenPair {
   accessToken: string;
   refreshToken: string;
+}
+
+interface GithubViewerResponse {
+  id: number;
+  login: string;
+  name: string | null;
+  email: string | null;
+  avatar_url: string | null;
+}
+
+interface GithubEmailResponse {
+  email: string;
+  primary: boolean;
+  verified: boolean;
+  visibility: string | null;
 }
 
 @Injectable()
@@ -141,5 +157,84 @@ export class AuthService {
       email: user.email,
       role: user.role,
     });
+  }
+
+  async handleDevGithubTokenAuth(githubToken: string) {
+    const profile = await this.resolveGithubProfileFromToken(githubToken);
+
+    this.logger.log(
+      `dev_github_auth_profile_resolved githubId=${profile.id} login=${profile.login} emailSource=${profile.emailSource}`,
+    );
+
+    return this.handleGithubAuth({
+      id: profile.id,
+      email: profile.email,
+      displayName: profile.displayName,
+      avatar: profile.avatar,
+      githubAccessToken: githubToken,
+      githubRefreshToken: '',
+    });
+  }
+
+  private async resolveGithubProfileFromToken(githubToken: string) {
+    const client = axios.create({
+      baseURL: 'https://api.github.com',
+      timeout: 30_000,
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${githubToken}`,
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    });
+
+    try {
+      const [viewerResponse, emailResponse] = await Promise.allSettled([
+        client.get<GithubViewerResponse>('/user'),
+        client.get<GithubEmailResponse[]>('/user/emails'),
+      ]);
+
+      if (viewerResponse.status === 'rejected') {
+        throw viewerResponse.reason;
+      }
+
+      const viewer = viewerResponse.value.data;
+      const verifiedPrimaryEmail =
+        emailResponse.status === 'fulfilled'
+          ? emailResponse.value.data.find((email) => email.primary && email.verified)?.email
+          : null;
+      const verifiedVisibleEmail =
+        emailResponse.status === 'fulfilled'
+          ? emailResponse.value.data.find((email) => email.verified)?.email
+          : null;
+      const email =
+        viewer.email ||
+        verifiedPrimaryEmail ||
+        verifiedVisibleEmail ||
+        `${viewer.login}@users.noreply.github.com`;
+
+      return {
+        id: String(viewer.id),
+        login: viewer.login,
+        email,
+        emailSource: viewer.email
+          ? 'viewer'
+          : verifiedPrimaryEmail
+            ? 'primary'
+            : verifiedVisibleEmail
+              ? 'verified'
+              : 'noreply_fallback',
+        displayName: viewer.name || viewer.login,
+        avatar: viewer.avatar_url || '',
+      };
+    } catch (error) {
+      const status =
+        axios.isAxiosError(error) && error.response?.status
+          ? ` status=${error.response.status}`
+          : '';
+      this.logger.warn(`dev_github_auth_profile_failed${status}`);
+      throw new UnauthorizedException(
+        'Unable to validate GITHUB_TOKEN with GitHub. Please check token validity and permissions.',
+      );
+    }
   }
 }

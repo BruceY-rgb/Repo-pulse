@@ -9,6 +9,8 @@ import {
   HttpCode,
   HttpStatus,
   UnauthorizedException,
+  ForbiddenException,
+  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiCookieAuth } from '@nestjs/swagger';
@@ -121,7 +123,32 @@ export class AuthController {
   getGithubOAuthRuntimeConfig() {
     return {
       callbackUrl: this.configService.get<string>('GITHUB_CALLBACK_URL') || '',
+      devBypassEnabled: this.isDevGithubAuthBypassEnabled(),
     };
+  }
+
+  /**
+   * 本地开发专用 GitHub session bypass — 使用服务端 GITHUB_TOKEN 写入正常 Cookie
+   */
+  @Post('dev/github-session')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '开发环境 GitHub Token 登录（仅本地开发）' })
+  async devGithubSession(@Res({ passthrough: true }) res: Response) {
+    if (!this.isDevGithubAuthBypassEnabled()) {
+      throw new ForbiddenException('Dev GitHub auth bypass is disabled');
+    }
+
+    const githubToken = this.configService.get<string>('GITHUB_TOKEN')?.trim();
+    if (!githubToken) {
+      throw new BadRequestException('GITHUB_TOKEN is required for dev GitHub auth bypass');
+    }
+
+    const tokens = await this.authService.handleDevGithubTokenAuth(githubToken);
+    this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
+    this.logger.log('dev_github_auth_session_created');
+
+    return { message: 'Dev GitHub session created' };
   }
 
   /**
@@ -215,5 +242,10 @@ export class AuthController {
       ...COOKIE_OPTIONS,
       maxAge: REFRESH_TOKEN_MAX_AGE,
     });
+  }
+
+  private isDevGithubAuthBypassEnabled() {
+    const bypassFlag = (this.configService.get<string>('DEV_GITHUB_AUTH_BYPASS') ?? '0').toLowerCase();
+    return process.env.NODE_ENV !== 'production' && ['1', 'true'].includes(bypassFlag);
   }
 }

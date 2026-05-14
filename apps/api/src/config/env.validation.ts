@@ -16,6 +16,10 @@ export const envValidationSchema = Joi.object({
   GITHUB_CLIENT_ID: Joi.string().allow(''),
   GITHUB_CLIENT_SECRET: Joi.string().allow(''),
   GITHUB_CALLBACK_URL: Joi.string().uri().allow(''),
+  GITHUB_OAUTH_PROXY_URL: Joi.string().uri().allow(''),
+  GITHUB_OAUTH_TIMEOUT_MS: Joi.number().integer().positive().default(30000),
+  GITHUB_TOKEN: Joi.string().allow(''),
+  DEV_GITHUB_AUTH_BYPASS: Joi.string().valid('0', '1', 'true', 'false').default('0'),
 
   // GitLab OAuth
   GITLAB_CLIENT_ID: Joi.string().allow(''),

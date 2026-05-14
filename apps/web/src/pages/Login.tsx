@@ -30,6 +30,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import {
+  useDevGithubSessionMutation,
   useGithubOAuthConfigMutation,
   useGithubOAuthRuntimeConfigQuery,
   useGithubOAuthLogin,
@@ -49,6 +50,7 @@ export function Login() {
   const { t } = useLanguage();
   const loginWithGithub = useGithubOAuthLogin();
   const loginMutation = useLoginMutation();
+  const devGithubSessionMutation = useDevGithubSessionMutation();
   const oauthConfigMutation = useGithubOAuthConfigMutation();
   const oauthRuntimeConfigQuery = useGithubOAuthRuntimeConfigQuery();
   const [clientId, setClientId] = useState('');
@@ -57,6 +59,7 @@ export function Login() {
   const callbackUrl =
     oauthRuntimeConfigQuery.data?.callbackUrl ||
     'http://localhost:3001/auth/github/callback';
+  const devBypassEnabled = oauthRuntimeConfigQuery.data?.devBypassEnabled ?? false;
 
   const loginSchema = useMemo(
     () =>
@@ -120,11 +123,28 @@ export function Login() {
       });
     }
 
-    loginWithGithub();
+    try {
+      await loginWithGithub();
+    } catch {
+      setGithubConfigHint(t('auth.login.form.error.oauthFailed'));
+    }
+  };
+
+  const onDevGithubSessionLogin = async () => {
+    setGithubConfigHint(null);
+
+    try {
+      await devGithubSessionMutation.mutateAsync(undefined);
+    } catch {
+      // Mutation error is rendered below.
+    }
   };
 
   const loginErrorMessage = getLoginErrorMessage(loginMutation.error, t);
   const oauthConfigErrorMessage = getOAuthConfigErrorMessage(oauthConfigMutation.error, t);
+  const devGithubSessionErrorMessage = getDevGithubSessionErrorMessage(
+    devGithubSessionMutation.error,
+  );
   const oauthConfigSuccessMessage = oauthConfigMutation.isSuccess
     ? t('auth.login.oauthConfig.success')
     : null;
@@ -307,11 +327,32 @@ export function Login() {
             onClick={onGithubLogin}
             className="w-full gap-2"
             size="lg"
-            disabled={oauthConfigMutation.isPending}
+            disabled={oauthConfigMutation.isPending || devGithubSessionMutation.isPending}
           >
             <Github className="h-4 w-4" />
             {t('auth.login.github')}
           </Button>
+
+          {devBypassEnabled ? (
+            <div className="space-y-2">
+              <Button
+                type="button"
+                onClick={onDevGithubSessionLogin}
+                className="w-full gap-2"
+                size="lg"
+                variant="secondary"
+                disabled={oauthConfigMutation.isPending || devGithubSessionMutation.isPending}
+              >
+                <Github className="h-4 w-4" />
+                {devGithubSessionMutation.isPending
+                  ? 'Connecting dev GitHub token...'
+                  : 'Continue with Dev GitHub Token'}
+              </Button>
+              {devGithubSessionErrorMessage ? (
+                <p className="text-sm text-destructive">{devGithubSessionErrorMessage}</p>
+              ) : null}
+            </div>
+          ) : null}
 
           <p className="text-center text-xs text-muted-foreground">
             {t('auth.login.notice')}
@@ -320,6 +361,30 @@ export function Login() {
       </Card>
     </div>
   );
+}
+
+function getDevGithubSessionErrorMessage(error: ApiClientError | null): string | null {
+  if (!error) {
+    return null;
+  }
+
+  if (error.statusCode === 400) {
+    return 'DEV_GITHUB_AUTH_BYPASS 已开启，但后端缺少 GITHUB_TOKEN。请在 .env 中配置后重启 API。';
+  }
+
+  if (error.statusCode === 401) {
+    return '后端 GITHUB_TOKEN 无法通过 GitHub 校验，请检查 token 是否有效并具备必要权限。';
+  }
+
+  if (error.statusCode === 403) {
+    return 'Dev GitHub Token 登录未启用。请设置 DEV_GITHUB_AUTH_BYPASS=1 并重启 API。';
+  }
+
+  if (error.statusCode === undefined) {
+    return '无法连接 API，请确认后端服务已启动。';
+  }
+
+  return error.message || 'Dev GitHub Token 登录失败。';
 }
 
 function getLoginErrorMessage(
@@ -357,6 +422,12 @@ function getOAuthFailureMessage(
       return 'GitHub 授权码已失效，请重新发起一次登录。';
     case 'redirect_uri_mismatch':
       return 'GitHub OAuth 回调地址不匹配，请确认 GitHub App 中的 callback URL 与页面提示一致。';
+    case 'github_token_timeout':
+      return 'GitHub 已授权，但后端连接 GitHub 换取 access token 超时。请确认 API 进程可以访问 github.com，必要时为 API 配置 GITHUB_OAUTH_PROXY_URL 或 HTTPS_PROXY。';
+    case 'github_network_unreachable':
+      return 'GitHub 已授权，但后端无法连接 GitHub。请检查 API 进程网络、代理或 DNS 配置。';
+    case 'session_unavailable':
+      return 'GitHub 授权成功，但 Electron 没有拿到登录 Cookie。请重启 Electron 后重试，并确认 API_BASE_URL 与 GitHub callback 使用相同 host。';
     default:
       return t('auth.login.form.error.oauthFailed');
   }

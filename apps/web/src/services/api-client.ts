@@ -20,6 +20,23 @@ const apiClient = axios.create({
 // 防止并发刷新：记录是否正在刷新中
 let isRefreshing = false;
 let refreshSubscribers: Array<(success: boolean) => void> = [];
+let desktopApiBaseUrlPromise: Promise<string> | null = null;
+
+function isDesktopRuntime() {
+  return typeof window !== 'undefined' && Boolean(window.desktop);
+}
+
+async function resolveApiBaseUrl() {
+  if (!isDesktopRuntime()) {
+    return '/api';
+  }
+
+  desktopApiBaseUrlPromise ??= window.desktop
+    ?.getApiBaseUrl()
+    .catch(() => 'http://localhost:3001') ?? Promise.resolve('http://localhost:3001');
+
+  return desktopApiBaseUrlPromise;
+}
 
 function subscribeTokenRefresh(cb: (success: boolean) => void) {
   refreshSubscribers.push(cb);
@@ -29,6 +46,11 @@ function notifySubscribers(success: boolean) {
   refreshSubscribers.forEach((cb) => cb(success));
   refreshSubscribers = [];
 }
+
+apiClient.interceptors.request.use(async (config) => {
+  config.baseURL = await resolveApiBaseUrl();
+  return config;
+});
 
 // Response interceptor: 处理 401 自动刷新
 apiClient.interceptors.response.use(
@@ -57,7 +79,8 @@ apiClient.interceptors.response.use(
 
       try {
         // 调用刷新接口（Cookie 自动携带 refresh_token）
-        await axios.post('/api/auth/refresh', {}, { withCredentials: true });
+        const apiBaseUrl = await resolveApiBaseUrl();
+        await axios.post(`${apiBaseUrl}/auth/refresh`, {}, { withCredentials: true });
         isRefreshing = false;
         notifySubscribers(true);
 

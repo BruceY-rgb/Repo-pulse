@@ -211,17 +211,23 @@ export class SyncService {
         });
 
         if (!existingEvent) {
+          const commitMessage = sanitizeDbText(commit.commit?.message || '');
+          const defaultBranch = sanitizeOptionalDbText(repository.defaultBranch);
+
           await prisma.event.create({
             data: {
               repositoryId,
               type: EventType.PUSH,
               action: 'pushed',
-              externalId: commit.sha,
-              title: commit.commit?.message?.split('\n')[0] || 'Push',
-              body: commit.commit?.message || '',
-              author: commit.commit?.author?.name || commit.commit?.author?.login || 'Unknown',
-              branch: repository.defaultBranch,
-              branches: [repository.defaultBranch],
+              externalId: sanitizeDbText(commit.sha),
+              title: sanitizeDbText(commitMessage.split('\n')[0] || 'Push', 'Push'),
+              body: commitMessage,
+              author: sanitizeDbText(
+                commit.commit?.author?.name || commit.commit?.author?.login || 'Unknown',
+                'Unknown',
+              ),
+              branch: defaultBranch,
+              branches: defaultBranch ? [defaultBranch] : [],
               occurredAt: new Date(commit.commit?.author?.date || new Date()),
               metadata: {
                 source: 'legacy_history_sync',
@@ -265,16 +271,14 @@ export class SyncService {
               repositoryId,
               type: eventType,
               action,
-              externalId: String(pr.id),
-              title: pr.title,
-              body: pr.body || '',
-              author: pr.user?.login || 'Unknown',
-              branch: pr.base?.ref,
-              sourceBranch: pr.head?.ref,
-              targetBranch: pr.base?.ref,
-              branches: [pr.head?.ref, pr.base?.ref].filter(
-                (branch): branch is string => Boolean(branch),
-              ),
+              externalId: sanitizeDbText(String(pr.id)),
+              title: sanitizeDbText(pr.title || 'Pull request', 'Pull request'),
+              body: sanitizeDbText(pr.body || ''),
+              author: sanitizeDbText(pr.user?.login || 'Unknown', 'Unknown'),
+              branch: sanitizeOptionalDbText(pr.base?.ref),
+              sourceBranch: sanitizeOptionalDbText(pr.head?.ref),
+              targetBranch: sanitizeOptionalDbText(pr.base?.ref),
+              branches: sanitizeDbTextArray([pr.head?.ref, pr.base?.ref]),
               occurredAt: new Date(
                 pr.merged_at || (pr.state === 'closed' ? pr.closed_at : null) || pr.created_at,
               ),
@@ -316,10 +320,10 @@ export class SyncService {
               repositoryId,
               type: eventType,
               action,
-              externalId: String(issue.id),
-              title: issue.title,
-              body: issue.body || '',
-              author: issue.user?.login || 'Unknown',
+              externalId: sanitizeDbText(String(issue.id)),
+              title: sanitizeDbText(issue.title || 'Issue', 'Issue'),
+              body: sanitizeDbText(issue.body || ''),
+              author: sanitizeDbText(issue.user?.login || 'Unknown', 'Unknown'),
               branches: [],
               occurredAt: new Date(
                 issue.state === 'closed'
@@ -369,4 +373,21 @@ export class SyncService {
       }
     }
   }
+}
+
+function sanitizeDbText(value: unknown, fallback = ''): string {
+  const text = typeof value === 'string' ? value : value == null ? fallback : String(value);
+  const sanitized = text.replace(/\u0000/g, '');
+  return sanitized || fallback;
+}
+
+function sanitizeOptionalDbText(value: unknown): string | undefined {
+  const sanitized = sanitizeDbText(value);
+  return sanitized || undefined;
+}
+
+function sanitizeDbTextArray(values: unknown[]): string[] {
+  return values
+    .map((value) => sanitizeOptionalDbText(value))
+    .filter((value): value is string => Boolean(value));
 }

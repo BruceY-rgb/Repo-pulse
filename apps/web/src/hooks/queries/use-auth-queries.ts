@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { authService } from '@/services/auth.service';
 import { useApiMutation, useApiQuery } from '@/lib/query-hooks';
 
@@ -57,11 +58,47 @@ interface UpdatePreferencesPayload {
   preferences: Record<string, unknown>;
 }
 
+async function resolveCurrentUserAfterDesktopOAuth() {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      return await authService.getMe();
+    } catch (error) {
+      lastError = error;
+
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 500);
+      });
+    }
+  }
+
+  throw lastError;
+}
+
 export function useGithubOAuthConfigMutation() {
   return useApiMutation({
     mutationKey: [...authQueryKeys.all, 'github-oauth-config'],
     mutationFn: async ({ clientId, clientSecret }: GithubOAuthConfigPayload) =>
       authService.configureGithubOAuth(clientId, clientSecret),
+  });
+}
+
+export function useDevGithubSessionMutation() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  return useApiMutation({
+    mutationKey: [...authQueryKeys.all, 'dev-github-session'],
+    mutationFn: async () => {
+      await authService.createDevGithubSession();
+      return authService.getMe();
+    },
+    onSuccess: async (user) => {
+      queryClient.setQueryData(authQueryKeys.currentUser(), user);
+      await queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });
+      navigate('/chats', { replace: true });
+    },
   });
 }
 
@@ -94,10 +131,34 @@ export function useLogoutMutation() {
 }
 
 export function useGithubOAuthLogin() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
   return useMemo(
-    () => () => {
+    () => async () => {
+      if (window.desktop?.loginWithGithub) {
+        const result = await window.desktop.loginWithGithub();
+
+        if (!result.ok) {
+          const reason = result.reason
+            ? `&reason=${encodeURIComponent(result.reason)}`
+            : '';
+          navigate(`/login?error=oauth_failed${reason}`, { replace: true });
+          return;
+        }
+
+        try {
+          const user = await resolveCurrentUserAfterDesktopOAuth();
+          queryClient.setQueryData(authQueryKeys.currentUser(), user);
+          navigate('/chats', { replace: true });
+        } catch {
+          navigate('/login?error=oauth_failed&reason=session_unavailable', { replace: true });
+        }
+        return;
+      }
+
       window.location.href = authService.getGithubAuthUrl();
     },
-    [],
+    [navigate, queryClient],
   );
 }
