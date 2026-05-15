@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { prisma, Prisma, User } from '@repo-pulse/database';
 import * as bcrypt from 'bcrypt';
+import * as https from 'https';
 
 @Injectable()
 export class UserService {
@@ -75,6 +76,38 @@ export class UserService {
     return prisma.user.update({
       where: { id },
       data: updateData,
+    });
+  }
+
+  async updateProfile(userId: string, data: { name?: string; email?: string; avatar?: string; username?: string; company?: string; bio?: string }) {
+    const d: Record<string, unknown> = {};
+    if (data.name !== undefined) d.name = data.name;
+    if (data.email !== undefined) d.email = data.email;
+    if (data.avatar !== undefined) d.avatar = data.avatar || null;
+    if (data.username !== undefined) d.username = data.username || null;
+    if (data.company !== undefined) d.company = data.company || null;
+    if (data.bio !== undefined) d.bio = data.bio || null;
+
+    const user = await prisma.user.update({ where: { id: userId }, data: d });
+    return this.excludePassword(user);
+  }
+
+  async fetchGithubAvatar(userId: string): Promise<string | null> {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { githubAccessToken: true } });
+    if (!user?.githubAccessToken) return null;
+
+    return new Promise((resolve) => {
+      const req = https.get('https://api.github.com/user', {
+        headers: { Authorization: `Bearer ${user.githubAccessToken}`, 'User-Agent': 'Repo-Pulse' },
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => {
+          try { resolve(JSON.parse(data).avatar_url || null); } catch { resolve(null); }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.setTimeout(5000, () => { req.destroy(); resolve(null); });
     });
   }
 

@@ -6,12 +6,17 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
+import { join } from 'path';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 
 async function bootstrap() {
   // 保留 Raw Body 供 Webhook 验签使用
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
   });
+
+  // Serve uploaded files
+  app.useStaticAssets(join(__dirname, '..', 'uploads'), { prefix: '/uploads' });
 
   const configService = app.get(ConfigService);
   const logger = new Logger('Bootstrap');

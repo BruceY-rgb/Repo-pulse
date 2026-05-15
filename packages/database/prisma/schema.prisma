@@ -109,6 +109,9 @@ model User {
   githubRefreshToken String?
   gitlabId           String?  @unique
   role               Role     @default(MEMBER)
+  username           String?  @unique
+  company            String?
+  bio                String?   @db.Text
   preferences        Json     @default("{}")
 
   // AI 配置
