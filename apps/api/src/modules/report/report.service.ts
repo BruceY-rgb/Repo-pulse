@@ -53,15 +53,28 @@ export class ReportService {
 
     const accessibleIds = userRepos.map((r) => r.repositoryId);
 
-    if (!repositoryIdsParam) return accessibleIds;
+    // 读取用户的监控范围，优先使用监控范围内的仓库
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { preferences: true },
+    });
+    const prefs = (user?.preferences as Record<string, unknown>) || {};
+    const scope = (prefs.monitoringScope as Record<string, unknown>) || {};
+    const scopeRepoIds = Array.isArray(scope.repositoryIds)
+      ? (scope.repositoryIds as string[]).filter((id) => accessibleIds.includes(id))
+      : accessibleIds;
+
+    const effectiveIds = scopeRepoIds.length > 0 ? scopeRepoIds : [];
+
+    if (!repositoryIdsParam) return effectiveIds;
 
     const requested = repositoryIdsParam
       .split(',')
       .map((id) => id.trim())
       .filter(Boolean);
 
-    const accessibleSet = new Set(accessibleIds);
-    return requested.filter((id) => accessibleSet.has(id));
+    const effectiveSet = new Set(effectiveIds);
+    return requested.filter((id) => effectiveSet.has(id));
   }
 
   async getReports(
