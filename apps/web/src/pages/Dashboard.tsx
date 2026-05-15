@@ -1028,8 +1028,8 @@ export function Dashboard() {
                         onClick={() => setRiskFilter(level)}
                         className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                           riskFilter === level
-                            ? 'bg-[var(--github-accent)] text-white'
-                            : 'bg-[var(--github-surface)] text-[var(--github-text-secondary)] hover:text-white'
+                            ? 'border border-[#ff4d00] bg-[#ff4d00] text-white shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]'
+                            : 'border border-transparent bg-[var(--github-surface)] text-[var(--github-text-secondary)] hover:text-white'
                         }`}
                       >
                         {level === 'all' ? 'All' : level.charAt(0).toUpperCase() + level.slice(1)}
