@@ -82,7 +82,7 @@ export class UserService {
   async updateProfile(userId: string, data: { name?: string; email?: string; avatar?: string; username?: string; company?: string; bio?: string }) {
     const d: Record<string, unknown> = {};
     if (data.name !== undefined) d.name = data.name;
-    if (data.email !== undefined) d.email = data.email;
+    if (data.email !== undefined && data.email) d.email = data.email;
     if (data.avatar !== undefined) d.avatar = data.avatar || null;
     if (data.username !== undefined) d.username = data.username || null;
     if (data.company !== undefined) d.company = data.company || null;

@@ -457,7 +457,7 @@ export function Settings() {
                         fd.append('file', file);
                         try {
                           var res = await apiClient.post('/users/me/avatar', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-                          setUserProfile({ ...userProfile, avatar: res.data.data.url });
+                          setUserProfile({ ...userProfile, avatar: res.data.data.avatar });
                           toast.success(t('settings.profile.avatarUploaded') || 'Avatar uploaded');
                         } catch { toast.error('Upload failed'); }
                       }} />

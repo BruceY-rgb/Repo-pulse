@@ -123,8 +123,6 @@ export class AuthService {
         githubId: profile.id,
         githubAccessToken: profile.githubAccessToken,
         githubRefreshToken: profile.githubRefreshToken,
-        name: profile.displayName || user.name,
-        avatar: profile.avatar || user.avatar || undefined,
       });
     }
 

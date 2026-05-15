@@ -4,19 +4,19 @@ import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import { json } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
 import { join } from 'path';
-import type { NestExpressApplication } from '@nestjs/platform-express';
 
 async function bootstrap() {
   // 保留 Raw Body 供 Webhook 验签使用
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+  const app = await NestFactory.create(AppModule, {
     rawBody: true,
+    bodyParser: false,
   });
 
-  // Serve uploaded files
-  app.useStaticAssets(join(__dirname, '..', 'uploads'), { prefix: '/uploads' });
+  app.use(json({ limit: '20mb' }));
 
   const configService = app.get(ConfigService);
   const logger = new Logger('Bootstrap');

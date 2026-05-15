@@ -6,7 +6,6 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UpdatePreferencesDto } from './dto/update-preferences.dto';
 import * as multer from 'multer';
-import { extname } from 'path';
 
 @ApiTags('用户')
 @Controller('users')
@@ -47,14 +46,8 @@ export class UserController {
 
   @Post('me/avatar')
   @UseInterceptors(FileInterceptor('file', {
-    storage: multer.diskStorage({
-      destination: './uploads/avatars',
-      filename: (_req: any, file: any, cb: any) => {
-        const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-        cb(null, unique + extname(file.originalname));
-      },
-    }),
-    limits: { fileSize: 10 * 1024 * 1024 },
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 50 * 1024 * 1024 },
     fileFilter: (_req: any, file: any, cb: any) => {
       if (!file.mimetype.startsWith('image/')) {
         cb(new Error('Only image files are allowed'), false);
@@ -67,8 +60,8 @@ export class UserController {
     @CurrentUser() user: { sub: string },
     @UploadedFile() file: any,
   ) {
-    const url = `/uploads/avatars/${file.filename}`;
-    await this.userService.updateProfile(user.sub, { avatar: url });
-    return { url };
+    const base64 = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    await this.userService.updateProfile(user.sub, { avatar: base64 });
+    return { avatar: base64 };
   }
 }

@@ -102,7 +102,7 @@ model User {
   id                 String   @id @default(cuid())
   email              String   @unique
   name               String
-  avatar             String?
+  avatar             String?   @db.Text
   passwordHash       String?
   githubId           String?  @unique
   githubAccessToken  String?
