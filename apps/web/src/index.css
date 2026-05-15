@@ -52,6 +52,14 @@
     --info-foreground:    213 100% 68%;
 
     /* ─── 圆角 ──────────────────────────────────────────────────────── */
+    /* GitHub 兼容变量 */
+    --github-accent: 16 100% 50%;
+    --github-bg: 220 13% 8%;
+    --github-border: 220 13% 20%;
+    --github-surface: 220 13% 16%;
+    --github-text: 210 20% 96%;
+    --github-text-secondary: 215 14% 60%;
+
     --radius: 0.75rem;
   }
 }
@@ -171,3 +179,5 @@
   outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
 }
+
+/* ─── Tab 选中状态 ───────────────────────────────────────────────────── */

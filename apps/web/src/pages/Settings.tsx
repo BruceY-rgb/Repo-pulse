@@ -361,35 +361,35 @@ export function Settings() {
         <TabsList className="bg-[var(--github-surface)] border border-[var(--github-border)]">
           <TabsTrigger
             value="profile"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+            className="data-[state=active]:text-white"
           >
             <User className="w-4 h-4 mr-2" />
             {t('settings.tabs.profile')}
           </TabsTrigger>
           <TabsTrigger
             value="notifications"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+            className="data-[state=active]:text-white"
           >
             <Bell className="w-4 h-4 mr-2" />
             {t('settings.tabs.notifications')}
           </TabsTrigger>
           <TabsTrigger
             value="integrations"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+            className="data-[state=active]:text-white"
           >
             <Code className="w-4 h-4 mr-2" />
             {t('settings.tabs.integrations')}
           </TabsTrigger>
           <TabsTrigger
             value="security"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+            className="data-[state=active]:text-white"
           >
             <Shield className="w-4 h-4 mr-2" />
             {t('settings.tabs.security')}
           </TabsTrigger>
           <TabsTrigger
             value="ai"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+            className="data-[state=active]:text-white"
           >
             <Brain className="w-4 h-4 mr-2" />
             {t('settings.tabs.ai')}
@@ -1075,7 +1075,7 @@ export function Settings() {
                         <Input
                           id="aiApiKey"
                           type={showApiKey ? 'text' : 'password'}
-                          placeholder={aiConfig.aiApiKey ? '***' : t('settings.ai.apiKeyPlaceholder')}
+                          placeholder={aiConfig.aiApiKey ? '*'.repeat(aiConfig.aiApiKey.length) : t('settings.ai.apiKeyPlaceholder')}
                           value={aiConfig.aiApiKey || ''}
                           onChange={(e) => setAiConfig({ ...aiConfig, aiApiKey: e.target.value })}
                           className="bg-[var(--github-surface)] border-[var(--github-border)] pr-10"
@@ -1085,7 +1085,7 @@ export function Settings() {
                           onClick={() => setShowApiKey(!showApiKey)}
                           className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--github-text-secondary)] hover:text-white transition-colors"
                         >
-                          {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          {showApiKey ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
                         </button>
                       </div>
                       <p className="text-xs text-[var(--github-text-secondary)]">
