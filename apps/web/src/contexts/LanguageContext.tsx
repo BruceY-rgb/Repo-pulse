@@ -615,6 +615,71 @@ const translations: Record<Language, Record<string, string>> = {
     'settings.ai.save': 'Save AI Config',
     'settings.ai.saving': 'Saving...',
     'settings.ai.saved': 'Saved!',
+
+    // AI Analysis Page
+    'analysis.page.title': 'AI Analysis',
+    'analysis.page.subtitle': 'Intelligent code review and risk assessment',
+    'analysis.riskLevel': 'Risk Level',
+    'analysis.category': 'Category',
+    'analysis.status': 'Status',
+    'analysis.filter.all': 'All',
+    'analysis.filter.low': 'Low',
+    'analysis.filter.medium': 'Medium',
+    'analysis.filter.high': 'High',
+    'analysis.filter.critical': 'Critical',
+    'analysis.filter.feature': 'Feature',
+    'analysis.filter.bugfix': 'Bug Fix',
+    'analysis.filter.refactor': 'Refactor',
+    'analysis.filter.security': 'Security',
+    'analysis.filter.dependency': 'Dependency',
+    'analysis.filter.docs': 'Docs',
+    'analysis.filter.completed': 'Completed',
+    'analysis.filter.failed': 'Failed',
+    'analysis.filter.processing': 'Processing',
+    'analysis.filter.skipped': 'Skipped',
+    'analysis.detail.title': 'Analysis Detail',
+    'analysis.empty.title': 'No analyses yet',
+    'analysis.empty.subtitle': 'AI analyses will appear here once events are processed.',
+    'analysis.error.loadFailed': 'Failed to load analyses.',
+    'analysis.error.retry': 'Retry',
+    'analysis.refreshing': 'Refreshing...',
+    'analysis.pagination.previous': 'Previous',
+    'analysis.pagination.next': 'Next',
+    'analysis.pagination.page': 'Page {current} of {total}',
+    'analysis.detail.reanalyze': 'Re-analyze',
+    'analysis.detail.delete': 'Delete',
+    'analysis.detail.score': 'Score',
+    'analysis.detail.confidence': 'confidence',
+    'analysis.detail.summary': 'Summary',
+    'analysis.detail.suggestedAction': 'Suggested',
+    'analysis.detail.model': 'Model',
+    'analysis.detail.tokens': 'tokens',
+    'analysis.detail.latency': 'latency',
+    'analysis.card.analyzing': 'Analyzing...',
+
+    // Approvals
+    'approvals.page.title': 'Approvals',
+    'approvals.page.subtitle': 'Review and approve high-risk code changes',
+    'approvals.tab.pending': 'Pending',
+    'approvals.tab.approved': 'Approved',
+    'approvals.tab.rejected': 'Rejected',
+    'approvals.detail.title': 'Approval Details',
+    'approvals.detail.event': 'Event',
+    'approvals.detail.unknown': 'Unknown',
+    'approvals.detail.aiSummary': 'AI Analysis Summary',
+    'approvals.detail.noAnalysis': 'No analysis available',
+    'approvals.detail.editContent': 'Edit Content (Optional)',
+    'approvals.detail.editPlaceholder': 'Edit the content before approving...',
+    'approvals.detail.comment': 'Comment (Optional)',
+    'approvals.detail.commentPlaceholder': 'Add a comment...',
+    'approvals.detail.approve': 'Approve',
+    'approvals.detail.reject': 'Reject',
+    'approvals.detail.editAndApprove': 'Edit & Approve',
+    'approvals.detail.reviewComment': 'Review Comment',
+    'approvals.empty.pending': 'No pending approvals',
+    'approvals.empty.approved': 'No approved approvals',
+    'approvals.empty.rejected': 'No rejected approvals',
+
   },
   zh: {
     // Header
@@ -1222,6 +1287,71 @@ const translations: Record<Language, Record<string, string>> = {
     'settings.ai.save': '保存 AI 配置',
     'settings.ai.saving': '保存中...',
     'settings.ai.saved': '已保存！',
+
+    // AI 分析页面
+    'analysis.page.title': 'AI 分析',
+    'analysis.page.subtitle': '智能代码审查与风险评估',
+    'analysis.riskLevel': '风险等级',
+    'analysis.category': '分类',
+    'analysis.status': '状态',
+    'analysis.filter.all': '全部',
+    'analysis.filter.low': '低',
+    'analysis.filter.medium': '中',
+    'analysis.filter.high': '高',
+    'analysis.filter.critical': '严重',
+    'analysis.filter.feature': '新功能',
+    'analysis.filter.bugfix': 'Bug 修复',
+    'analysis.filter.refactor': '重构',
+    'analysis.filter.security': '安全',
+    'analysis.filter.dependency': '依赖',
+    'analysis.filter.docs': '文档',
+    'analysis.filter.completed': '已完成',
+    'analysis.filter.failed': '失败',
+    'analysis.filter.processing': '处理中',
+    'analysis.filter.skipped': '已跳过',
+    'analysis.detail.title': '分析详情',
+    'analysis.empty.title': '暂无分析',
+    'analysis.empty.subtitle': 'AI 分析将在事件处理完成后显示在此处。',
+    'analysis.error.loadFailed': '加载分析失败。',
+    'analysis.error.retry': '重试',
+    'analysis.refreshing': '刷新中...',
+    'analysis.pagination.previous': '上一页',
+    'analysis.pagination.next': '下一页',
+    'analysis.pagination.page': '第 {current} 页，共 {total} 页',
+    'analysis.detail.reanalyze': '重新分析',
+    'analysis.detail.delete': '删除',
+    'analysis.detail.score': '评分',
+    'analysis.detail.confidence': '置信度',
+    'analysis.detail.summary': '摘要',
+    'analysis.detail.suggestedAction': '建议',
+    'analysis.detail.model': '模型',
+    'analysis.detail.tokens': 'Token',
+    'analysis.detail.latency': '延迟',
+    'analysis.card.analyzing': '分析中...',
+
+    // 审批
+    'approvals.page.title': '审批',
+    'approvals.page.subtitle': '审查并批准高风险代码变更',
+    'approvals.tab.pending': '待审批',
+    'approvals.tab.approved': '已批准',
+    'approvals.tab.rejected': '已拒绝',
+    'approvals.detail.title': '审批详情',
+    'approvals.detail.event': '事件',
+    'approvals.detail.unknown': '未知',
+    'approvals.detail.aiSummary': 'AI 分析摘要',
+    'approvals.detail.noAnalysis': '无可用分析',
+    'approvals.detail.editContent': '编辑内容（可选）',
+    'approvals.detail.editPlaceholder': '编辑审批内容...',
+    'approvals.detail.comment': '评论（可选）',
+    'approvals.detail.commentPlaceholder': '添加评论...',
+    'approvals.detail.approve': '批准',
+    'approvals.detail.reject': '拒绝',
+    'approvals.detail.editAndApprove': '编辑并批准',
+    'approvals.detail.reviewComment': '审批意见',
+    'approvals.empty.pending': '暂无待审批项',
+    'approvals.empty.approved': '暂无已批准项',
+    'approvals.empty.rejected': '暂无已拒绝项',
+
   },
 };
 
@@ -1230,8 +1360,14 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguage] = useState<Language>('zh');
 
-  const t = (key: string): string => {
-    return translations[language][key] || key;
+  const t = (key: string, params?: Record<string, string>): string => {
+    var text = translations[language][key] || key;
+    if (params) {
+      Object.keys(params).forEach(function (k) {
+        text = text.replace('{' + k + '}', params[k]);
+      });
+    }
+    return text;
   };
 
   return (
