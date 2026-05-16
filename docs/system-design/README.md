@@ -1,30 +1,48 @@
-# 系统设计图集（System Design Diagrams）
+# 系统设计 · 文档索引
 
-本目录收录《系统设计书》评分项所需的核心图。所有图均使用 **Mermaid** 绘制，可在 GitHub / VSCode / Typora 直接渲染。
+## 主文档
 
-## 图集索引
+[系统设计书 · system-design-book.md](./system-design-book.md) — 涵盖系统体系结构、数据库、关键过程、用户界面、组件设计、可靠性与安全性、项目文档体系七个章节，配套 15 张示意图。
 
-| # | 文件 | 对应评分项 | 类型 |
-| :--- | :--- | :--- | :--- |
-| 1 | [01-layered-architecture.md](./01-layered-architecture.md) | 系统体系结构图（10 分） | 分层架构图 |
-| 2 | [02-er-diagram.md](./02-er-diagram.md) | 数据库设计（20 分） | E-R 实体关系图 |
-| 3 | [03-sequence-webhook-ai.md](./03-sequence-webhook-ai.md) | 关键过程描述（15 分） | 主链路时序图 |
-| 4 | [04-component-diagram.md](./04-component-diagram.md) | 组件设计 / 详细设计（20 分） | 模块依赖图 + 前端组件层次 |
-| 5 | [05-user-flow.md](./05-user-flow.md) | 用户界面设计（10 分） | 页面流程图 |
-| 6 | [06-security-architecture.md](./06-security-architecture.md) | 可靠性 & 安全性设计（10 分） | 三层安全架构 + 容错降级 |
+## 章节入口
 
-## 与其他文档的关系
+| 章节 | 入口 | 关键图 |
+| :--- | :--- | :--- |
+| 系统体系结构 | [§1](./system-design-book.md#1-系统体系结构) | 图 1-1 分层架构 |
+| 数据库设计 | [§2](./system-design-book.md#2-数据库设计) | 图 2-1 E-R 结构 |
+| 关键过程描述 | [§3](./system-design-book.md#3-关键过程描述) | 图 3-1 主链路时序 |
+| 用户界面设计 | [§4](./system-design-book.md#4-用户界面设计) | 图 4-1 至 4-4（Landing / Dashboard / 页面流程 / 角色路径） |
+| 组件设计 / 详细设计 | [§5](./system-design-book.md#5-组件设计--详细设计) | 图 5-1 至 5-3（总组件 / 后端模块 / 前端组件） |
+| 可靠性与安全性设计 | [§6](./system-design-book.md#6-可靠性与安全性设计) | 图 6-1 至 6-3（SLO / 安全 / 容错） |
+| 项目文档体系 | [§7](./system-design-book.md#7-项目文档体系) | 图 7-1 至 7-2（文档站点 / 工程规范） |
 
-- **需求层面的图**（用例图、数据流图、状态图、CRC 卡片、类图）在 [`../requirements/srs.md`](../requirements/srs.md)。
-- **本目录是设计层面的图**，更贴近代码实现细节。
-- 项目计划与里程碑见 [`../project-plan-book.md`](../project-plan-book.md)。
+## 目录结构
 
-## 内容来源约束
+```
+docs/system-design/
+├── README.md                      (本文件 · 索引)
+├── system-design-book.md          (主文档 · 系统设计书)
+└── img/                           (15 张示意图)
+    ├── 01-architecture.png
+    ├── 02-database-er.png
+    ├── 03-sequence-main-flow.png
+    ├── 04-page-flow.png
+    ├── 04-role-paths.png
+    ├── 04-ui-landing.png
+    ├── 04-ui-dashboard.png
+    ├── 05-component.png
+    ├── 05-backend-modules.png
+    ├── 05-frontend-tree.png
+    ├── 06-slo-indicators.png
+    ├── 06-security-architecture.png
+    ├── 06-fallback-chain.png
+    ├── 07-docs-site.png
+    └── 07-docs-system.png
+```
 
-所有图的内容严格对齐：
+## 相关文档
 
-- 后端模块结构：`apps/api/src/modules/`（13 个 NestJS 模块）
-- 前端页面结构：`apps/web/src/pages/`（10 个主页面）
-- 数据模型：`packages/database/prisma/schema.prisma`（10 个 Model + 12 个枚举）
-- 业务流程描述：`docs/requirements/srs.md`
-- 性能与安全指标：`docs/requirements/srs.md` 安全性 & 性能章节
+- 需求规格：[`../requirements/srs.md`](../requirements/srs.md)
+- 项目计划：[`../project-plan-book.md`](../project-plan-book.md)
+- 前端样式规范：[`../frontend-style-guide.md`](../frontend-style-guide.md)
+- 顶层执行契约：[`../../CLAUDE.md`](../../CLAUDE.md)
