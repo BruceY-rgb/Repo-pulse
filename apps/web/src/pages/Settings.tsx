@@ -50,6 +50,7 @@ import {
   NotificationTemplateGallery,
   type NotificationTemplateValue,
 } from '@/components/settings/notifications/NotificationTemplateGallery';
+import { FeishuIntegrationDialog } from '@/components/settings/integrations/FeishuIntegrationDialog';
 import {
   createExceptionRuleFromFilterRule,
   createFilterRulePayloadFromDraft,
@@ -84,6 +85,8 @@ import type {
   NotificationChannel,
   NotificationPreferences,
 } from '@/services/notification.service';
+import { imService } from '@/services/im.service';
+import feishuLogo from '@/assets/integrations/feishu.svg';
 
 const apiKeys = [
   { name: 'Production API Key', key: 'rp_live_xxxxxxxxxxxx', created: '2025-01-15', lastUsed: '2 hours ago' },
@@ -94,6 +97,8 @@ export function Settings() {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [saved, setSaved] = useState(false);
+  const [feishuDialogOpen, setFeishuDialogOpen] = useState(false);
+  const [feishuConnected, setFeishuConnected] = useState(false);
 
   // 用户信息状态
   const [userLoading, setUserLoading] = useState(false);
@@ -171,6 +176,24 @@ export function Settings() {
       }
     };
     loadUser();
+  }, []);
+
+  useEffect(() => {
+    const loadFeishuStatus = async () => {
+      try {
+        const status = await imService.getImStatus();
+        const feishuStatus = status.feishu;
+        setFeishuConnected(Boolean(
+          feishuStatus?.connected ||
+          feishuStatus?.state === 'connected' ||
+          feishuStatus?.state === 'ready',
+        ));
+      } catch {
+        setFeishuConnected(false);
+      }
+    };
+
+    loadFeishuStatus();
   }, []);
 
   // 加载 AI 配置
@@ -909,15 +932,21 @@ export function Settings() {
             <CardContent className="space-y-4">
               {[
                 { provider: 'GitHub', username: userProfile.githubId ? userProfile.name || 'Connected' : 'Not connected', connected: !!userProfile.githubId, icon: Github },
+                { provider: 'Feishu', username: feishuConnected ? t('settings.integrations.feishu.ready') : t('settings.integrations.feishu.notConfigured'), connected: feishuConnected, logo: feishuLogo, action: 'feishu' },
                 { provider: 'Slack', username: 'Not configured', connected: false, icon: Slack },
                 { provider: 'Email', username: userProfile.email || 'Not configured', connected: !!userProfile.email, icon: Mail },
               ].map((account) => {
                 const Icon = account.icon;
+                const isFeishu = account.action === 'feishu';
                 return (
                   <div key={account.provider} className="flex items-center justify-between p-4 rounded-lg bg-white/5">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 rounded-lg bg-[var(--github-surface)] flex items-center justify-center">
-                        <Icon className="w-5 h-5 text-white" />
+                        {account.logo ? (
+                          <img src={account.logo} alt="" className="h-5 w-5 rounded" />
+                        ) : (
+                          <Icon className="w-5 h-5 text-white" />
+                        )}
                       </div>
                       <div>
                         <p className="text-sm font-medium text-white">{account.provider}</p>
@@ -925,7 +954,23 @@ export function Settings() {
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      {account.connected ? (
+                      {isFeishu ? (
+                        <>
+                          {account.connected ? (
+                            <Badge className="bg-green-400/20 text-green-400">{t('settings.integrations.connected')}</Badge>
+                          ) : null}
+                          <Button
+                            size="sm"
+                            className={account.connected ? "border-[var(--github-border)]" : "btn-x-primary"}
+                            variant={account.connected ? "outline" : undefined}
+                            onClick={() => setFeishuDialogOpen(true)}
+                          >
+                            {account.connected
+                              ? t('settings.integrations.feishu.manage')
+                              : t('settings.integrations.feishu.configure')}
+                          </Button>
+                        </>
+                      ) : account.connected ? (
                         <>
                           <Badge className="bg-green-400/20 text-green-400">{t('settings.integrations.connected')}</Badge>
                           <Button variant="outline" size="sm" className="border-[var(--github-border)] text-red-400 hover:text-red-400">
@@ -943,6 +988,12 @@ export function Settings() {
               })}
             </CardContent>
           </Card>
+
+          <FeishuIntegrationDialog
+            open={feishuDialogOpen}
+            onOpenChange={setFeishuDialogOpen}
+            onConnectionChange={setFeishuConnected}
+          />
 
           <Card className="card-github">
             <CardHeader>
