@@ -1,6 +1,16 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { SkipTransform } from '../../common/decorators/skip-transform.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ImService } from './im.service';
 import {
@@ -38,6 +48,15 @@ export class ImController {
     @Body() body: SaveFeishuConnectionDto,
   ) {
     return this.imService.testFeishuConnection(user.sub, body);
+  }
+
+  @Public()
+  @Post('feishu/events')
+  @HttpCode(200)
+  @SkipTransform()
+  @ApiOperation({ summary: '飞书事件回调' })
+  async handleFeishuEvent(@Body() body: Record<string, any>) {
+    return this.imService.handleFeishuEvent(body);
   }
 
   @Post('pairing-codes')

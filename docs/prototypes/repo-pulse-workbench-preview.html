@@ -1,0 +1,2252 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Repo-Pulse Chat Workbench Preview</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: oklch(13.5% 0.014 248);
+      --rail: oklch(10.5% 0.014 248);
+      --sidebar: oklch(16.5% 0.015 248);
+      --surface: oklch(19.5% 0.016 248);
+      --surface-2: oklch(23% 0.018 248);
+      --surface-3: oklch(27% 0.02 248);
+      --line: oklch(33% 0.023 248);
+      --line-soft: oklch(28% 0.018 248);
+      --text: oklch(94% 0.012 248);
+      --muted: oklch(70% 0.018 248);
+      --quiet: oklch(55% 0.018 248);
+      --orange: oklch(68% 0.22 42);
+      --orange-soft: oklch(78% 0.17 62);
+      --green: oklch(70% 0.17 150);
+      --blue: oklch(72% 0.14 245);
+      --red: oklch(66% 0.2 28);
+      --yellow: oklch(79% 0.15 86);
+      --violet: oklch(72% 0.14 305);
+      --radius: 8px;
+      --shadow: 0 28px 70px rgb(0 0 0 / 0.44);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+      background:
+        linear-gradient(135deg, rgb(255 77 0 / 0.07), transparent 28%),
+        linear-gradient(180deg, var(--bg), oklch(9% 0.012 250));
+      color: var(--text);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      background: transparent;
+      border: 0;
+      color: inherit;
+      cursor: pointer;
+    }
+
+    svg {
+      width: 18px;
+      height: 18px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.9;
+    }
+
+    .preview {
+      min-height: 100vh;
+      padding: 18px;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 72px 348px minmax(560px, 1fr) 360px;
+      height: calc(100vh - 36px);
+      min-height: 760px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--bg);
+      box-shadow: var(--shadow);
+    }
+
+    .rail {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 10px;
+      background: var(--rail);
+      border-right: 1px solid var(--line-soft);
+    }
+
+    .brand {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      margin-bottom: 8px;
+      border: 1px solid color-mix(in oklch, var(--orange), transparent 42%);
+      border-radius: 10px;
+      background: linear-gradient(150deg, color-mix(in oklch, var(--orange), transparent 72%), var(--surface));
+      color: var(--orange-soft);
+      font-weight: 820;
+    }
+
+    .rail-btn {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--quiet);
+      transition: background 150ms ease, color 150ms ease;
+    }
+
+    .rail-btn:hover,
+    .rail-btn.active {
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    .rail-btn.active::before {
+      content: "";
+      position: absolute;
+      left: -10px;
+      width: 3px;
+      height: 22px;
+      border-radius: 999px;
+      background: var(--orange);
+    }
+
+    .rail-spacer {
+      flex: 1;
+    }
+
+    .user-avatar {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      overflow: hidden;
+      border-radius: 9px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .user-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .sidebar {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      background: var(--sidebar);
+      border-right: 1px solid var(--line-soft);
+    }
+
+    .side-head {
+      padding: 16px 16px 14px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .workspace {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .workspace strong {
+      display: block;
+      font-size: 15px;
+    }
+
+    .workspace span {
+      display: block;
+      margin-top: 3px;
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
+    .mini-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 680;
+    }
+
+    .side-search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 34px;
+      margin-top: 14px;
+      padding: 0 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: oklch(12.5% 0.014 248);
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
+    .mode-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      margin-top: 12px;
+      padding: 3px;
+      border: 1px solid var(--line-soft);
+      border-radius: 9px;
+      background: oklch(13% 0.014 248);
+    }
+
+    .mode-tab {
+      height: 30px;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--quiet);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .mode-tab.active {
+      background: var(--surface-2);
+      color: var(--text);
+    }
+
+    .side-body {
+      min-height: 0;
+      overflow: auto;
+      padding: 12px 10px 18px;
+    }
+
+    .side-section {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 8px 7px;
+      color: var(--quiet);
+      font-size: 11px;
+      font-weight: 760;
+      text-transform: uppercase;
+    }
+
+    .repo-list,
+    .watch-source-list {
+      display: grid;
+      gap: 4px;
+    }
+
+    .repo-row {
+      position: relative;
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      width: 100%;
+      min-height: 68px;
+      padding: 9px 8px;
+      border-radius: 9px;
+      background: transparent;
+      text-align: left;
+      transition: background 150ms ease, box-shadow 150ms ease;
+    }
+
+    .repo-row:hover,
+    .repo-row.active {
+      background: var(--surface);
+    }
+
+    .repo-row.active {
+      box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--orange), transparent 68%);
+    }
+
+    .repo-logo {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 9px;
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 820;
+      overflow: hidden;
+    }
+
+    .repo-logo.orange {
+      background: linear-gradient(135deg, color-mix(in oklch, var(--orange), transparent 28%), oklch(22% 0.04 45));
+    }
+
+    .repo-logo.blue {
+      background: linear-gradient(135deg, color-mix(in oklch, var(--blue), transparent 36%), oklch(21% 0.04 245));
+    }
+
+    .repo-logo.green {
+      background: linear-gradient(135deg, color-mix(in oklch, var(--green), transparent 36%), oklch(21% 0.04 150));
+    }
+
+    .repo-logo.violet {
+      background: linear-gradient(135deg, color-mix(in oklch, var(--violet), transparent 38%), oklch(22% 0.04 305));
+    }
+
+    .presence-dot {
+      position: absolute;
+      right: -1px;
+      bottom: -1px;
+      width: 11px;
+      height: 11px;
+      border: 2px solid var(--sidebar);
+      border-radius: 50%;
+      background: var(--green);
+    }
+
+    .repo-copy {
+      min-width: 0;
+    }
+
+    .repo-title-line,
+    .source-title-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .repo-title,
+    .source-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 740;
+    }
+
+    .repo-slice,
+    .source-slice {
+      display: block;
+      overflow: hidden;
+      margin-top: 4px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--quiet);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .repo-meta {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-top: 5px;
+      color: var(--quiet);
+      font-size: 11px;
+    }
+
+    .unread {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 6px;
+      border-radius: 999px;
+      background: var(--orange);
+      color: oklch(99% 0.01 65);
+      font-size: 11px;
+      font-weight: 820;
+    }
+
+    .unread.red {
+      background: var(--red);
+    }
+
+    .unread.muted {
+      background: var(--surface-3);
+      color: var(--muted);
+    }
+
+    .watch-pane {
+      display: none;
+    }
+
+    .sidebar.watch-mode .chat-pane {
+      display: none;
+    }
+
+    .sidebar.watch-mode .watch-pane {
+      display: block;
+    }
+
+    .source-row {
+      display: grid;
+      grid-template-columns: 36px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      width: 100%;
+      padding: 8px;
+      border-radius: 9px;
+      background: transparent;
+      text-align: left;
+    }
+
+    .source-row:hover,
+    .source-row.active {
+      background: var(--surface);
+    }
+
+    .source-avatar {
+      display: grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 780;
+    }
+
+    .main {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      background: var(--bg);
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      min-height: 76px;
+      gap: 16px;
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--line-soft);
+      background:
+        linear-gradient(180deg, rgb(255 255 255 / 0.018), transparent),
+        var(--bg);
+    }
+
+    .crumb {
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 5px;
+      min-width: 0;
+    }
+
+    .title-row h1 {
+      overflow: hidden;
+      margin: 0;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 21px;
+      letter-spacing: 0;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 23px;
+      padding: 0 8px;
+      border: 1px solid var(--line-soft);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .status.green {
+      color: var(--green);
+    }
+
+    .status.orange {
+      color: var(--orange-soft);
+    }
+
+    .status.blue {
+      color: var(--blue);
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .icon-btn,
+    .text-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--muted);
+      transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+    }
+
+    .icon-btn {
+      width: 34px;
+    }
+
+    .text-btn {
+      gap: 8px;
+      padding: 0 12px;
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .icon-btn:hover,
+    .text-btn:hover {
+      border-color: color-mix(in oklch, var(--orange), transparent 48%);
+      color: var(--text);
+    }
+
+    .icon-btn.primary,
+    .text-btn.primary {
+      border-color: color-mix(in oklch, var(--orange), transparent 42%);
+      background: color-mix(in oklch, var(--orange), transparent 84%);
+      color: var(--orange-soft);
+    }
+
+    .icon-btn.active,
+    .text-btn.active {
+      border-color: color-mix(in oklch, var(--blue), transparent 44%);
+      background: color-mix(in oklch, var(--blue), transparent 86%);
+      color: var(--blue);
+    }
+
+    .icon-btn.report-active {
+      border-color: color-mix(in oklch, var(--violet), transparent 44%);
+      background: color-mix(in oklch, var(--violet), transparent 86%);
+      color: var(--violet);
+    }
+
+    .views {
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .view {
+      display: none;
+      height: 100%;
+      min-height: 0;
+    }
+
+    .view.active {
+      display: flex;
+      flex-direction: column;
+      animation: enter 220ms ease-out both;
+    }
+
+    @keyframes enter {
+      from {
+        opacity: 0;
+        transform: translateY(6px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .chat-stream {
+      min-height: 0;
+      flex: 1;
+      overflow: auto;
+      padding: 20px 22px 18px;
+    }
+
+    .day-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 2px 0 18px;
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
+    .day-divider::before,
+    .day-divider::after {
+      content: "";
+      height: 1px;
+      flex: 1;
+      background: var(--line-soft);
+    }
+
+    .message {
+      display: grid;
+      grid-template-columns: 40px minmax(0, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+      align-items: start;
+    }
+
+    .msg-avatar {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 820;
+    }
+
+    .msg-avatar.orange {
+      background: color-mix(in oklch, var(--orange), var(--surface-2) 70%);
+      color: var(--orange-soft);
+    }
+
+    .msg-avatar.blue {
+      background: color-mix(in oklch, var(--blue), var(--surface-2) 76%);
+      color: var(--blue);
+    }
+
+    .msg-avatar.green {
+      background: color-mix(in oklch, var(--green), var(--surface-2) 78%);
+      color: var(--green);
+    }
+
+    .msg-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .msg-top strong {
+      font-size: 13px;
+    }
+
+    .msg-top time {
+      color: var(--quiet);
+      font-size: 11px;
+    }
+
+    .bubble {
+      max-width: 900px;
+      margin-top: 6px;
+      padding: 12px 13px;
+      border: 1px solid var(--line-soft);
+      border-radius: 10px;
+      background: var(--surface);
+      transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+    }
+
+    .bubble:hover {
+      border-color: color-mix(in oklch, var(--orange), transparent 62%);
+      box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--orange), transparent 78%);
+    }
+
+    .bubble.menu-target {
+      border-color: color-mix(in oklch, var(--orange), transparent 34%);
+      box-shadow: 0 0 0 1px color-mix(in oklch, var(--orange), transparent 62%), 0 18px 40px rgb(0 0 0 / 0.2);
+    }
+
+    .bubble h2,
+    .bubble h3 {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    .bubble p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .bubble.event {
+      border-color: color-mix(in oklch, var(--blue), transparent 70%);
+      background: color-mix(in oklch, var(--blue), var(--surface) 94%);
+    }
+
+    .bubble.approval {
+      border-color: color-mix(in oklch, var(--orange), transparent 58%);
+      background: color-mix(in oklch, var(--orange), var(--surface) 92%);
+    }
+
+    .bubble.agent {
+      border-color: color-mix(in oklch, var(--green), transparent 62%);
+      background: color-mix(in oklch, var(--green), var(--surface) 94%);
+    }
+
+    .bubble.report {
+      border-color: color-mix(in oklch, var(--violet), transparent 66%);
+      background: color-mix(in oklch, var(--violet), var(--surface) 94%);
+    }
+
+    .agent-reminder {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin: -2px 0 10px;
+      padding: 8px 9px;
+      border: 1px solid color-mix(in oklch, var(--orange), transparent 58%);
+      border-radius: 8px;
+      background: color-mix(in oklch, var(--orange), transparent 88%);
+      color: var(--orange-soft);
+      font-size: 12px;
+    }
+
+    .agent-reminder strong {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+    }
+
+    .agent-reminder button {
+      height: 26px;
+      padding: 0 8px;
+      border: 1px solid color-mix(in oklch, var(--orange), transparent 55%);
+      border-radius: 7px;
+      background: color-mix(in oklch, var(--orange), transparent 82%);
+      color: var(--orange-soft);
+      font-size: 11px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+
+    .tag-row,
+    .action-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 10px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 22px;
+      padding: 0 7px;
+      border: 1px solid var(--line-soft);
+      border-radius: 999px;
+      color: var(--quiet);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .tag.red {
+      border-color: color-mix(in oklch, var(--red), transparent 65%);
+      color: var(--red);
+    }
+
+    .tag.orange {
+      border-color: color-mix(in oklch, var(--orange), transparent 62%);
+      color: var(--orange-soft);
+    }
+
+    .tag.green {
+      border-color: color-mix(in oklch, var(--green), transparent 64%);
+      color: var(--green);
+    }
+
+    .tag.blue {
+      border-color: color-mix(in oklch, var(--blue), transparent 64%);
+      color: var(--blue);
+    }
+
+    .diff {
+      display: grid;
+      gap: 6px;
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: oklch(12.5% 0.014 248);
+      color: var(--muted);
+      font-family: "SF Mono", Monaco, Consolas, monospace;
+      font-size: 12px;
+      overflow-x: auto;
+    }
+
+    .action-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 32px;
+      padding: 0 11px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .action-btn:hover {
+      color: var(--text);
+      border-color: var(--line);
+    }
+
+    .action-btn.primary {
+      border-color: color-mix(in oklch, var(--orange), transparent 45%);
+      background: color-mix(in oklch, var(--orange), transparent 82%);
+      color: var(--orange-soft);
+    }
+
+    .action-btn.success {
+      border-color: color-mix(in oklch, var(--green), transparent 45%);
+      background: color-mix(in oklch, var(--green), transparent 86%);
+      color: var(--green);
+    }
+
+    .composer {
+      border-top: 1px solid var(--line-soft);
+      padding: 12px 18px 16px;
+      background: oklch(12.7% 0.014 248);
+    }
+
+    .suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-bottom: 9px;
+    }
+
+    .suggestion {
+      height: 27px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .composer-box {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+    }
+
+    .composer-box textarea {
+      width: 100%;
+      min-height: 42px;
+      max-height: 92px;
+      resize: none;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .composer-box textarea::placeholder {
+      color: var(--quiet);
+    }
+
+    .feed-view {
+      min-height: 0;
+      overflow: auto;
+      padding: 18px 22px 24px;
+      background: oklch(13% 0.014 248);
+    }
+
+    .feed-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 680px) minmax(250px, 1fr);
+      gap: 18px;
+      align-items: start;
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+
+    .feed-main {
+      border: 1px solid var(--line-soft);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--surface);
+    }
+
+    .feed-header {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line-soft);
+      background: color-mix(in oklch, var(--surface), transparent 4%);
+      backdrop-filter: blur(14px);
+    }
+
+    .feed-header h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .feed-tabs {
+      display: inline-flex;
+      gap: 2px;
+      padding: 3px;
+      border: 1px solid var(--line-soft);
+      border-radius: 9px;
+      background: oklch(13% 0.014 248);
+    }
+
+    .feed-tab {
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--quiet);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .feed-tab.active {
+      background: var(--surface-3);
+      color: var(--text);
+    }
+
+    .tweet-card {
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr);
+      gap: 12px;
+      padding: 15px 16px;
+      border-bottom: 1px solid var(--line-soft);
+      background: var(--surface);
+    }
+
+    .tweet-card:last-child {
+      border-bottom: 0;
+    }
+
+    .tweet-card:hover {
+      background: oklch(21% 0.017 248);
+    }
+
+    .tweet-avatar {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      border-radius: 999px;
+      background: var(--surface-3);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 820;
+    }
+
+    .tweet-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
+    .tweet-top strong {
+      overflow: hidden;
+      color: var(--text);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+    }
+
+    .tweet-card h3 {
+      margin: 7px 0 0;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .tweet-card p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .tweet-media {
+      margin-top: 11px;
+      padding: 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: 10px;
+      background: oklch(14% 0.014 248);
+    }
+
+    .tweet-media strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .tweet-media span {
+      display: block;
+      margin-top: 6px;
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
+    .tweet-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .tweet-action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-width: 0;
+      height: 30px;
+      padding: 0 9px;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--quiet);
+      font-size: 12px;
+      font-weight: 700;
+      transition: background 150ms ease, color 150ms ease;
+    }
+
+    .tweet-action:first-child {
+      color: var(--orange-soft);
+    }
+
+    .tweet-action.ai-action {
+      color: var(--blue);
+    }
+
+    .tweet-action:hover {
+      background: var(--surface-3);
+      color: var(--text);
+    }
+
+    .tweet-action:first-child:hover {
+      background: color-mix(in oklch, var(--orange), transparent 85%);
+      color: var(--orange-soft);
+    }
+
+    .tweet-action.ai-action:hover {
+      background: color-mix(in oklch, var(--blue), transparent 86%);
+      color: var(--blue);
+    }
+
+    .feed-aside {
+      display: grid;
+      gap: 12px;
+    }
+
+    .aside-card,
+    .context-card {
+      border: 1px solid var(--line-soft);
+      border-radius: 10px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    .aside-card h3,
+    .context-card h3 {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin: 0;
+      padding: 12px 13px;
+      border-bottom: 1px solid var(--line-soft);
+      font-size: 13px;
+    }
+
+    .aside-body,
+    .context-body {
+      display: grid;
+      gap: 9px;
+      padding: 12px;
+    }
+
+    .trend-row,
+    .context-row {
+      display: grid;
+      gap: 4px;
+      padding-bottom: 9px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .trend-row:last-child,
+    .context-row:last-child {
+      padding-bottom: 0;
+      border-bottom: 0;
+    }
+
+    .trend-row strong,
+    .context-row strong {
+      font-size: 12px;
+    }
+
+    .trend-row span,
+    .context-row span {
+      color: var(--quiet);
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .context {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      background: var(--sidebar);
+      border-left: 1px solid var(--line-soft);
+    }
+
+    .context-head {
+      min-height: 76px;
+      padding: 15px 16px 13px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .context-head span {
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
+    .context-head h2 {
+      margin: 5px 0 0;
+      font-size: 16px;
+    }
+
+    .context-scroll {
+      min-height: 0;
+      overflow: auto;
+      padding: 14px;
+    }
+
+    .health-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .health-cell {
+      padding: 10px;
+      border-radius: 8px;
+      background: oklch(15% 0.014 248);
+    }
+
+    .health-cell span {
+      display: block;
+      color: var(--quiet);
+      font-size: 11px;
+    }
+
+    .health-cell strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 15px;
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .dashboard-metric {
+      min-width: 0;
+      padding: 10px;
+      border-radius: 8px;
+      background: oklch(15% 0.014 248);
+    }
+
+    .dashboard-metric span {
+      display: block;
+      color: var(--quiet);
+      font-size: 11px;
+    }
+
+    .dashboard-metric strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .dashboard-metric small {
+      display: block;
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .trend-bars {
+      display: grid;
+      gap: 8px;
+    }
+
+    .trend-bar {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr) 24px;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .bar-track {
+      height: 7px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: var(--surface-3);
+    }
+
+    .bar-fill {
+      display: block;
+      width: var(--value);
+      height: 100%;
+      border-radius: inherit;
+      background: var(--orange);
+    }
+
+    .bar-fill.blue {
+      background: var(--blue);
+    }
+
+    .bar-fill.green {
+      background: var(--green);
+    }
+
+    .bar-fill.red {
+      background: var(--red);
+    }
+
+    .toast {
+      position: fixed;
+      right: 28px;
+      bottom: 28px;
+      display: none;
+      max-width: 360px;
+      padding: 12px 14px;
+      border: 1px solid color-mix(in oklch, var(--green), transparent 50%);
+      border-radius: 8px;
+      background: oklch(18% 0.02 150);
+      color: var(--text);
+      box-shadow: var(--shadow);
+      font-size: 13px;
+    }
+
+    .message-menu {
+      position: fixed;
+      z-index: 40;
+      display: none;
+      width: min(320px, calc(100vw - 32px));
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: oklch(16% 0.016 248);
+      box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
+    }
+
+    .message-menu.show {
+      display: block;
+      animation: menuIn 120ms ease-out both;
+    }
+
+    .message-menu-title {
+      padding: 6px 8px 8px;
+      border-bottom: 1px solid var(--line-soft);
+      color: var(--quiet);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .menu-action {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      width: 100%;
+      min-height: 36px;
+      margin-top: 5px;
+      padding: 8px;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .menu-action:hover {
+      background: var(--surface-2);
+      color: var(--text);
+    }
+
+    .menu-action.primary {
+      color: var(--orange-soft);
+    }
+
+    @keyframes menuIn {
+      from {
+        opacity: 0;
+        transform: scale(0.98) translateY(-2px);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+
+    .toast.show {
+      display: block;
+      animation: toast 240ms ease-out both;
+    }
+
+    @keyframes toast {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @media (max-width: 1280px) {
+      .app {
+        grid-template-columns: 68px 318px minmax(520px, 1fr);
+      }
+
+      .context {
+        display: none;
+      }
+
+      .feed-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 900px) {
+      .preview {
+        padding: 0;
+      }
+
+      .app {
+        grid-template-columns: 62px minmax(0, 1fr);
+        height: 100vh;
+        min-height: 100vh;
+        border: 0;
+        border-radius: 0;
+      }
+
+      .sidebar {
+        display: none;
+      }
+
+      .topbar {
+        grid-template-columns: 1fr;
+      }
+
+      .top-actions {
+        overflow-x: auto;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .message,
+      .tweet-card {
+        grid-template-columns: 1fr;
+      }
+
+      .msg-avatar,
+      .tweet-avatar {
+        display: none;
+      }
+
+      .composer-box,
+      .tweet-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="preview">
+    <section class="app" aria-label="Repo-Pulse 桌面端聊天工作台">
+      <aside class="rail" aria-label="主导航">
+        <div class="brand">RP</div>
+        <button class="rail-btn active" data-mode="chat" title="仓库聊天">
+          <svg viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
+        </button>
+        <button class="rail-btn" data-mode="watch" title="关注动态">
+          <svg viewBox="0 0 24 24"><path d="M12 5l2.2 4.5 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5-3.6-3.5 5-.7z"/></svg>
+        </button>
+        <button class="rail-btn" title="审批">
+          <svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        </button>
+        <button class="rail-btn" title="Agent">
+          <svg viewBox="0 0 24 24"><rect x="5" y="8" width="14" height="10" rx="2"/><path d="M9 13h.01"/><path d="M15 13h.01"/><path d="M12 8V4"/></svg>
+        </button>
+        <div class="rail-spacer"></div>
+        <button class="rail-btn" title="设置">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 3.1-.2-.1a1.7 1.7 0 0 0-2 .1 1.7 1.7 0 0 0-.8 1.6V22H9v-.3a1.7 1.7 0 0 0-.8-1.6 1.7 1.7 0 0 0-2-.1l-.2.1L4.2 17l.1-.1A1.7 1.7 0 0 0 4.6 15 1.7 1.7 0 0 0 3 14H2v-4h1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1L6 3.9l.2.1a1.7 1.7 0 0 0 2-.1A1.7 1.7 0 0 0 9 2.3V2h6v.3a1.7 1.7 0 0 0 .8 1.6 1.7 1.7 0 0 0 2 .1l.2-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9A1.7 1.7 0 0 0 21 10h1v4h-1a1.7 1.7 0 0 0-1.6 1z"/></svg>
+        </button>
+        <div class="user-avatar"><img src="../../apps/web/public/avator.png" alt="用户头像" /></div>
+      </aside>
+
+      <aside class="sidebar" id="sidebar" aria-label="仓库列表和关注源">
+        <div class="side-head">
+          <div class="workspace">
+            <div>
+              <strong>Repo-Pulse</strong>
+              <span>Team command workspace</span>
+            </div>
+            <button class="mini-button">+</button>
+          </div>
+          <div class="side-search">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            搜索仓库、事件、审批
+          </div>
+          <div class="mode-tabs">
+            <button class="mode-tab active" data-mode="chat">可编辑仓库</button>
+            <button class="mode-tab" data-mode="watch">关注动态</button>
+          </div>
+        </div>
+
+        <div class="side-body chat-pane">
+          <div class="side-section"><span>Repository Chats</span><span>12</span></div>
+          <div class="repo-list">
+            <button class="repo-row active" data-repo="web">
+              <span class="repo-logo orange">WEB<span class="presence-dot"></span></span>
+              <span class="repo-copy">
+                <span class="repo-title-line"><span class="repo-title">Repo-Pulse / apps-web</span><span class="tag red">P0</span></span>
+                <span class="repo-slice">审批请求：OAuth 回调变更需要确认</span>
+                <span class="repo-meta">2m · release/desktop-shell · Agent 可执行</span>
+              </span>
+              <span class="unread red">6</span>
+            </button>
+            <button class="repo-row" data-repo="api">
+              <span class="repo-logo blue">API<span class="presence-dot"></span></span>
+              <span class="repo-copy">
+                <span class="repo-title-line"><span class="repo-title">Repo-Pulse / apps-api</span><span class="tag orange">Review</span></span>
+                <span class="repo-slice">AI 摘要：Webhook 验签链路已完成</span>
+                <span class="repo-meta">11m · webhook-events · 1 条待读</span>
+              </span>
+              <span class="unread">1</span>
+            </button>
+            <button class="repo-row" data-repo="ai">
+              <span class="repo-logo green">AI</span>
+              <span class="repo-copy">
+                <span class="repo-title-line"><span class="repo-title">packages / ai-sdk</span><span class="tag green">OK</span></span>
+                <span class="repo-slice">报告：Provider fallback 兼容性摘要</span>
+                <span class="repo-meta">24m · main · 可生成报告</span>
+              </span>
+              <span class="unread muted">3</span>
+            </button>
+            <button class="repo-row" data-repo="desktop">
+              <span class="repo-logo violet">DESK</span>
+              <span class="repo-copy">
+                <span class="repo-title-line"><span class="repo-title">apps / electron</span><span class="tag blue">Live</span></span>
+                <span class="repo-slice">GitHub Event：titleBarStyle 更新</span>
+                <span class="repo-meta">42m · desktop shell · 已读</span>
+              </span>
+              <span></span>
+            </button>
+          </div>
+
+          <div class="side-section"><span>Agent Queue</span><span>确认后执行</span></div>
+          <div class="repo-list">
+            <button class="repo-row agent-queue-row" type="button">
+              <span class="repo-logo orange">AG</span>
+              <span class="repo-copy">
+                <span class="repo-title-line"><span class="repo-title">待确认操作</span><span class="tag orange">2</span></span>
+                <span class="repo-slice">同步分支、重新分析认证链路、生成报告草稿</span>
+                <span class="repo-meta">不会自动执行</span>
+              </span>
+              <span class="unread">2</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="side-body watch-pane">
+          <div class="side-section"><span>Watch Sources</span><span>只读</span></div>
+          <div class="watch-source-list">
+            <button class="source-row active">
+              <span class="source-avatar">ALL</span>
+              <span>
+                <span class="source-title-line"><span class="source-title">全部关注动态</span></span>
+                <span class="source-slice">starred repos + following users</span>
+              </span>
+              <span class="unread">27</span>
+            </button>
+            <button class="source-row">
+              <span class="source-avatar">V</span>
+              <span>
+                <span class="source-title-line"><span class="source-title">vercel/ai</span></span>
+                <span class="source-slice">Streaming helper release</span>
+              </span>
+              <span class="unread muted">5</span>
+            </button>
+            <button class="source-row">
+              <span class="source-avatar">S</span>
+              <span>
+                <span class="source-title-line"><span class="source-title">socket.io</span></span>
+                <span class="source-slice">WebSocket auth docs</span>
+              </span>
+              <span class="unread muted">3</span>
+            </button>
+            <button class="source-row">
+              <span class="source-avatar">@</span>
+              <span>
+                <span class="source-title-line"><span class="source-title">Following users</span></span>
+                <span class="source-slice">OAuth device flow examples</span>
+              </span>
+              <span class="unread muted">8</span>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <section class="main" aria-live="polite">
+        <header class="topbar">
+          <div>
+            <div class="crumb" id="crumb">可编辑仓库 / Repo-Pulse / apps-web</div>
+            <div class="title-row">
+              <h1 id="title">Repo-Pulse / apps-web</h1>
+              <span class="status green"><span class="dot"></span>可编辑</span>
+              <span class="status orange" id="subtitle">6 个未处理事件</span>
+            </div>
+          </div>
+          <div class="top-actions">
+            <button class="icon-btn" title="搜索聊天记录" aria-label="搜索聊天记录">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            </button>
+            <button class="icon-btn" id="dashboardTopBtn" title="仓库看板" aria-label="仓库看板">
+              <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="8" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="15" width="7" height="6" rx="1"/></svg>
+            </button>
+            <button class="icon-btn" title="分支监控" aria-label="分支监控">
+              <svg viewBox="0 0 24 24"><path d="M7 7v10"/><path d="M17 7v10"/><path d="M7 12h10"/></svg>
+            </button>
+            <button class="icon-btn" id="reportTopBtn" title="生成报告" aria-label="生成报告">
+              <svg viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 13h6"/><path d="M10 17h4"/></svg>
+            </button>
+            <button class="icon-btn primary" id="agentTopBtn" title="让 Agent 处理" aria-label="让 Agent 处理">
+              <svg viewBox="0 0 24 24"><rect x="5" y="8" width="14" height="10" rx="2"/><path d="M9 13h.01"/><path d="M15 13h.01"/></svg>
+            </button>
+          </div>
+        </header>
+
+        <div class="views">
+          <section class="view active" id="chatView" aria-label="仓库聊天窗口">
+            <div class="chat-stream">
+              <div class="day-divider">今天 · 仓库事件流</div>
+
+              <article class="message">
+                <div class="msg-avatar blue">GH</div>
+                <div>
+                  <div class="msg-top"><strong>GitHub</strong><time>09:42</time><span class="tag blue">push</span></div>
+                  <div class="bubble event" data-agent-action="让 Agent 分析这次 push 的影响范围">
+                    <h3>Yang 推送了 3 个 commits 到 release/desktop-shell</h3>
+                    <p>这个消息像聊天工具里的系统消息，但保留仓库事件结构，方便团队直接围绕它讨论。</p>
+                    <div class="diff">
+                      <span>+ apps/web/src/pages/AuthCallback.tsx</span>
+                      <span>~ apps/web/src/services/api-client.ts</span>
+                      <span>~ apps/electron/src/main/main.ts</span>
+                    </div>
+                    <div class="tag-row">
+                      <span class="tag">3 commits</span>
+                      <span class="tag">5 files</span>
+                      <span class="tag orange">桌面端认证</span>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="message">
+                <div class="msg-avatar orange">AI</div>
+                <div>
+                  <div class="msg-top"><strong>Repo-Pulse AI</strong><time>09:43</time><span class="tag red">风险 86</span></div>
+                  <div class="bubble" data-agent-action="让 Agent 生成认证风险验证清单">
+                    <div class="agent-reminder">
+                      <strong>
+                        <svg viewBox="0 0 24 24"><rect x="5" y="8" width="14" height="10" rx="2"/><path d="M9 13h.01"/><path d="M15 13h.01"/></svg>
+                        建议交给 Agent 生成验证计划
+                      </strong>
+                      <button type="button" data-agent-inline>处理</button>
+                    </div>
+                    <h3>AI 已完成风险摘要</h3>
+                    <p>变更影响 OAuth 回调、cookie 刷新和 Electron file 协议路由。建议验证桌面端登录、浏览器登录、token 过期刷新、退出登录四条路径。</p>
+                    <div class="tag-row">
+                      <span class="tag red">高风险</span>
+                      <span class="tag">auth</span>
+                      <span class="tag">desktop</span>
+                      <span class="tag">session</span>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="message">
+                <div class="msg-avatar orange">AP</div>
+                <div>
+                  <div class="msg-top"><strong>审批流</strong><time>09:44</time><span class="tag orange">待处理</span></div>
+                  <div class="bubble approval" data-agent-action="让 Agent 处理这条审批请求">
+                    <div class="agent-reminder">
+                      <strong>
+                        <svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                        这条审批需要处理
+                      </strong>
+                      <button type="button" data-agent-inline>让 Agent 起草处理意见</button>
+                    </div>
+                    <h3>审批请求：是否允许推送这条高风险摘要到飞书群？</h3>
+                    <p>通知会包含受影响文件、分支、AI 风险原因和验证清单。这里应该像聊天消息一样直接处理，而不是跳去单独审批页面。</p>
+                    <div class="action-row">
+                      <button class="action-btn success" id="approveBtn">通过</button>
+                      <button class="action-btn">编辑后通过</button>
+                      <button class="action-btn">拒绝</button>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="message">
+                <div class="msg-avatar green">AG</div>
+                <div>
+                  <div class="msg-top"><strong>Agent</strong><time>09:46</time><span class="tag orange">等待确认</span></div>
+                  <div class="bubble agent" data-agent-action="打开 Agent 执行计划确认">
+                    <h3>我可以继续处理：同步分支、重新分析认证链路、生成临时报告</h3>
+                    <p>按安全策略，我会先给出计划和影响范围；你确认后才执行。不会自动写代码，也不会自动发送外部通知。</p>
+                    <div class="diff">
+                      <span>1. POST /repositories/apps-web/sync</span>
+                      <span>2. POST /ai/trigger/:eventId {"force": true}</span>
+                      <span>3. POST /reports/generate {"format": "MARKDOWN"}</span>
+                    </div>
+                    <div class="action-row">
+                      <button class="action-btn primary" id="confirmAgentBtn">确认执行计划</button>
+                      <button class="action-btn">调整计划</button>
+                      <button class="action-btn">稍后</button>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="message">
+                <div class="msg-avatar violet">RP</div>
+                <div>
+                  <div class="msg-top"><strong>报告系统</strong><time>10:08</time><span class="tag blue">draft</span></div>
+                  <div class="bubble report" data-agent-action="让 Agent 基于报告草稿生成下一步建议">
+                    <h3>桌面端认证链路临时报告已生成草稿</h3>
+                    <p>报告从会话消息中自动组织：变更背景、风险判断、审批记录、Agent 执行结果和验证清单。</p>
+                    <div class="action-row">
+                      <button class="action-btn">预览报告</button>
+                      <button class="action-btn">导出 Markdown</button>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <div class="composer" aria-label="Agent 操作输入区">
+              <div class="suggestions">
+                <button class="suggestion">总结最近 24 小时风险</button>
+                <button class="suggestion">生成验证清单</button>
+                <button class="suggestion">同步当前分支</button>
+                <button class="suggestion">生成报告草稿</button>
+              </div>
+              <div class="composer-box">
+                <textarea placeholder="在这个仓库会话里直接让 Agent 做事：例如“检查 release/desktop-shell 最近的认证风险，生成一份验证计划”"></textarea>
+                <button class="text-btn primary" id="sendAgentBtn">发送给 Agent</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" id="watchView" aria-label="关注仓库动态流">
+            <div class="feed-view">
+              <div class="feed-layout">
+                <section class="feed-main">
+                  <div class="feed-header">
+                    <div>
+                      <h2>关注动态</h2>
+                      <div class="crumb">了解 star 仓库和 follow 用户正在发生什么</div>
+                    </div>
+                    <div class="feed-tabs">
+                      <button class="feed-tab active" data-filter="all">全部</button>
+                      <button class="feed-tab" data-filter="release">Release</button>
+                      <button class="feed-tab" data-filter="security">Security</button>
+                      <button class="feed-tab" data-filter="people">Following</button>
+                    </div>
+                  </div>
+
+                  <article class="tweet-card" data-kind="release">
+                    <div class="tweet-avatar">V</div>
+                    <div>
+                      <div class="tweet-top"><strong>vercel/ai</strong><span>@vercel · 18m</span><span class="tag orange">release</span></div>
+                      <h3>AI SDK 发布新的 streaming helper，可能影响 Repo-Pulse 的 AI 分析流设计</h3>
+                      <p>关注流的价值不是让用户处理审批，而是让用户快速知道生态里发生了什么，并判断是否需要加入监控。</p>
+                      <div class="tweet-media">
+                        <strong>v6 beta: streamObject lifecycle updates</strong>
+                        <span>TypeScript · 12.4k stars · 与 SSE 分析流高度相关</span>
+                      </div>
+                      <div class="tweet-actions">
+                        <button class="tweet-action">加入监控</button>
+                        <button class="tweet-action ai-action" data-ai-analysis="vercel/ai 的 streaming helper 与 Repo-Pulse 的 AI 分析流高度相关，建议评估是否转入 apps/web 监控。">AI 分析</button>
+                        <button class="tweet-action">转发到 apps/web</button>
+                        <button class="tweet-action">收藏</button>
+                        <button class="tweet-action">打开 GitHub</button>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article class="tweet-card" data-kind="security">
+                    <div class="tweet-avatar">S</div>
+                    <div>
+                      <div class="tweet-top"><strong>socketio/socket.io</strong><span>@socketio · 43m</span><span class="tag red">security</span></div>
+                      <h3>WebSocket 鉴权文档新增 cookie 与 room authorization 示例</h3>
+                      <p>这条动态被 Repo-Pulse 标记为“可能影响当前项目”，因为 apps/api 正在使用 Socket.io Gateway 推送仓库事件。</p>
+                      <div class="tweet-actions">
+                        <button class="tweet-action">加入监控</button>
+                        <button class="tweet-action ai-action" data-ai-analysis="socket.io 的鉴权文档更新与 apps/api 的事件 Gateway 直接相关，建议转发到 apps/api 讨论。">AI 分析</button>
+                        <button class="tweet-action">转发到 apps/api</button>
+                        <button class="tweet-action">稍后读</button>
+                        <button class="tweet-action">忽略</button>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article class="tweet-card" data-kind="people">
+                    <div class="tweet-avatar">@</div>
+                    <div>
+                      <div class="tweet-top"><strong>@open-source-maintainer</strong><span>following · 1h</span><span class="tag blue">example</span></div>
+                      <h3>连续提交 GitHub OAuth Device Flow 桌面端示例</h3>
+                      <p>适合后续评估桌面端登录体验。它不进入可编辑仓库聊天，除非你主动转发或加入监控。</p>
+                      <div class="tweet-media">
+                        <strong>github-device-flow-electron-demo</strong>
+                        <span>OAuth · Electron · 认证体验参考</span>
+                      </div>
+                      <div class="tweet-actions">
+                        <button class="tweet-action ai-action" data-ai-analysis="这个 OAuth Device Flow 示例可作为桌面端登录体验参考，但暂不需要进入审批或任务队列。">AI 分析</button>
+                        <button class="tweet-action">转发到设计频道</button>
+                        <button class="tweet-action">收藏</button>
+                        <button class="tweet-action">不再推荐</button>
+                        <button class="tweet-action">打开</button>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article class="tweet-card" data-kind="release">
+                    <div class="tweet-avatar">P</div>
+                    <div>
+                      <div class="tweet-top"><strong>prisma/prisma</strong><span>@prisma · 2h</span><span class="tag orange">release</span></div>
+                      <h3>迁移日志能力增强，可能适合 Repo-Pulse 的审计报告</h3>
+                      <p>关注流可以把“和我当前产品相关”的外部变化筛出来，但不制造审批压力。</p>
+                      <div class="tweet-actions">
+                        <button class="tweet-action">加入监控</button>
+                        <button class="tweet-action ai-action" data-ai-analysis="Prisma 迁移日志增强可能帮助 Repo-Pulse 改进报告审计部分，建议收藏并转发到 reports 讨论。">AI 分析</button>
+                        <button class="tweet-action">转发到 reports</button>
+                        <button class="tweet-action">收藏</button>
+                        <button class="tweet-action">打开 GitHub</button>
+                      </div>
+                    </div>
+                  </article>
+                </section>
+
+                <aside class="feed-aside">
+                  <section class="aside-card">
+                    <h3>为什么值得看 <span class="tag green">AI ranked</span></h3>
+                    <div class="aside-body">
+                      <div class="trend-row"><strong>与你们当前迁移相关</strong><span>桌面端认证、WebSocket、AI streaming 被优先展示。</span></div>
+                      <div class="trend-row"><strong>不会混入审批队列</strong><span>关注流只负责发现动态，主动转发后才进入仓库会话。</span></div>
+                      <div class="trend-row"><strong>可以转成监控对象</strong><span>一键把某个仓库加入 Repo-Pulse 监控范围。</span></div>
+                    </div>
+                  </section>
+                  <section class="aside-card">
+                    <h3>推荐监控</h3>
+                    <div class="aside-body">
+                      <div class="trend-row"><strong>vercel/ai</strong><span>AI 分析流相关度 92%</span></div>
+                      <div class="trend-row"><strong>socketio/socket.io</strong><span>实时事件推送相关度 84%</span></div>
+                      <div class="trend-row"><strong>electron/electron</strong><span>桌面端登录体验相关度 79%</span></div>
+                    </div>
+                  </section>
+                </aside>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <aside class="context" aria-label="会话上下文">
+        <div class="context-head">
+          <span id="contextKicker">Repo Context</span>
+          <h2 id="contextTitle">apps-web</h2>
+        </div>
+        <div class="context-scroll" id="contextContent"></div>
+      </aside>
+    </section>
+  </main>
+
+  <div class="message-menu" id="messageMenu" role="dialog" aria-label="消息操作菜单">
+    <div class="message-menu-title" id="messageMenuTitle">选择一条消息</div>
+    <button class="menu-action primary" id="menuAgentAction" type="button">
+      <svg viewBox="0 0 24 24"><rect x="5" y="8" width="14" height="10" rx="2"/><path d="M9 13h.01"/><path d="M15 13h.01"/><path d="M12 8V4"/></svg>
+      使用 Agent 处理
+    </button>
+    <button class="menu-action" id="menuCreateApproval" type="button">
+      <svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      创建审批事项
+    </button>
+    <button class="menu-action" id="menuCopyLink" type="button">
+      <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1.1-1.1"/></svg>
+      复制消息链接
+    </button>
+  </div>
+
+  <div class="toast" id="toast" role="status">原型操作已模拟。</div>
+
+  <template id="repoContext">
+    <section class="context-card">
+      <h3>仓库状态 <span class="tag orange">6 未处理</span></h3>
+      <div class="context-body health-grid">
+        <div class="health-cell"><span>风险</span><strong>高</strong></div>
+        <div class="health-cell"><span>待审批</span><strong>2</strong></div>
+        <div class="health-cell"><span>未读事件</span><strong>6</strong></div>
+        <div class="health-cell"><span>Agent 队列</span><strong>2</strong></div>
+      </div>
+    </section>
+    <section class="context-card">
+      <h3>监控分支</h3>
+      <div class="context-body">
+        <div class="context-row"><strong>main</strong><span>稳定 · 12m 前同步</span></div>
+        <div class="context-row"><strong>release/desktop-shell</strong><span>高风险 · 认证链路变更</span></div>
+        <div class="context-row"><strong>feature/chat-workbench</strong><span>活跃 · UI 原型讨论</span></div>
+      </div>
+    </section>
+    <section class="context-card">
+      <h3>聊天内能力</h3>
+      <div class="context-body">
+        <div class="context-row"><strong>搜索聊天记录</strong><span>按作者、分支、事件类型、风险级别定位。</span></div>
+        <div class="context-row"><strong>Agent 操作</strong><span>确认后执行 sync、分析、报告、通知草稿。</span></div>
+        <div class="context-row"><strong>审批复用</strong><span>审批卡片直接出现在会话流里。</span></div>
+      </div>
+    </section>
+  </template>
+
+  <template id="repoDashboardContext">
+    <section class="context-card">
+      <h3>仓库看板 <span class="tag blue">Dashboard</span></h3>
+      <div class="context-body dashboard-grid">
+        <div class="dashboard-metric">
+          <span>今日事件</span>
+          <strong>18</strong>
+          <small>Push 9 · PR 4 · Issue 5</small>
+        </div>
+        <div class="dashboard-metric">
+          <span>风险指数</span>
+          <strong>86</strong>
+          <small>认证链路高风险</small>
+        </div>
+        <div class="dashboard-metric">
+          <span>待审批</span>
+          <strong>2</strong>
+          <small>1 条外部通知审批</small>
+        </div>
+        <div class="dashboard-metric">
+          <span>未读消息</span>
+          <strong>6</strong>
+          <small>集中在 release 分支</small>
+        </div>
+      </div>
+    </section>
+    <section class="context-card">
+      <h3>近 7 日活动</h3>
+      <div class="context-body trend-bars">
+        <div class="trend-bar"><span>Mon</span><span class="bar-track"><span class="bar-fill blue" style="--value: 48%;"></span></span><strong>8</strong></div>
+        <div class="trend-bar"><span>Tue</span><span class="bar-track"><span class="bar-fill green" style="--value: 62%;"></span></span><strong>11</strong></div>
+        <div class="trend-bar"><span>Wed</span><span class="bar-track"><span class="bar-fill" style="--value: 72%;"></span></span><strong>14</strong></div>
+        <div class="trend-bar"><span>Thu</span><span class="bar-track"><span class="bar-fill red" style="--value: 90%;"></span></span><strong>18</strong></div>
+      </div>
+    </section>
+    <section class="context-card">
+      <h3>分支监控</h3>
+      <div class="context-body">
+        <div class="context-row"><strong>release/desktop-shell</strong><span>风险最高 · 5 个变更 · 2 个待审批</span></div>
+        <div class="context-row"><strong>main</strong><span>稳定 · 0 个高风险事件</span></div>
+        <div class="context-row"><strong>feature/chat-workbench</strong><span>活跃 · 7 个 UI 原型相关提交</span></div>
+      </div>
+    </section>
+    <section class="context-card">
+      <h3>看板动作</h3>
+      <div class="context-body">
+        <div class="context-row"><strong>从看板回到会话</strong><span>点击消息或审批项时，应定位到对应聊天卡片。</span></div>
+        <div class="context-row"><strong>让 Agent 分析趋势</strong><span>可基于当前看板生成风险解释和处理计划。</span></div>
+      </div>
+    </section>
+  </template>
+
+  <template id="repoReportContext">
+    <section class="context-card">
+      <h3>报告生成 <span class="tag orange">Reports</span></h3>
+      <div class="context-body">
+        <div class="context-row"><strong>报告范围</strong><span>Repo-Pulse / apps-web · release/desktop-shell · 最近 24 小时</span></div>
+        <div class="context-row"><strong>报告内容</strong><span>变更摘要、AI 风险、审批记录、Agent 操作、验证清单。</span></div>
+        <div class="context-row"><strong>输出格式</strong><span>Markdown 草稿 · 可导出 PDF / HTML。</span></div>
+      </div>
+    </section>
+    <section class="context-card">
+      <h3>生成选项</h3>
+      <div class="context-body">
+        <button class="action-btn primary" type="button" data-report-action>生成仓库日报</button>
+        <button class="action-btn" type="button" data-report-action>生成风险专项报告</button>
+        <button class="action-btn" type="button" data-report-action>导出最近报告 PDF</button>
+      </div>
+    </section>
+    <section class="context-card">
+      <h3>最近报告</h3>
+      <div class="context-body">
+        <div class="context-row"><strong>桌面端认证链路临时报告</strong><span>草稿 · 10:08 · 来自当前会话</span></div>
+        <div class="context-row"><strong>apps-web 周报</strong><span>已完成 · 昨天 18:12 · Markdown/PDF</span></div>
+      </div>
+    </section>
+  </template>
+
+  <template id="watchContext">
+    <section class="context-card">
+      <h3>关注流规则 <span class="tag blue">只读</span></h3>
+      <div class="context-body">
+        <div class="context-row"><strong>starred repositories</strong><span>132 个仓库，按相关度和新鲜度排序。</span></div>
+        <div class="context-row"><strong>following users</strong><span>18 个用户，优先展示与当前产品相关的提交。</span></div>
+        <div class="context-row"><strong>security keywords</strong><span>安全、认证、Webhook、AI streaming 提权。</span></div>
+      </div>
+    </section>
+    <section class="context-card">
+      <h3>核心价值</h3>
+      <div class="context-body">
+        <div class="context-row"><strong>了解动态</strong><span>像 Twitter 一样浏览，不把所有信息变成任务。</span></div>
+        <div class="context-row"><strong>发现值得监控的仓库</strong><span>高相关动态可以一键转入监控。</span></div>
+        <div class="context-row"><strong>转发到仓库会话</strong><span>只有主动转发后才进入团队协作流。</span></div>
+      </div>
+    </section>
+  </template>
+
+  <script>
+    const sidebar = document.getElementById("sidebar");
+    const chatView = document.getElementById("chatView");
+    const watchView = document.getElementById("watchView");
+    const title = document.getElementById("title");
+    const subtitle = document.getElementById("subtitle");
+    const crumb = document.getElementById("crumb");
+    const contextKicker = document.getElementById("contextKicker");
+    const contextTitle = document.getElementById("contextTitle");
+    const contextContent = document.getElementById("contextContent");
+    const toast = document.getElementById("toast");
+    const dashboardTopBtn = document.getElementById("dashboardTopBtn");
+    const reportTopBtn = document.getElementById("reportTopBtn");
+    const messageMenu = document.getElementById("messageMenu");
+    const messageMenuTitle = document.getElementById("messageMenuTitle");
+    const menuAgentAction = document.getElementById("menuAgentAction");
+    const menuCreateApproval = document.getElementById("menuCreateApproval");
+    const menuCopyLink = document.getElementById("menuCopyLink");
+    let activeMessageBubble = null;
+
+    const repoData = {
+      web: {
+        title: "Repo-Pulse / apps-web",
+        crumb: "可编辑仓库 / Repo-Pulse / apps-web",
+        subtitle: "6 个未处理事件",
+        context: "apps-web"
+      },
+      api: {
+        title: "Repo-Pulse / apps-api",
+        crumb: "可编辑仓库 / Repo-Pulse / apps-api",
+        subtitle: "1 个未读事件",
+        context: "apps-api"
+      },
+      ai: {
+        title: "packages / ai-sdk",
+        crumb: "可编辑仓库 / packages / ai-sdk",
+        subtitle: "3 条报告消息",
+        context: "ai-sdk"
+      },
+      desktop: {
+        title: "apps / electron",
+        crumb: "可编辑仓库 / apps / electron",
+        subtitle: "已读",
+        context: "electron"
+      }
+    };
+
+    function renderContext(templateId) {
+      const template = document.getElementById(templateId);
+      if (template) {
+        contextContent.replaceChildren(template.content.cloneNode(true));
+      }
+    }
+
+    function setMode(mode) {
+      const isWatch = mode === "watch";
+      dashboardTopBtn.classList.remove("active");
+      reportTopBtn.classList.remove("report-active");
+      sidebar.classList.toggle("watch-mode", isWatch);
+      chatView.classList.toggle("active", !isWatch);
+      watchView.classList.toggle("active", isWatch);
+      document.querySelectorAll("[data-mode]").forEach((item) => {
+        item.classList.toggle("active", item.dataset.mode === mode);
+      });
+      if (isWatch) {
+        title.textContent = "关注动态";
+        subtitle.textContent = "只读信息流";
+        crumb.textContent = "Watch Feed / starred + following";
+        contextKicker.textContent = "Watch Context";
+        contextTitle.textContent = "关注动态";
+        renderContext("watchContext");
+      } else {
+        const activeRepo = document.querySelector(".repo-row.active")?.dataset.repo || "web";
+        setRepo(activeRepo);
+      }
+    }
+
+    function setRepo(repoKey) {
+      const data = repoData[repoKey] || repoData.web;
+      dashboardTopBtn.classList.remove("active");
+      reportTopBtn.classList.remove("report-active");
+      document.querySelectorAll(".repo-row").forEach((row) => {
+        row.classList.toggle("active", row.dataset.repo === repoKey);
+      });
+      title.textContent = data.title;
+      subtitle.textContent = data.subtitle;
+      crumb.textContent = data.crumb;
+      contextKicker.textContent = "Repo Context";
+      contextTitle.textContent = data.context;
+      renderContext("repoContext");
+    }
+
+    function showRepoDashboard() {
+      setMode("chat");
+      dashboardTopBtn.classList.add("active");
+      reportTopBtn.classList.remove("report-active");
+      contextKicker.textContent = "Repo Dashboard";
+      contextTitle.textContent = "apps-web 看板";
+      renderContext("repoDashboardContext");
+      showToast("已打开当前仓库看板。这里复用 Web 端 Dashboard 的仓库级指标。");
+    }
+
+    function showRepoReports() {
+      setMode("chat");
+      dashboardTopBtn.classList.remove("active");
+      reportTopBtn.classList.add("report-active");
+      contextKicker.textContent = "Repo Reports";
+      contextTitle.textContent = "apps-web 报告";
+      renderContext("repoReportContext");
+      showToast("已打开当前仓库报告生成。正式产品会复用 Web 端 Reports 能力。");
+    }
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add("show");
+      window.setTimeout(() => toast.classList.remove("show"), 2600);
+    }
+
+    function getBubbleTitle(bubble) {
+      const heading = bubble?.querySelector("h2, h3");
+      return heading?.textContent?.trim() || "这条仓库消息";
+    }
+
+    function closeMessageMenu() {
+      messageMenu.classList.remove("show");
+      activeMessageBubble?.classList.remove("menu-target");
+      activeMessageBubble = null;
+    }
+
+    function openMessageMenu(event, bubble) {
+      event.preventDefault();
+      activeMessageBubble?.classList.remove("menu-target");
+      activeMessageBubble = bubble;
+      activeMessageBubble.classList.add("menu-target");
+      messageMenuTitle.textContent = `对消息使用操作：${getBubbleTitle(bubble)}`;
+      messageMenu.classList.add("show");
+
+      const rect = messageMenu.getBoundingClientRect();
+      const left = Math.max(12, Math.min(event.clientX, window.innerWidth - rect.width - 12));
+      const top = Math.max(12, Math.min(event.clientY, window.innerHeight - rect.height - 12));
+      messageMenu.style.left = `${left}px`;
+      messageMenu.style.top = `${top}px`;
+    }
+
+    function useAgentForBubble(bubble) {
+      const action = bubble?.dataset.agentAction || `让 Agent 处理：${getBubbleTitle(bubble)}`;
+      showToast(`${action}。正式产品会先返回执行计划并等待确认。`);
+      closeMessageMenu();
+    }
+
+    document.querySelectorAll("[data-mode]").forEach((button) => {
+      button.addEventListener("click", () => {
+        closeMessageMenu();
+        setMode(button.dataset.mode);
+      });
+    });
+
+    document.querySelectorAll(".repo-row[data-repo]").forEach((row) => {
+      row.addEventListener("click", () => {
+        closeMessageMenu();
+        setMode("chat");
+        setRepo(row.dataset.repo);
+      });
+    });
+
+    document.querySelector(".agent-queue-row").addEventListener("click", () => {
+      closeMessageMenu();
+      setMode("chat");
+      showToast("Agent 待确认事项应展开在当前仓库会话里。");
+    });
+
+    document.querySelectorAll(".feed-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".feed-tab").forEach((item) => item.classList.toggle("active", item === tab));
+        const filter = tab.dataset.filter;
+        document.querySelectorAll(".tweet-card").forEach((card) => {
+          card.style.display = filter === "all" || card.dataset.kind === filter ? "" : "none";
+        });
+      });
+    });
+
+    document.querySelectorAll("[data-ai-analysis]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        showToast(event.currentTarget.dataset.aiAnalysis);
+      });
+    });
+
+    document.getElementById("approveBtn").addEventListener("click", (event) => {
+      event.currentTarget.textContent = "已通过";
+      event.currentTarget.disabled = true;
+      showToast("审批已在聊天窗口内处理。正式产品会写入审计记录。");
+    });
+
+    document.getElementById("confirmAgentBtn").addEventListener("click", (event) => {
+      event.currentTarget.textContent = "已加入执行队列";
+      event.currentTarget.disabled = true;
+      showToast("Agent 计划已确认。原型不会执行真实命令。");
+    });
+
+    document.getElementById("sendAgentBtn").addEventListener("click", () => {
+      showToast("已发送给 Agent。正式产品会先返回计划，再等待确认。");
+    });
+
+    document.getElementById("agentTopBtn").addEventListener("click", () => {
+      showToast("Agent 面板应在当前仓库聊天中展开，而不是跳出会话。");
+    });
+
+    dashboardTopBtn.addEventListener("click", showRepoDashboard);
+    reportTopBtn.addEventListener("click", showRepoReports);
+
+    document.addEventListener("click", (event) => {
+      if (!event.target.matches("[data-report-action]")) {
+        return;
+      }
+      showToast(`${event.target.textContent.trim()} 已加入生成队列。原型中仅模拟报告生成。`);
+    });
+
+    document.addEventListener("contextmenu", (event) => {
+      const bubble = event.target.closest?.(".bubble");
+      if (!bubble || !chatView.classList.contains("active")) {
+        closeMessageMenu();
+        return;
+      }
+      openMessageMenu(event, bubble);
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!messageMenu.classList.contains("show")) {
+        return;
+      }
+      if (messageMenu.contains(event.target)) {
+        return;
+      }
+      closeMessageMenu();
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closeMessageMenu();
+      }
+    });
+
+    messageMenu.addEventListener("contextmenu", (event) => event.preventDefault());
+    menuAgentAction.addEventListener("click", () => useAgentForBubble(activeMessageBubble));
+    menuCreateApproval.addEventListener("click", () => {
+      showToast("已基于这条消息创建审批草稿。正式产品会进入当前仓库会话的审批流。");
+      closeMessageMenu();
+    });
+    menuCopyLink.addEventListener("click", () => {
+      showToast("已复制消息链接。原型中仅模拟该操作。");
+      closeMessageMenu();
+    });
+
+    document.querySelectorAll("[data-agent-inline]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        const bubble = event.currentTarget.closest(".bubble");
+        useAgentForBubble(bubble);
+      });
+    });
+
+    renderContext("repoContext");
+  </script>
+</body>
+</html>

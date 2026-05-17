@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle,
@@ -42,6 +42,22 @@ interface FeishuIntegrationDialogProps {
 }
 
 const DEFAULT_EVENTS = ['highRisk', 'prUpdates', 'analysisComplete'];
+const FEISHU_PERMISSION_SCOPES_JSON = JSON.stringify({
+  scopes: {
+    tenant: [
+      'contact:contact.base:readonly',
+      'im:chat:readonly',
+      'im:chat.members:read',
+      'im:message',
+      'im:message.group_at_msg:readonly',
+      'im:message.group_msg',
+      'im:message.p2p_msg:readonly',
+      'im:message:send_as_bot',
+      'im:resource',
+    ],
+    user: [],
+  },
+}, null, 2);
 
 function getErrorMessage(error: unknown): string {
   if (error && typeof error === 'object' && 'response' in error) {
@@ -84,6 +100,12 @@ function buildFallbackStages(status: FeishuConnectionStatus | null): ImStageStat
   ];
 }
 
+function hasReadySubscription(status: FeishuConnectionStatus | null): boolean {
+  return Boolean(
+    status?.stages?.some((stage) => stage.id === 'subscription_ready' && stage.state === 'verified'),
+  );
+}
+
 export function FeishuIntegrationDialog({
   open,
   onOpenChange,
@@ -108,35 +130,59 @@ export function FeishuIntegrationDialog({
 
   const stages = useMemo(() => buildFallbackStages(status), [status]);
   const connected = isConnected(status);
+  const subscriptionReady = hasReadySubscription(status);
   const canSubmitCredentials = appId.trim().length > 0 && appSecret.trim().length > 0;
+
+  const refreshStatus = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setLoadingStatus(true);
+    }
+    setStatusError('');
+    try {
+      const [nextStatus, nextSubscriptions] = await Promise.all([
+        imService.getImStatus(),
+        imService.listSubscriptions().catch(() => []),
+      ]);
+      const feishuStatus = nextStatus.feishu ?? null;
+      setStatus(feishuStatus);
+      setAppId(feishuStatus?.appId ?? '');
+      setSubscriptions(nextSubscriptions);
+      onConnectionChange?.(isConnected(feishuStatus));
+      return feishuStatus;
+    } catch (error) {
+      setStatusError(getErrorMessage(error));
+      setStatus(null);
+      onConnectionChange?.(false);
+      return null;
+    } finally {
+      if (!options?.silent) {
+        setLoadingStatus(false);
+      }
+    }
+  }, [onConnectionChange]);
 
   useEffect(() => {
     if (!open) return;
+    void refreshStatus();
+  }, [open, refreshStatus]);
 
-    const load = async () => {
-      setLoadingStatus(true);
-      setStatusError('');
-      try {
-        const [nextStatus, nextSubscriptions] = await Promise.all([
-          imService.getImStatus(),
-          imService.listSubscriptions().catch(() => []),
-        ]);
-        const feishuStatus = nextStatus.feishu ?? null;
-        setStatus(feishuStatus);
-        setAppId(feishuStatus?.appId ?? '');
-        setSubscriptions(nextSubscriptions);
-        onConnectionChange?.(isConnected(feishuStatus));
-      } catch (error) {
-        setStatusError(getErrorMessage(error));
-        setStatus(null);
-        onConnectionChange?.(false);
-      } finally {
-        setLoadingStatus(false);
-      }
-    };
+  useEffect(() => {
+    if (!open || activeTab !== 'binding' || !pairingCode?.expiresAt || subscriptionReady) return;
 
-    void load();
-  }, [onConnectionChange, open]);
+    const expiresAt = new Date(pairingCode.expiresAt).getTime();
+    if (Number.isNaN(expiresAt) || expiresAt <= Date.now()) return;
+
+    const interval = window.setInterval(() => {
+      void refreshStatus({ silent: true }).then((nextStatus) => {
+        if (hasReadySubscription(nextStatus)) {
+          toast.success(t('settings.integrations.feishu.bindingReady'));
+          setActiveTab('subscriptions');
+        }
+      });
+    }, 3000);
+
+    return () => window.clearInterval(interval);
+  }, [activeTab, open, pairingCode?.expiresAt, refreshStatus, subscriptionReady, t]);
 
   const saveCredentials = async () => {
     if (!canSubmitCredentials) {
@@ -187,6 +233,7 @@ export function FeishuIntegrationDialog({
       };
       setStatus(nextStatus);
       onConnectionChange?.(result.success);
+      void refreshStatus({ silent: true });
       toast[result.success ? 'success' : 'error'](result.message);
     } catch (error) {
       const message = getErrorMessage(error);
@@ -269,6 +316,11 @@ export function FeishuIntegrationDialog({
   const currentSubscription = subscriptions[0];
   const selectedEvents = currentSubscription?.events ?? DEFAULT_EVENTS;
 
+  const copyPermissionScopes = async () => {
+    await navigator.clipboard.writeText(FEISHU_PERMISSION_SCOPES_JSON);
+    toast.success(t('settings.integrations.feishu.copied'));
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="border-[var(--github-border)] bg-[#0d1117] text-white sm:max-w-2xl">
@@ -336,6 +388,22 @@ export function FeishuIntegrationDialog({
                     <p>{t('settings.integrations.feishu.guideStep1')}</p>
                     <p>{t('settings.integrations.feishu.guideStep2')}</p>
                     <p>{t('settings.integrations.feishu.guideStep3')}</p>
+                    <p>{t('settings.integrations.feishu.guideStep4')}</p>
+                    <p>{t('settings.integrations.feishu.guideStep5')}</p>
+                    <div className="mt-3 flex flex-col gap-2 rounded-md border border-[var(--github-border)] bg-[var(--github-surface)] p-2 sm:flex-row sm:items-center sm:justify-between">
+                      <code className="text-[11px] text-white">
+                        {t('settings.integrations.feishu.permissionScopes')}
+                      </code>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 shrink-0 border-[var(--github-border)] text-xs"
+                        onClick={copyPermissionScopes}
+                      >
+                        {t('settings.integrations.feishu.copy')}
+                      </Button>
+                    </div>
                   </div>
                 </CollapsibleContent>
               </Collapsible>
