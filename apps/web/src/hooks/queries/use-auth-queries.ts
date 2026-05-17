@@ -48,6 +48,21 @@ export function useLoginMutation() {
   });
 }
 
+export function useDesktopGithubLoginMutation() {
+  const queryClient = useQueryClient();
+
+  return useApiMutation({
+    mutationKey: [...authQueryKeys.all, 'desktop-github-login'],
+    mutationFn: async () => {
+      await authService.loginWithDesktopGithub();
+      return authService.getMe();
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });
+    },
+  });
+}
+
 interface GithubOAuthConfigPayload {
   clientId: string;
   clientSecret: string;

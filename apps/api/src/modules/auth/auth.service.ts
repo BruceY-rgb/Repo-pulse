@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
 import * as bcrypt from 'bcrypt';
 import { UserService } from '../user/user.service';
 import { SyncService } from '../sync/sync.service';
@@ -15,6 +16,21 @@ export interface JwtPayload {
 export interface TokenPair {
   accessToken: string;
   refreshToken: string;
+}
+
+interface GithubEnvProfile {
+  id: number;
+  login: string;
+  name: string | null;
+  email: string | null;
+  avatar_url: string;
+}
+
+interface GithubEmail {
+  email: string;
+  primary: boolean;
+  verified: boolean;
+  visibility: string | null;
 }
 
 @Injectable()
@@ -139,5 +155,101 @@ export class AuthService {
       email: user.email,
       role: user.role,
     });
+  }
+
+  async handleGithubEnvTokenAuth() {
+    if (this.configService.get<string>('DESKTOP_AUTH_MODE') !== 'env') {
+      throw new UnauthorizedException('Desktop env login is not enabled');
+    }
+
+    const githubToken = this.configService.get<string>('GITHUB_TOKEN')?.trim();
+    if (!githubToken) {
+      throw new UnauthorizedException('GITHUB_TOKEN is not configured');
+    }
+
+    const profile = await this.fetchGithubEnvProfile(githubToken);
+    const email =
+      profile.email ||
+      (await this.fetchPrimaryGithubEmail(githubToken)) ||
+      `${profile.login}@users.noreply.github.com`;
+    const githubId = String(profile.id);
+    const displayName = profile.name || profile.login || 'GitHub User';
+
+    let user = await this.userService.findByGithubId(githubId);
+
+    if (!user) {
+      const existingUserByEmail = await this.userService.findByEmail(email);
+
+      if (existingUserByEmail) {
+        user = await this.userService.update(existingUserByEmail.id, {
+          githubId,
+          githubAccessToken: githubToken,
+          name: displayName,
+          avatar: profile.avatar_url,
+        });
+      } else {
+        user = await this.userService.create({
+          email,
+          name: displayName,
+          avatar: profile.avatar_url,
+          githubId,
+          githubAccessToken: githubToken,
+        });
+      }
+    } else {
+      user = await this.userService.update(user.id, {
+        githubAccessToken: githubToken,
+        name: displayName,
+        avatar: profile.avatar_url,
+      });
+    }
+
+    this.logger.log(`desktop_github_env_login_success userId=${user.id} login=${profile.login}`);
+
+    setTimeout(() => {
+      this.syncService.syncUserRepositories(user.id).catch((err) => {
+        this.logger.error(`Failed to sync user repositories for ${user.id}`, err);
+      });
+    }, 100);
+
+    return this.generateTokens({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
+  }
+
+  private async fetchGithubEnvProfile(githubToken: string): Promise<GithubEnvProfile> {
+    try {
+      const response = await axios.get<GithubEnvProfile>('https://api.github.com/user', {
+        headers: this.getGithubTokenHeaders(githubToken),
+      });
+      return response.data;
+    } catch (error) {
+      this.logger.error('desktop_github_env_profile_fetch_failed', error);
+      throw new UnauthorizedException('Unable to read GitHub profile from GITHUB_TOKEN');
+    }
+  }
+
+  private async fetchPrimaryGithubEmail(githubToken: string): Promise<string | null> {
+    try {
+      const response = await axios.get<GithubEmail[]>('https://api.github.com/user/emails', {
+        headers: this.getGithubTokenHeaders(githubToken),
+      });
+      const primaryEmail = response.data.find((item) => item.primary && item.verified);
+      const verifiedEmail = response.data.find((item) => item.verified);
+      return primaryEmail?.email || verifiedEmail?.email || null;
+    } catch (error) {
+      this.logger.warn('desktop_github_env_email_fetch_failed', error);
+      return null;
+    }
+  }
+
+  private getGithubTokenHeaders(githubToken: string) {
+    return {
+      Accept: 'application/vnd.github.v3+json',
+      Authorization: `Bearer ${githubToken}`,
+      'User-Agent': 'Repo-Pulse-Desktop',
+    };
   }
 }

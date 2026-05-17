@@ -16,6 +16,7 @@ export const envValidationSchema = Joi.object({
   GITHUB_CLIENT_ID: Joi.string().allow(''),
   GITHUB_CLIENT_SECRET: Joi.string().allow(''),
   GITHUB_CALLBACK_URL: Joi.string().uri().allow(''),
+  GITHUB_TOKEN: Joi.string().allow(''),
 
   // GitLab OAuth
   GITLAB_CLIENT_ID: Joi.string().allow(''),
@@ -41,6 +42,7 @@ export const envValidationSchema = Joi.object({
   FRONTEND_URL: Joi.string().uri().default('http://localhost:5173'),
   // API_URL: 后端 API 的公开访问地址，用于生成 Webhook 回调 URL
   API_URL: Joi.string().uri().default('http://localhost:3001'),
+  DESKTOP_AUTH_MODE: Joi.string().valid('oauth', 'env').default('oauth'),
 
   // Rate Limiting
   THROTTLE_TTL: Joi.number().default(60),

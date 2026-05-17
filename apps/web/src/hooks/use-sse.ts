@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { toApiUrl } from '@/lib/desktop';
 
 interface UseSSEOptions<T> {
   url: string;
@@ -34,7 +35,7 @@ export function useSSE<T = string>(options: UseSSEOptions<T>): SSEReturn<T> {
     setIsComplete(false);
     setData(null);
 
-    const eventSource = new EventSource(url);
+    const eventSource = new EventSource(toApiUrl(url));
     eventSourceRef.current = eventSource;
 
     eventSource.onopen = () => {
@@ -100,14 +101,14 @@ export function useStreamingText(options: {
 
     try {
       // 获取访问 token
-      const userResponse = await fetch('/api/users/me', {
+      const userResponse = await fetch(toApiUrl('/users/me'), {
         credentials: 'include',
       });
       const userData = await userResponse.json();
       const token = userData.accessToken;
 
       // 使用 fetch 进行流式请求
-      const response = await fetch(`/api/ai/stream/${eventId}`, {
+      const response = await fetch(toApiUrl(`/ai/stream/${eventId}`), {
         headers: {
           Authorization: `Bearer ${token}`,
         },

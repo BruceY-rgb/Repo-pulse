@@ -7,6 +7,7 @@ import { notificationQueryKeys } from '@/hooks/queries/use-notification-queries'
 import { repositoryQueryKeys } from '@/hooks/queries/use-repository-queries';
 import { analysisQueryKeys } from '@/hooks/use-analysis';
 import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
+import { getSocketUrl } from '@/lib/desktop';
 
 export function useRepositoryRealtimeSubscription(repositoryIds?: string | string[]) {
   const queryClient = useQueryClient();
@@ -15,7 +16,7 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
   const subscribedRoomsRef = useRef<Set<string>>(new Set());
   const connectTimeoutRef = useRef<number | null>(null);
 
-  const socketNamespace = useMemo(() => '/events', []);
+  const socketNamespace = useMemo(() => getSocketUrl('/events'), []);
 
   const getTargetRepositoryIds = useCallback(() => {
     if (Array.isArray(repositoryIds)) {

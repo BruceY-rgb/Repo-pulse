@@ -158,6 +158,31 @@
     @apply bg-card rounded-lg p-4 text-sm overflow-x-auto;
   }
 
+  .desktop-drag {
+    -webkit-app-region: drag;
+  }
+
+  .desktop-window-drag-strip {
+    position: fixed;
+    top: 0;
+    left: 92px;
+    right: 92px;
+    z-index: 60;
+    height: 12px;
+    -webkit-app-region: drag;
+  }
+
+  .desktop-no-drag,
+  .desktop-shell a,
+  .desktop-shell button,
+  .desktop-shell input,
+  .desktop-shell textarea,
+  .desktop-shell select,
+  .desktop-shell [role='button'],
+  .desktop-shell [data-radix-popper-content-wrapper] {
+    -webkit-app-region: no-drag;
+  }
+
   /* ─── 动画工具 ───────────────────────────────────────────────────── */
   .animate-float {
     animation: float 6s ease-in-out infinite;

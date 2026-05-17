@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type { AxiosError } from 'axios';
 import type { ApiResponse } from '@/types/api';
+import { getApiBaseUrl, getLoginRoute, toApiUrl } from '@/lib/desktop';
 
 /**
  * 全局 Axios 客户端
@@ -9,7 +10,7 @@ import type { ApiResponse } from '@/types/api';
  * - 401 时自动调用 /auth/refresh 刷新 Token
  */
 const apiClient = axios.create({
-  baseURL: '/api',
+  baseURL: getApiBaseUrl(),
   timeout: 30000,
   withCredentials: true, // 携带 HttpOnly Cookie
   headers: {
@@ -57,7 +58,7 @@ apiClient.interceptors.response.use(
 
       try {
         // 调用刷新接口（Cookie 自动携带 refresh_token）
-        await axios.post('/api/auth/refresh', {}, { withCredentials: true });
+        await axios.post(toApiUrl('/auth/refresh'), {}, { withCredentials: true });
         isRefreshing = false;
         notifySubscribers(true);
 
@@ -69,7 +70,7 @@ apiClient.interceptors.response.use(
         isRefreshing = false;
         notifySubscribers(false);
         // 刷新失败，重定向到登录页
-        window.location.href = '/login';
+        window.location.href = getLoginRoute();
       }
     }
 

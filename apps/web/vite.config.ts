@@ -3,8 +3,10 @@ import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 
 const apiTarget = "http://127.0.0.1:3001"
+const isDesktopBuild = process.env.VITE_DESKTOP === "true"
 
 export default defineConfig({
+  base: isDesktopBuild ? "./" : "/",
   plugins: [react()],
   resolve: {
     alias: {

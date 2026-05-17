@@ -29,8 +29,22 @@ async function bootstrap() {
 
   // CORS — 使用 FRONTEND_URL，允许携带 Cookie
   const frontendUrl = configService.get<string>('FRONTEND_URL', 'http://localhost:5173');
+  const allowedCorsOrigins = new Set([
+    frontendUrl,
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'null',
+  ]);
   app.enableCors({
-    origin: frontendUrl,
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      if (!origin || allowedCorsOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      logger.warn(`CORS request rejected from origin: ${origin}`);
+      callback(null, false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],

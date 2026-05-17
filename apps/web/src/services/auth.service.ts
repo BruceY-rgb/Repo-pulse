@@ -1,5 +1,6 @@
 import { apiClient } from './api-client';
 import type { ApiResponse, User } from '@/types/api';
+import { toApiUrl } from '@/lib/desktop';
 
 /**
  * 前端认证服务
@@ -16,6 +17,10 @@ export const authService = {
       { email, password },
     );
     return data.data;
+  },
+
+  async loginWithDesktopGithub(): Promise<void> {
+    await apiClient.post('/auth/desktop/github');
   },
 
   /**
@@ -45,7 +50,7 @@ export const authService = {
    * 获取 GitHub OAuth 登录 URL
    */
   getGithubAuthUrl(): string {
-    return '/api/auth/github';
+    return toApiUrl('/auth/github');
   },
 
   /**

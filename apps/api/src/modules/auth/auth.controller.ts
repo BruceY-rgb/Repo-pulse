@@ -67,6 +67,16 @@ export class AuthController {
     return { userId: user.id, email: user.email, name: user.name };
   }
 
+  @Post('desktop/github')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '桌面端使用环境变量 GITHUB_TOKEN 登录' })
+  async desktopGithubLogin(@Res({ passthrough: true }) res: Response) {
+    const tokens = await this.authService.handleGithubEnvTokenAuth();
+    this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
+    return { message: 'Desktop GitHub login successful' };
+  }
+
   /**
    * 刷新 Token — 从 Cookie 读取 Refresh Token，写入新 Token
    */
