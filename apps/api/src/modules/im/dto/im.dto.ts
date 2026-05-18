@@ -3,6 +3,7 @@ import {
   IsBoolean,
   IsIn,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   ValidateNested,
@@ -45,6 +46,10 @@ export class ImSubscriptionDto {
   @IsArray()
   @IsString({ each: true })
   branches!: string[];
+
+  @IsOptional()
+  @IsObject()
+  repositoryBranchScopes?: Record<string, string[]>;
 
   @IsArray()
   @IsString({ each: true })

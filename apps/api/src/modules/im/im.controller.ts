@@ -50,6 +50,12 @@ export class ImController {
     return this.imService.testFeishuConnection(user.sub, body);
   }
 
+  @Post('feishu/test-notification')
+  @ApiOperation({ summary: '发送飞书测试推送' })
+  async sendFeishuTestNotification(@CurrentUser() user: { sub: string }) {
+    return this.imService.sendFeishuTestNotification(user.sub);
+  }
+
   @Public()
   @Post('feishu/events')
   @HttpCode(200)

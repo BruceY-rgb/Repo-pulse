@@ -1095,6 +1095,578 @@
       gap: 12px;
     }
 
+    .legacy-view {
+      min-height: 0;
+      overflow: auto;
+      padding: 22px;
+      background: oklch(13% 0.014 248);
+    }
+
+    .legacy-shell {
+      display: grid;
+      gap: 16px;
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+
+    .legacy-page-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .legacy-page-head h2 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    .legacy-page-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .legacy-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .legacy-card {
+      border: 1px solid var(--line-soft);
+      border-radius: 12px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    .legacy-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 15px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .legacy-card-head h3 {
+      margin: 0;
+      font-size: 15px;
+    }
+
+    .legacy-card-head span {
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
+    .legacy-card-body {
+      padding: 15px;
+    }
+
+    .legacy-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .legacy-metric {
+      min-width: 0;
+      padding: 14px;
+      border: 1px solid var(--line-soft);
+      border-radius: 10px;
+      background: oklch(15% 0.014 248);
+    }
+
+    .legacy-metric span {
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
+    .legacy-metric strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 26px;
+      line-height: 1;
+    }
+
+    .legacy-metric small {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .legacy-two-col {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .legacy-chart {
+      display: grid;
+      align-items: end;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 10px;
+      height: 220px;
+      padding-top: 12px;
+    }
+
+    .legacy-chart-bar {
+      display: grid;
+      align-items: end;
+      gap: 8px;
+      height: 100%;
+      color: var(--quiet);
+      font-size: 11px;
+      text-align: center;
+    }
+
+    .legacy-chart-bar i {
+      display: block;
+      height: var(--height);
+      min-height: 18px;
+      border-radius: 7px 7px 3px 3px;
+      background: linear-gradient(180deg, var(--orange), color-mix(in oklch, var(--orange), transparent 60%));
+    }
+
+    .legacy-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .legacy-list-item {
+      display: grid;
+      gap: 5px;
+      padding: 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 9px;
+      background: oklch(15% 0.014 248);
+    }
+
+    .legacy-list-item strong {
+      font-size: 13px;
+    }
+
+    .legacy-list-item span {
+      color: var(--quiet);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .legacy-report-layout {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .legacy-report-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .legacy-report-item {
+      display: grid;
+      gap: 6px;
+      padding: 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: 10px;
+      background: oklch(15% 0.014 248);
+      text-align: left;
+    }
+
+    .legacy-report-item.active {
+      border-color: color-mix(in oklch, var(--orange), transparent 45%);
+      background: color-mix(in oklch, var(--orange), var(--surface) 93%);
+    }
+
+    .legacy-report-item strong {
+      font-size: 13px;
+    }
+
+    .legacy-report-item span {
+      color: var(--quiet);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .legacy-tabs {
+      display: inline-flex;
+      gap: 3px;
+      padding: 3px;
+      border: 1px solid var(--line-soft);
+      border-radius: 9px;
+      background: oklch(13% 0.014 248);
+    }
+
+    .legacy-tab {
+      height: 30px;
+      padding: 0 11px;
+      border-radius: 7px;
+      color: var(--quiet);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .legacy-tab.active {
+      background: var(--surface-3);
+      color: var(--text);
+    }
+
+    .agent-run-view {
+      min-height: 0;
+      overflow: auto;
+      padding: 18px 22px 22px;
+      background:
+        linear-gradient(180deg, color-mix(in oklch, var(--green), transparent 94%), transparent 220px),
+        oklch(12.5% 0.014 248);
+    }
+
+    .agent-run-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 330px;
+      gap: 16px;
+      max-width: 1180px;
+      margin: 0 auto;
+      align-items: start;
+    }
+
+    .agent-run-main,
+    .agent-run-side {
+      display: grid;
+      gap: 12px;
+    }
+
+    .codex-card {
+      border: 1px solid var(--line-soft);
+      border-radius: 12px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    .codex-card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 15px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .codex-card-head h2,
+    .codex-card-head h3 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    .codex-card-head p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .codex-card-body {
+      padding: 14px 15px;
+    }
+
+    .run-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      height: 26px;
+      padding: 0 9px;
+      border: 1px solid color-mix(in oklch, var(--green), transparent 55%);
+      border-radius: 999px;
+      background: color-mix(in oklch, var(--green), transparent 88%);
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+
+    .run-pulse {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 4px color-mix(in oklch, var(--green), transparent 84%);
+    }
+
+    .plan-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .plan-row {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 9px;
+      background: oklch(15% 0.014 248);
+    }
+
+    .plan-step {
+      display: grid;
+      place-items: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      background: var(--surface-3);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 820;
+    }
+
+    .plan-row.done .plan-step {
+      background: color-mix(in oklch, var(--green), transparent 82%);
+      color: var(--green);
+    }
+
+    .plan-row.active .plan-step {
+      background: color-mix(in oklch, var(--orange), transparent 82%);
+      color: var(--orange-soft);
+    }
+
+    .plan-row strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .plan-row span {
+      display: block;
+      margin-top: 4px;
+      color: var(--quiet);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .tool-timeline {
+      display: grid;
+      gap: 10px;
+    }
+
+    .tool-call {
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+    }
+
+    .tool-icon {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: var(--surface-3);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 820;
+    }
+
+    .tool-call.running .tool-icon {
+      background: color-mix(in oklch, var(--orange), transparent 84%);
+      color: var(--orange-soft);
+    }
+
+    .tool-call.done .tool-icon {
+      background: color-mix(in oklch, var(--green), transparent 84%);
+      color: var(--green);
+    }
+
+    .tool-body {
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 9px;
+      background: oklch(14.5% 0.014 248);
+    }
+
+    .tool-body strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .tool-body p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .terminal-block {
+      display: grid;
+      gap: 6px;
+      margin-top: 9px;
+      padding: 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: oklch(9.5% 0.012 248);
+      color: var(--muted);
+      font-family: "SF Mono", Monaco, Consolas, monospace;
+      font-size: 12px;
+      overflow-x: auto;
+    }
+
+    .terminal-block .ok {
+      color: var(--green);
+    }
+
+    .terminal-block .warn {
+      color: var(--orange-soft);
+    }
+
+    .approval-box {
+      border: 1px solid color-mix(in oklch, var(--orange), transparent 52%);
+      border-radius: 10px;
+      background: color-mix(in oklch, var(--orange), var(--surface) 92%);
+      overflow: hidden;
+    }
+
+    .approval-box-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px;
+      border-bottom: 1px solid color-mix(in oklch, var(--orange), transparent 68%);
+    }
+
+    .approval-box-head strong {
+      font-size: 13px;
+    }
+
+    .approval-box-head span {
+      color: var(--orange-soft);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .approval-box-body {
+      padding: 12px;
+    }
+
+    .run-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .run-summary-cell {
+      padding: 10px;
+      border-radius: 8px;
+      background: oklch(15% 0.014 248);
+    }
+
+    .run-summary-cell span {
+      display: block;
+      color: var(--quiet);
+      font-size: 11px;
+    }
+
+    .run-summary-cell strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 15px;
+    }
+
+    .agent-session-strip {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 10px;
+      background: oklch(14.5% 0.014 248);
+    }
+
+    .agent-session-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      height: 28px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .agent-session-pill.active {
+      border-color: color-mix(in oklch, var(--orange), transparent 52%);
+      background: color-mix(in oklch, var(--orange), transparent 88%);
+      color: var(--orange-soft);
+    }
+
+    .agent-chat {
+      display: grid;
+      gap: 10px;
+    }
+
+    .agent-chat-line {
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+    }
+
+    .agent-chat-avatar {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: var(--surface-3);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 820;
+    }
+
+    .agent-chat-line.user .agent-chat-avatar {
+      background: color-mix(in oklch, var(--blue), transparent 82%);
+      color: var(--blue);
+    }
+
+    .agent-chat-bubble {
+      padding: 9px 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 9px;
+      background: oklch(14.5% 0.014 248);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .agent-reply-box {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      margin-top: 10px;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: oklch(13% 0.014 248);
+    }
+
+    .agent-reply-box input {
+      min-width: 0;
+      height: 34px;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      font-size: 12px;
+    }
+
     .aside-card,
     .context-card {
       border: 1px solid var(--line-soft);
@@ -1381,6 +1953,13 @@
       .feed-layout {
         grid-template-columns: 1fr;
       }
+
+      .legacy-metrics,
+      .legacy-two-col,
+      .legacy-report-layout,
+      .agent-run-shell {
+        grid-template-columns: 1fr;
+      }
     }
 
     @media (max-width: 900px) {
@@ -1445,10 +2024,10 @@
         <button class="rail-btn" title="Agent">
           <svg viewBox="0 0 24 24"><rect x="5" y="8" width="14" height="10" rx="2"/><path d="M9 13h.01"/><path d="M15 13h.01"/><path d="M12 8V4"/></svg>
         </button>
-        <div class="rail-spacer"></div>
-        <button class="rail-btn" title="设置">
+        <button class="rail-btn" id="settingsRailBtn" title="设置" aria-label="设置">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 3.1-.2-.1a1.7 1.7 0 0 0-2 .1 1.7 1.7 0 0 0-.8 1.6V22H9v-.3a1.7 1.7 0 0 0-.8-1.6 1.7 1.7 0 0 0-2-.1l-.2.1L4.2 17l.1-.1A1.7 1.7 0 0 0 4.6 15 1.7 1.7 0 0 0 3 14H2v-4h1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1L6 3.9l.2.1a1.7 1.7 0 0 0 2-.1A1.7 1.7 0 0 0 9 2.3V2h6v.3a1.7 1.7 0 0 0 .8 1.6 1.7 1.7 0 0 0 2 .1l.2-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9A1.7 1.7 0 0 0 21 10h1v4h-1a1.7 1.7 0 0 0-1.6 1z"/></svg>
         </button>
+        <div class="rail-spacer"></div>
         <div class="user-avatar"><img src="../../apps/web/public/avator.png" alt="用户头像" /></div>
       </aside>
 
@@ -1829,6 +2408,341 @@
               </div>
             </div>
           </section>
+
+          <section class="view" id="dashboardView" aria-label="复用 Web 端仓库看板">
+            <div class="legacy-view">
+              <div class="legacy-shell">
+                <div class="legacy-page-head">
+                  <div>
+                    <h2>仓库看板</h2>
+                    <p>复用原 Web 端 Dashboard 页面结构，只把范围限定到当前仓库 apps-web。</p>
+                  </div>
+                  <div class="legacy-actions">
+                    <button class="action-btn">release/desktop-shell</button>
+                    <button class="action-btn">最近 7 天</button>
+                    <button class="action-btn primary" data-back-chat>回到会话</button>
+                  </div>
+                </div>
+
+                <div class="legacy-metrics">
+                  <div class="legacy-metric"><span>监控分支</span><strong>3</strong><small>main / release / feature</small></div>
+                  <div class="legacy-metric"><span>事件总数</span><strong>18</strong><small>今日新增</small></div>
+                  <div class="legacy-metric"><span>待审批</span><strong>2</strong><small>1 条外部通知审批</small></div>
+                  <div class="legacy-metric"><span>未读消息</span><strong>6</strong><small>集中在认证链路</small></div>
+                </div>
+
+                <div class="legacy-two-col">
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h3>周活动趋势</h3>
+                      <span>Dashboard activity</span>
+                    </div>
+                    <div class="legacy-card-body">
+                      <div class="legacy-chart">
+                        <div class="legacy-chart-bar"><i style="--height: 42%;"></i><span>Mon</span></div>
+                        <div class="legacy-chart-bar"><i style="--height: 58%;"></i><span>Tue</span></div>
+                        <div class="legacy-chart-bar"><i style="--height: 66%;"></i><span>Wed</span></div>
+                        <div class="legacy-chart-bar"><i style="--height: 88%;"></i><span>Thu</span></div>
+                        <div class="legacy-chart-bar"><i style="--height: 74%;"></i><span>Fri</span></div>
+                        <div class="legacy-chart-bar"><i style="--height: 38%;"></i><span>Sat</span></div>
+                        <div class="legacy-chart-bar"><i style="--height: 52%;"></i><span>Sun</span></div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h3>最近事件</h3>
+                      <span>Recent activity</span>
+                    </div>
+                    <div class="legacy-card-body legacy-list">
+                      <div class="legacy-list-item"><strong>OAuth 回调变更</strong><span>高风险 · release/desktop-shell · 待审批</span></div>
+                      <div class="legacy-list-item"><strong>AI 风险摘要完成</strong><span>risk 86 · auth/session</span></div>
+                      <div class="legacy-list-item"><strong>报告草稿已生成</strong><span>Markdown · 可导出 PDF</span></div>
+                    </div>
+                  </section>
+                </div>
+
+                <section class="legacy-card">
+                  <div class="legacy-card-head">
+                    <h3>风险分布</h3>
+                    <span>复用 Dashboard 风险组件</span>
+                  </div>
+                  <div class="legacy-card-body legacy-list">
+                    <div class="legacy-list-item"><strong>High · 4</strong><span>OAuth、cookie refresh、Electron file route</span></div>
+                    <div class="legacy-list-item"><strong>Medium · 7</strong><span>PR、Issue、依赖更新</span></div>
+                    <div class="legacy-list-item"><strong>Low · 7</strong><span>文档、样式、非关键配置</span></div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" id="reportsView" aria-label="复用 Web 端报告生成">
+            <div class="legacy-view">
+              <div class="legacy-shell">
+                <div class="legacy-page-head">
+                  <div>
+                    <h2>报告生成</h2>
+                    <p>复用原 Web 端 Reports 页面结构，当前范围限定到 apps-web 和选中分支。</p>
+                  </div>
+                  <div class="legacy-actions">
+                    <button class="action-btn">本周</button>
+                    <button class="action-btn primary" data-report-action>导出 PDF</button>
+                    <button class="action-btn" data-back-chat>回到会话</button>
+                  </div>
+                </div>
+
+                <div class="legacy-report-layout">
+                  <aside class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h3>报告列表</h3>
+                      <span>Reports sidebar</span>
+                    </div>
+                    <div class="legacy-card-body legacy-report-list">
+                      <button class="legacy-report-item active">
+                        <strong>桌面端认证链路临时报告</strong>
+                        <span>草稿 · 今天 10:08 · Markdown</span>
+                      </button>
+                      <button class="legacy-report-item">
+                        <strong>apps-web 周报</strong>
+                        <span>已完成 · 昨天 18:12 · PDF</span>
+                      </button>
+                      <button class="legacy-report-item">
+                        <strong>高风险变更专项报告</strong>
+                        <span>计划中 · release/desktop-shell</span>
+                      </button>
+                      <button class="action-btn primary" data-report-action>生成新报告</button>
+                    </div>
+                  </aside>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <div>
+                        <h3>桌面端认证链路临时报告</h3>
+                        <span>Reports detail</span>
+                      </div>
+                      <span class="tag orange">Weekly</span>
+                    </div>
+                    <div class="legacy-card-body">
+                      <p style="margin:0 0 16px;color:var(--muted);font-size:13px;line-height:1.6;">
+                        本报告由当前仓库会话自动组织，覆盖 OAuth 回调、Session 刷新、Electron 路由和审批记录。正式施工时可直接复用现有 Reports 页面组件和导出服务。
+                      </p>
+                      <div class="legacy-metrics">
+                        <div class="legacy-metric"><span>变更数</span><strong>5</strong><small>认证相关文件</small></div>
+                        <div class="legacy-metric"><span>风险数</span><strong>4</strong><small>High / Medium</small></div>
+                        <div class="legacy-metric"><span>审批数</span><strong>2</strong><small>1 个待处理</small></div>
+                        <div class="legacy-metric"><span>建议</span><strong>7</strong><small>验证清单</small></div>
+                      </div>
+                      <div style="margin-top:16px;" class="legacy-tabs">
+                        <button class="legacy-tab active">Activity</button>
+                        <button class="legacy-tab">Issues</button>
+                        <button class="legacy-tab">Trends</button>
+                      </div>
+                      <div class="legacy-list" style="margin-top:12px;">
+                        <div class="legacy-list-item"><strong>验证桌面端 OAuth callback</strong><span>优先级 P0 · 建议由 Agent 生成具体测试步骤</span></div>
+                        <div class="legacy-list-item"><strong>复查 cookie refresh 逻辑</strong><span>涉及 api-client 和 AuthCallback</span></div>
+                        <div class="legacy-list-item"><strong>审批飞书通知内容</strong><span>建议编辑后发送到研发群</span></div>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" id="agentRunView" aria-label="Codex 风格 Agent 执行界面">
+            <div class="agent-run-view">
+              <div class="agent-run-shell">
+                <div class="agent-run-main">
+                  <section class="codex-card">
+                    <div class="codex-card-head">
+                      <div>
+                        <h2 id="agentRunTitle">Agent 正在处理 apps-web 会话</h2>
+                        <p id="agentRunPrompt">任务：检查 release/desktop-shell 最近的认证风险，并生成验证计划。</p>
+                      </div>
+                      <span class="run-status"><span class="run-pulse"></span>等待确认</span>
+                    </div>
+                    <div class="codex-card-body">
+                      <div class="agent-session-strip" style="margin-bottom:12px;">
+                        <span class="agent-session-pill active" id="agentSessionPill">apps-web-agent</span>
+                        <span class="agent-session-pill" id="agentSessionBranch">release/desktop-shell</span>
+                        <span class="agent-session-pill" id="agentSessionState">独立 Agent 会话</span>
+                      </div>
+                      <div class="plan-list">
+                        <div class="plan-row done">
+                          <span class="plan-step">1</span>
+                          <div><strong>读取当前消息上下文</strong><span>已收集 GitHub push、AI 摘要、审批卡和报告草稿。</span></div>
+                          <span class="tag green">done</span>
+                        </div>
+                        <div class="plan-row active">
+                          <span class="plan-step">2</span>
+                          <div><strong>制定执行计划</strong><span>准备同步分支、刷新 AI 分析、生成验证清单和报告草稿。</span></div>
+                          <span class="tag orange">active</span>
+                        </div>
+                        <div class="plan-row">
+                          <span class="plan-step">3</span>
+                          <div><strong>等待用户确认</strong><span>涉及 API 调用和报告生成，执行前必须确认。</span></div>
+                          <span class="tag">pending</span>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="codex-card">
+                    <div class="codex-card-head">
+                      <div>
+                        <h3>执行记录</h3>
+                        <p>参考 Codex 的工具调用流：先展示正在做什么，再展示命令、输出和下一步。</p>
+                      </div>
+                    </div>
+                    <div class="codex-card-body tool-timeline">
+                      <div class="tool-call done">
+                        <span class="tool-icon">CTX</span>
+                        <div class="tool-body">
+                          <strong>读取会话上下文</strong>
+                          <p>定位到 OAuth 回调变更、AI 风险摘要和飞书通知审批请求。</p>
+                          <div class="terminal-block">
+                            <span class="ok">✓ loaded 5 message cards</span>
+                            <span class="ok">✓ matched branch release/desktop-shell</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="tool-call running">
+                        <span class="tool-icon">API</span>
+                        <div class="tool-body">
+                          <strong>准备调用仓库同步和 AI 分析</strong>
+                          <p>这些动作不会写代码，但会更新事件、分析和报告数据，因此进入确认状态。</p>
+                          <div class="terminal-block">
+                            <span class="warn">$ POST /repositories/apps-web/sync</span>
+                            <span class="warn">$ POST /ai/trigger/:eventId {"force": true}</span>
+                            <span class="warn">$ POST /reports/generate {"format": "MARKDOWN"}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="approval-box">
+                        <div class="approval-box-head">
+                          <strong>需要确认</strong>
+                          <span>confirm before run</span>
+                        </div>
+                        <div class="approval-box-body">
+                          <p style="margin:0;color:var(--muted);font-size:13px;line-height:1.55;">Agent 将同步当前分支、刷新 AI 风险摘要，并生成报告草稿。不会修改代码，不会自动发送外部通知。</p>
+                          <div class="action-row">
+                            <button class="action-btn primary" id="runApproveBtn">确认执行</button>
+                            <button class="action-btn">修改计划</button>
+                            <button class="action-btn" data-back-chat>返回会话</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="codex-card">
+                    <div class="codex-card-head">
+                      <div>
+                        <h3>与该仓库 Agent 继续对话</h3>
+                        <p>这个输入只进入当前仓库的 Agent 会话，不会污染其他仓库。</p>
+                      </div>
+                    </div>
+                    <div class="codex-card-body">
+                      <div class="agent-chat" id="agentChatLog">
+                        <div class="agent-chat-line user">
+                          <span class="agent-chat-avatar">你</span>
+                          <div class="agent-chat-bubble">请先给出验证计划，不要直接执行。</div>
+                        </div>
+                        <div class="agent-chat-line">
+                          <span class="agent-chat-avatar">AG</span>
+                          <div class="agent-chat-bubble">已理解。我会先读取当前仓库会话，再列出同步、分析、报告生成的计划，并等待确认。</div>
+                        </div>
+                      </div>
+                      <div class="agent-reply-box">
+                        <input id="agentReplyInput" placeholder="继续和当前仓库 Agent 对话，例如：只生成验证清单，不生成报告" />
+                        <button class="action-btn primary" id="agentReplyBtn">发送</button>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+
+                <aside class="agent-run-side">
+                  <section class="codex-card">
+                    <div class="codex-card-head">
+                      <h3>影响范围</h3>
+                      <span class="tag orange">safe</span>
+                    </div>
+                    <div class="codex-card-body run-summary-grid">
+                      <div class="run-summary-cell"><span>仓库</span><strong id="agentScopeRepo">apps-web</strong></div>
+                      <div class="run-summary-cell"><span>分支</span><strong id="agentScopeBranch">release</strong></div>
+                      <div class="run-summary-cell"><span>写代码</span><strong>否</strong></div>
+                      <div class="run-summary-cell"><span>通知</span><strong>草稿</strong></div>
+                    </div>
+                  </section>
+                  <section class="codex-card">
+                    <div class="codex-card-head">
+                      <h3>后续输出</h3>
+                    </div>
+                    <div class="codex-card-body legacy-list">
+                      <div class="legacy-list-item"><strong>验证清单</strong><span>桌面端登录、浏览器登录、token 过期、退出登录。</span></div>
+                      <div class="legacy-list-item"><strong>风险解释</strong><span>说明为什么 OAuth callback 属于高风险变更。</span></div>
+                      <div class="legacy-list-item"><strong>报告草稿</strong><span>生成后会回写到当前仓库会话。</span></div>
+                    </div>
+                  </section>
+                </aside>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" id="settingsView" aria-label="一级设置">
+            <div class="legacy-view">
+              <div class="legacy-shell">
+                <div class="legacy-page-head">
+                  <div>
+                    <h2>设置</h2>
+                    <p>一级导航保留设置入口，复用原 Web 端 Settings 的账户、AI、通知、集成配置。</p>
+                  </div>
+                  <div class="legacy-actions">
+                    <button class="action-btn primary" data-back-chat>回到会话</button>
+                  </div>
+                </div>
+
+                <div class="legacy-two-col">
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h3>AI 配置</h3>
+                      <span>Settings / AI</span>
+                    </div>
+                    <div class="legacy-card-body legacy-list">
+                      <div class="legacy-list-item"><strong>Provider</strong><span>OpenAI compatible · gpt-5.1-codex</span></div>
+                      <div class="legacy-list-item"><strong>Agent 执行策略</strong><span>所有仓库 Agent 默认确认后执行。</span></div>
+                      <div class="legacy-list-item"><strong>模型连接</strong><span>已连接 · 可测试 · 可拉取模型列表</span></div>
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h3>通知与集成</h3>
+                      <span>Settings / Integrations</span>
+                    </div>
+                    <div class="legacy-card-body legacy-list">
+                      <div class="legacy-list-item"><strong>Feishu</strong><span>已配置 · 高风险摘要需审批后发送。</span></div>
+                      <div class="legacy-list-item"><strong>In-app</strong><span>仓库会话内展示审批、报告和 Agent 状态。</span></div>
+                      <div class="legacy-list-item"><strong>通知例外规则</strong><span>复用原有 FilterRule / Notification 模板能力。</span></div>
+                    </div>
+                  </section>
+                </div>
+
+                <section class="legacy-card">
+                  <div class="legacy-card-head">
+                    <h3>账户与工作区</h3>
+                    <span>Settings / Profile</span>
+                  </div>
+                  <div class="legacy-card-body legacy-list">
+                    <div class="legacy-list-item"><strong>GitHub 账号</strong><span>用于识别可编辑仓库、star 仓库和 following 用户。</span></div>
+                    <div class="legacy-list-item"><strong>工作区偏好</strong><span>仓库会话排序、关注流权重、默认监控分支。</span></div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </section>
         </div>
       </section>
 
@@ -1966,6 +2880,34 @@
     </section>
   </template>
 
+  <template id="agentContext">
+    <section class="context-card">
+      <h3>Agent 执行策略 <span class="tag orange">Codex-like</span></h3>
+      <div class="context-body">
+        <div class="context-row"><strong>先展示计划</strong><span>让用户知道 Agent 准备做什么。</span></div>
+        <div class="context-row"><strong>工具调用透明</strong><span>每个 API、同步、报告生成都以执行记录展示。</span></div>
+        <div class="context-row"><strong>确认后执行</strong><span>涉及数据更新或外部通知时，必须人工确认。</span></div>
+      </div>
+    </section>
+    <section class="context-card">
+      <h3>当前任务</h3>
+      <div class="context-body">
+        <div class="context-row"><strong>输入来源</strong><span>仓库聊天消息、右键菜单或顶部 Agent 图标。</span></div>
+        <div class="context-row"><strong>执行结果</strong><span>回写到当前仓库会话，形成可追踪消息。</span></div>
+      </div>
+    </section>
+  </template>
+
+  <template id="settingsContext">
+    <section class="context-card">
+      <h3>一级设置 <span class="tag blue">Global</span></h3>
+      <div class="context-body">
+        <div class="context-row"><strong>不属于仓库会话</strong><span>设置是工作区级入口，保留在一级侧边栏底部。</span></div>
+        <div class="context-row"><strong>复用 Web Settings</strong><span>账户、AI、通知、飞书集成和规则配置都可迁移。</span></div>
+      </div>
+    </section>
+  </template>
+
   <template id="watchContext">
     <section class="context-card">
       <h3>关注流规则 <span class="tag blue">只读</span></h3>
@@ -1989,6 +2931,10 @@
     const sidebar = document.getElementById("sidebar");
     const chatView = document.getElementById("chatView");
     const watchView = document.getElementById("watchView");
+    const dashboardView = document.getElementById("dashboardView");
+    const reportsView = document.getElementById("reportsView");
+    const agentRunView = document.getElementById("agentRunView");
+    const settingsView = document.getElementById("settingsView");
     const title = document.getElementById("title");
     const subtitle = document.getElementById("subtitle");
     const crumb = document.getElementById("crumb");
@@ -1998,37 +2944,59 @@
     const toast = document.getElementById("toast");
     const dashboardTopBtn = document.getElementById("dashboardTopBtn");
     const reportTopBtn = document.getElementById("reportTopBtn");
+    const settingsRailBtn = document.getElementById("settingsRailBtn");
     const messageMenu = document.getElementById("messageMenu");
     const messageMenuTitle = document.getElementById("messageMenuTitle");
     const menuAgentAction = document.getElementById("menuAgentAction");
     const menuCreateApproval = document.getElementById("menuCreateApproval");
     const menuCopyLink = document.getElementById("menuCopyLink");
     let activeMessageBubble = null;
+    let currentRepoKey = "web";
 
     const repoData = {
       web: {
         title: "Repo-Pulse / apps-web",
         crumb: "可编辑仓库 / Repo-Pulse / apps-web",
         subtitle: "6 个未处理事件",
-        context: "apps-web"
+        context: "apps-web",
+        agentTitle: "Agent 正在处理 apps-web 会话",
+        agentSession: "apps-web-agent-042",
+        agentBranch: "release/desktop-shell",
+        agentScopeRepo: "apps-web",
+        agentScopeBranch: "release"
       },
       api: {
         title: "Repo-Pulse / apps-api",
         crumb: "可编辑仓库 / Repo-Pulse / apps-api",
         subtitle: "1 个未读事件",
-        context: "apps-api"
+        context: "apps-api",
+        agentTitle: "Agent 正在处理 apps-api 会话",
+        agentSession: "apps-api-agent-017",
+        agentBranch: "webhook-events",
+        agentScopeRepo: "apps-api",
+        agentScopeBranch: "webhook"
       },
       ai: {
         title: "packages / ai-sdk",
         crumb: "可编辑仓库 / packages / ai-sdk",
         subtitle: "3 条报告消息",
-        context: "ai-sdk"
+        context: "ai-sdk",
+        agentTitle: "Agent 正在处理 ai-sdk 会话",
+        agentSession: "ai-sdk-agent-009",
+        agentBranch: "main",
+        agentScopeRepo: "ai-sdk",
+        agentScopeBranch: "main"
       },
       desktop: {
         title: "apps / electron",
         crumb: "可编辑仓库 / apps / electron",
         subtitle: "已读",
-        context: "electron"
+        context: "electron",
+        agentTitle: "Agent 正在处理 electron 会话",
+        agentSession: "electron-agent-004",
+        agentBranch: "desktop-shell",
+        agentScopeRepo: "electron",
+        agentScopeBranch: "desktop"
       }
     };
 
@@ -2046,6 +3014,10 @@
       sidebar.classList.toggle("watch-mode", isWatch);
       chatView.classList.toggle("active", !isWatch);
       watchView.classList.toggle("active", isWatch);
+      dashboardView.classList.remove("active");
+      reportsView.classList.remove("active");
+      agentRunView.classList.remove("active");
+      settingsView.classList.remove("active");
       document.querySelectorAll("[data-mode]").forEach((item) => {
         item.classList.toggle("active", item.dataset.mode === mode);
       });
@@ -2064,8 +3036,15 @@
 
     function setRepo(repoKey) {
       const data = repoData[repoKey] || repoData.web;
+      currentRepoKey = repoData[repoKey] ? repoKey : "web";
       dashboardTopBtn.classList.remove("active");
       reportTopBtn.classList.remove("report-active");
+      chatView.classList.add("active");
+      watchView.classList.remove("active");
+      dashboardView.classList.remove("active");
+      reportsView.classList.remove("active");
+      agentRunView.classList.remove("active");
+      settingsView.classList.remove("active");
       document.querySelectorAll(".repo-row").forEach((row) => {
         row.classList.toggle("active", row.dataset.repo === repoKey);
       });
@@ -2077,24 +3056,95 @@
       renderContext("repoContext");
     }
 
+    function getCurrentRepoData() {
+      return repoData[currentRepoKey] || repoData.web;
+    }
+
     function showRepoDashboard() {
-      setMode("chat");
+      closeMessageMenu();
+      sidebar.classList.remove("watch-mode");
+      chatView.classList.remove("active");
+      watchView.classList.remove("active");
+      reportsView.classList.remove("active");
+      agentRunView.classList.remove("active");
+      settingsView.classList.remove("active");
+      dashboardView.classList.add("active");
       dashboardTopBtn.classList.add("active");
       reportTopBtn.classList.remove("report-active");
+      title.textContent = "仓库看板";
+      subtitle.textContent = "复用 Web Dashboard";
+      crumb.textContent = "可编辑仓库 / Repo-Pulse / apps-web / Dashboard";
       contextKicker.textContent = "Repo Dashboard";
       contextTitle.textContent = "apps-web 看板";
       renderContext("repoDashboardContext");
-      showToast("已打开当前仓库看板。这里复用 Web 端 Dashboard 的仓库级指标。");
+      showToast("已打开当前仓库看板。施工时可直接复用 Web 端 Dashboard 页面组件。");
     }
 
     function showRepoReports() {
-      setMode("chat");
+      closeMessageMenu();
+      sidebar.classList.remove("watch-mode");
+      chatView.classList.remove("active");
+      watchView.classList.remove("active");
+      dashboardView.classList.remove("active");
+      agentRunView.classList.remove("active");
+      settingsView.classList.remove("active");
+      reportsView.classList.add("active");
       dashboardTopBtn.classList.remove("active");
       reportTopBtn.classList.add("report-active");
+      title.textContent = "报告生成";
+      subtitle.textContent = "复用 Web Reports";
+      crumb.textContent = "可编辑仓库 / Repo-Pulse / apps-web / Reports";
       contextKicker.textContent = "Repo Reports";
       contextTitle.textContent = "apps-web 报告";
       renderContext("repoReportContext");
-      showToast("已打开当前仓库报告生成。正式产品会复用 Web 端 Reports 能力。");
+      showToast("已打开报告生成。施工时可直接复用 Web 端 Reports 页面组件。");
+    }
+
+    function showAgentRun(prompt) {
+      const data = getCurrentRepoData();
+      closeMessageMenu();
+      sidebar.classList.remove("watch-mode");
+      chatView.classList.remove("active");
+      watchView.classList.remove("active");
+      dashboardView.classList.remove("active");
+      reportsView.classList.remove("active");
+      agentRunView.classList.add("active");
+      settingsView.classList.remove("active");
+      dashboardTopBtn.classList.remove("active");
+      reportTopBtn.classList.remove("report-active");
+      title.textContent = "Agent 会话";
+      subtitle.textContent = data.agentSession;
+      crumb.textContent = `${data.crumb} / Agent`;
+      contextKicker.textContent = "Agent Run";
+      contextTitle.textContent = data.agentSession;
+      renderContext("agentContext");
+      document.getElementById("agentRunTitle").textContent = data.agentTitle;
+      document.getElementById("agentRunPrompt").textContent = `任务：${prompt || "检查 release/desktop-shell 最近的认证风险，并生成验证计划。"}`;
+      document.getElementById("agentSessionPill").textContent = data.agentSession;
+      document.getElementById("agentSessionBranch").textContent = data.agentBranch;
+      document.getElementById("agentScopeRepo").textContent = data.agentScopeRepo;
+      document.getElementById("agentScopeBranch").textContent = data.agentScopeBranch;
+    }
+
+    function showSettings() {
+      closeMessageMenu();
+      sidebar.classList.remove("watch-mode");
+      chatView.classList.remove("active");
+      watchView.classList.remove("active");
+      dashboardView.classList.remove("active");
+      reportsView.classList.remove("active");
+      agentRunView.classList.remove("active");
+      settingsView.classList.add("active");
+      dashboardTopBtn.classList.remove("active");
+      reportTopBtn.classList.remove("report-active");
+      document.querySelectorAll("[data-mode]").forEach((item) => item.classList.remove("active"));
+      settingsRailBtn.classList.add("active");
+      title.textContent = "设置";
+      subtitle.textContent = "工作区级配置";
+      crumb.textContent = "Repo-Pulse / Settings";
+      contextKicker.textContent = "Settings";
+      contextTitle.textContent = "工作区设置";
+      renderContext("settingsContext");
     }
 
     function showToast(message) {
@@ -2131,13 +3181,13 @@
 
     function useAgentForBubble(bubble) {
       const action = bubble?.dataset.agentAction || `让 Agent 处理：${getBubbleTitle(bubble)}`;
-      showToast(`${action}。正式产品会先返回执行计划并等待确认。`);
-      closeMessageMenu();
+      showAgentRun(action);
     }
 
     document.querySelectorAll("[data-mode]").forEach((button) => {
       button.addEventListener("click", () => {
         closeMessageMenu();
+        settingsRailBtn.classList.remove("active");
         setMode(button.dataset.mode);
       });
     });
@@ -2152,8 +3202,7 @@
 
     document.querySelector(".agent-queue-row").addEventListener("click", () => {
       closeMessageMenu();
-      setMode("chat");
-      showToast("Agent 待确认事项应展开在当前仓库会话里。");
+      showAgentRun("处理 Agent 队列中的同步分支、重新分析认证链路和生成报告草稿");
     });
 
     document.querySelectorAll(".feed-tab").forEach((tab) => {
@@ -2180,27 +3229,61 @@
     });
 
     document.getElementById("confirmAgentBtn").addEventListener("click", (event) => {
-      event.currentTarget.textContent = "已加入执行队列";
-      event.currentTarget.disabled = true;
-      showToast("Agent 计划已确认。原型不会执行真实命令。");
+      showAgentRun("确认并执行当前消息中的同步、AI 分析和报告生成计划");
     });
 
     document.getElementById("sendAgentBtn").addEventListener("click", () => {
-      showToast("已发送给 Agent。正式产品会先返回计划，再等待确认。");
+      showAgentRun("检查 release/desktop-shell 最近的认证风险，生成一份验证计划");
     });
 
     document.getElementById("agentTopBtn").addEventListener("click", () => {
-      showToast("Agent 面板应在当前仓库聊天中展开，而不是跳出会话。");
+      showAgentRun("处理当前仓库未读高风险事件并给出可执行计划");
     });
 
     dashboardTopBtn.addEventListener("click", showRepoDashboard);
     reportTopBtn.addEventListener("click", showRepoReports);
+    settingsRailBtn.addEventListener("click", showSettings);
 
     document.addEventListener("click", (event) => {
       if (!event.target.matches("[data-report-action]")) {
         return;
       }
       showToast(`${event.target.textContent.trim()} 已加入生成队列。原型中仅模拟报告生成。`);
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!event.target.matches("[data-back-chat]")) {
+        return;
+      }
+      setMode("chat");
+      showToast("已回到当前仓库会话。");
+    });
+
+    document.getElementById("runApproveBtn").addEventListener("click", (event) => {
+      event.currentTarget.textContent = "执行中...";
+      event.currentTarget.disabled = true;
+      showToast("已确认执行。正式产品会继续展示实时工具调用输出。");
+    });
+
+    document.getElementById("agentReplyBtn").addEventListener("click", () => {
+      const input = document.getElementById("agentReplyInput");
+      const text = input.value.trim();
+      if (!text) {
+        showToast("请输入要发送给当前仓库 Agent 的内容。");
+        return;
+      }
+      const log = document.getElementById("agentChatLog");
+      const userLine = document.createElement("div");
+      userLine.className = "agent-chat-line user";
+      userLine.innerHTML = `<span class="agent-chat-avatar">你</span><div class="agent-chat-bubble"></div>`;
+      userLine.querySelector(".agent-chat-bubble").textContent = text;
+      const agentLine = document.createElement("div");
+      agentLine.className = "agent-chat-line";
+      agentLine.innerHTML = `<span class="agent-chat-avatar">AG</span><div class="agent-chat-bubble"></div>`;
+      agentLine.querySelector(".agent-chat-bubble").textContent = "收到，这条补充会进入当前仓库 Agent 会话，并影响后续计划。";
+      log.append(userLine, agentLine);
+      input.value = "";
+      showToast("已发送到当前仓库的 Agent 会话。");
     });
 
     document.addEventListener("contextmenu", (event) => {

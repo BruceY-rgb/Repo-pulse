@@ -3,14 +3,18 @@ import {
   AlertTriangle,
   CheckCircle,
   ChevronDown,
+  ChevronRight,
   Clipboard,
+  GitBranch,
   Loader2,
   RefreshCw,
   Save,
+  Search,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   Dialog,
@@ -26,6 +30,8 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useRepositoryBranchesQuery } from '@/hooks/queries/use-repository-queries';
+import { normalizeBranchOption, repositoryService } from '@/services/repository.service';
 import {
   imService,
   type FeishuConnectionStatus,
@@ -34,6 +40,7 @@ import {
   type ImSubscription,
   type PairingCodeResult,
 } from '@/services/im.service';
+import type { Repository, RepositoryBranchScopeMap, RepositoryBranchScopeOption } from '@/types/api';
 
 interface FeishuIntegrationDialogProps {
   open: boolean;
@@ -41,7 +48,20 @@ interface FeishuIntegrationDialogProps {
   onConnectionChange?: (connected: boolean) => void;
 }
 
-const DEFAULT_EVENTS = ['highRisk', 'prUpdates', 'analysisComplete'];
+const GITHUB_EVENT_TYPES = [
+  'PUSH',
+  'PR_OPENED',
+  'PR_MERGED',
+  'PR_CLOSED',
+  'PR_REVIEW',
+  'ISSUE_OPENED',
+  'ISSUE_CLOSED',
+  'ISSUE_COMMENT',
+  'RELEASE',
+  'BRANCH_CREATED',
+  'BRANCH_DELETED',
+] as const;
+const DEFAULT_EVENTS = ['PUSH', 'PR_OPENED', 'PR_MERGED', 'PR_CLOSED', 'ISSUE_OPENED', 'ISSUE_CLOSED'];
 const FEISHU_PERMISSION_SCOPES_JSON = JSON.stringify({
   scopes: {
     tenant: [
@@ -106,6 +126,154 @@ function hasReadySubscription(status: FeishuConnectionStatus | null): boolean {
   );
 }
 
+function normalizeSelectedEvents(events: string[] | undefined): string[] {
+  const selected = (events || []).filter((event) =>
+    (GITHUB_EVENT_TYPES as readonly string[]).includes(event),
+  );
+  return selected.length > 0 ? selected : DEFAULT_EVENTS;
+}
+
+function createDefaultSubscription(chatName: string): ImSubscription {
+  return {
+    id: 'default',
+    chatName,
+    repositoryIds: [],
+    branches: [],
+    repositoryBranchScopes: {},
+    events: DEFAULT_EVENTS,
+    enabled: true,
+  };
+}
+
+function formatBranchSummary(branches: string[], fallbackLabel: string) {
+  if (branches.length === 0) return fallbackLabel;
+  if (branches.length === 1) return branches[0];
+  return `${branches[0]} +${branches.length - 1}`;
+}
+
+interface FeishuRepositorySubscriptionItemProps {
+  repo: Repository;
+  checked: boolean;
+  expanded: boolean;
+  branchSummary: string;
+  selectedBranches: string[];
+  allBranchesLabel: string;
+  notSelectedLabel: string;
+  onToggleRepository: (repositoryId: string) => void;
+  onToggleExpanded: (repositoryId: string) => void;
+  onToggleBranch: (repositoryId: string, branchName: string) => void;
+  onResetBranches: (repositoryId: string) => void;
+  t: (key: string) => string;
+}
+
+function FeishuRepositorySubscriptionItem({
+  repo,
+  checked,
+  expanded,
+  branchSummary,
+  selectedBranches,
+  allBranchesLabel,
+  notSelectedLabel,
+  onToggleRepository,
+  onToggleExpanded,
+  onToggleBranch,
+  onResetBranches,
+  t,
+}: FeishuRepositorySubscriptionItemProps) {
+  const branchesQuery = useRepositoryBranchesQuery(repo.id, expanded);
+  const branchOptions = (branchesQuery.data ?? [])
+    .map((branch) => normalizeBranchOption(branch))
+    .filter((branch): branch is RepositoryBranchScopeOption => Boolean(branch));
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-[var(--github-border)]/80 bg-white/[0.02]">
+      <div className="flex items-center gap-3 px-3 py-2">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+          onClick={() => onToggleRepository(repo.id)}
+        >
+          <Checkbox checked={checked} className="pointer-events-none border-[var(--github-border)]" />
+          <GitBranch className="h-4 w-4 shrink-0 text-[var(--github-text-secondary)]" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-white">{repo.fullName}</p>
+            <p className="truncate text-xs text-[var(--github-text-secondary)]">
+              {checked ? branchSummary : notSelectedLabel}
+            </p>
+          </div>
+        </button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-lg text-[var(--github-text-secondary)] hover:bg-white/5 hover:text-white"
+          onClick={() => onToggleExpanded(repo.id)}
+        >
+          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </Button>
+      </div>
+
+      {expanded ? (
+        <div className="space-y-3 border-t border-[var(--github-border)]/80 bg-black/10 px-3 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-medium uppercase tracking-[0.16em] text-[var(--github-text-secondary)]">
+                {t('dashboard.scope.branches.title')}
+              </p>
+              <p className="mt-1 truncate text-xs text-[var(--github-text-secondary)]">
+                {t('dashboard.scope.branches.description')}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 shrink-0 rounded-lg px-2 text-xs text-[var(--github-accent)] hover:bg-[var(--github-accent)]/10 hover:text-white"
+              onClick={() => onResetBranches(repo.id)}
+            >
+              {allBranchesLabel}
+            </Button>
+          </div>
+
+          {branchesQuery.isLoading ? (
+            <div className="flex items-center gap-2 rounded-lg border border-[var(--github-border)]/70 bg-white/[0.03] px-3 py-3 text-sm text-[var(--github-text-secondary)]">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {t('dashboard.scope.branches.loading')}
+            </div>
+          ) : branchOptions.length === 0 ? (
+            <div className="rounded-lg border border-[var(--github-border)]/70 bg-white/[0.03] px-3 py-3 text-sm text-[var(--github-text-secondary)]">
+              {t('dashboard.scope.branches.empty')}
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              {branchOptions.map((branch) => {
+                const branchChecked = selectedBranches.includes(branch.name);
+
+                return (
+                  <button
+                    key={`${repo.id}-${branch.name}`}
+                    type="button"
+                    className="flex items-center gap-3 rounded-lg border border-[var(--github-border)]/70 bg-white/[0.02] px-3 py-2 text-left transition-colors hover:border-[var(--github-accent)]/40 hover:bg-white/[0.05]"
+                    onClick={() => onToggleBranch(repo.id, branch.name)}
+                  >
+                    <Checkbox checked={branchChecked} className="pointer-events-none border-[var(--github-border)]" />
+                    <span className="min-w-0 flex-1 truncate text-sm text-white">{branch.name}</span>
+                    {branch.isDefault ? (
+                      <span className="rounded-full bg-[var(--github-accent)]/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--github-accent)]">
+                        default
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function FeishuIntegrationDialog({
   open,
   onOpenChange,
@@ -119,11 +287,16 @@ export function FeishuIntegrationDialog({
   const [testResult, setTestResult] = useState<FeishuConnectionTestResult | null>(null);
   const [pairingCode, setPairingCode] = useState<PairingCodeResult | null>(null);
   const [subscriptions, setSubscriptions] = useState<ImSubscription[]>([]);
-  const [branchDraft, setBranchDraft] = useState('main');
+  const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [repositorySearch, setRepositorySearch] = useState('');
+  const [repositoryListMode, setRepositoryListMode] = useState<'monitored' | 'all'>('monitored');
+  const [expandedRepositoryIds, setExpandedRepositoryIds] = useState<string[]>([]);
   const [guideOpen, setGuideOpen] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState(false);
+  const [loadingRepositories, setLoadingRepositories] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [sendingTestNotification, setSendingTestNotification] = useState(false);
   const [pairing, setPairing] = useState(false);
   const [savingSubscriptions, setSavingSubscriptions] = useState(false);
   const [statusError, setStatusError] = useState('');
@@ -132,6 +305,10 @@ export function FeishuIntegrationDialog({
   const connected = isConnected(status);
   const subscriptionReady = hasReadySubscription(status);
   const canSubmitCredentials = appId.trim().length > 0 && appSecret.trim().length > 0;
+
+  const getBaseSubscription = useCallback(() => (
+    subscriptions[0] ?? createDefaultSubscription(t('settings.integrations.feishu.defaultChat'))
+  ), [subscriptions, t]);
 
   const refreshStatus = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
@@ -161,10 +338,24 @@ export function FeishuIntegrationDialog({
     }
   }, [onConnectionChange]);
 
+  const loadRepositories = useCallback(async () => {
+    setLoadingRepositories(true);
+    try {
+      const nextRepositories = await repositoryService.getAll();
+      setRepositories(nextRepositories);
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+      setRepositories([]);
+    } finally {
+      setLoadingRepositories(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     void refreshStatus();
-  }, [open, refreshStatus]);
+    void loadRepositories();
+  }, [loadRepositories, open, refreshStatus]);
 
   useEffect(() => {
     if (!open || activeTab !== 'binding' || !pairingCode?.expiresAt || subscriptionReady) return;
@@ -263,6 +454,18 @@ export function FeishuIntegrationDialog({
     }
   };
 
+  const sendTestNotification = async () => {
+    setSendingTestNotification(true);
+    try {
+      const result = await imService.sendFeishuTestNotification();
+      toast[result.sent > 0 ? 'success' : 'error'](result.message);
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setSendingTestNotification(false);
+    }
+  };
+
   const copyPairingCommand = async () => {
     if (!pairingCode?.code) return;
     await navigator.clipboard.writeText(`/bind ${pairingCode.code}`);
@@ -270,23 +473,17 @@ export function FeishuIntegrationDialog({
   };
 
   const saveSubscriptions = async () => {
-    const draftSubscription: ImSubscription = subscriptions[0] ?? {
-      id: 'default',
-      chatName: t('settings.integrations.feishu.defaultChat'),
-      repositoryIds: [],
-      branches: [],
-      events: DEFAULT_EVENTS,
-      enabled: true,
-    };
-    const branches = branchDraft
-      .split(',')
-      .map((branch) => branch.trim())
-      .filter(Boolean);
+    const draftSubscription = getBaseSubscription();
 
     setSavingSubscriptions(true);
     try {
       const nextSubscriptions = await imService.saveSubscriptions({
-        subscriptions: [{ ...draftSubscription, branches }],
+        subscriptions: [{
+          ...draftSubscription,
+          branches: [],
+          repositoryBranchScopes: normalizedRepositoryBranchScopes,
+          events: normalizeSelectedEvents(draftSubscription.events),
+        }],
       });
       setSubscriptions(nextSubscriptions);
       toast.success(t('settings.integrations.feishu.subscriptionSaved'));
@@ -298,23 +495,127 @@ export function FeishuIntegrationDialog({
   };
 
   const toggleEvent = (eventName: string) => {
-    const baseSubscription: ImSubscription = subscriptions[0] ?? {
-      id: 'default',
-      chatName: t('settings.integrations.feishu.defaultChat'),
-      repositoryIds: [],
-      branches: [],
-      events: DEFAULT_EVENTS,
-      enabled: true,
-    };
-    const nextEvents = baseSubscription.events.includes(eventName)
-      ? baseSubscription.events.filter((event) => event !== eventName)
-      : [...baseSubscription.events, eventName];
+    const baseSubscription = getBaseSubscription();
+    const currentEvents = normalizeSelectedEvents(baseSubscription.events);
+    const nextEvents = currentEvents.includes(eventName)
+      ? currentEvents.filter((event) => event !== eventName)
+      : [...currentEvents, eventName];
 
     setSubscriptions([{ ...baseSubscription, events: nextEvents }]);
   };
 
+  const toggleSubscriptionEnabled = (enabled: boolean) => {
+    const baseSubscription = getBaseSubscription();
+
+    setSubscriptions([{ ...baseSubscription, enabled }]);
+  };
+
+  const useAllRepositories = () => {
+    const baseSubscription = getBaseSubscription();
+    setSubscriptions([{ ...baseSubscription, repositoryIds: [], branches: [], repositoryBranchScopes: {} }]);
+  };
+
+  const toggleRepository = (repositoryId: string) => {
+    const baseSubscription = getBaseSubscription();
+    const currentRepositoryIds = allRepositoriesSelected ? [] : baseSubscription.repositoryIds || [];
+    const nextRepositoryIds = currentRepositoryIds.includes(repositoryId)
+      ? currentRepositoryIds.filter((id) => id !== repositoryId)
+      : [...currentRepositoryIds, repositoryId];
+    const nextRepositoryBranchScopes = { ...normalizedRepositoryBranchScopes };
+    if (currentRepositoryIds.includes(repositoryId)) {
+      delete nextRepositoryBranchScopes[repositoryId];
+    }
+
+    setSubscriptions([{
+      ...baseSubscription,
+      repositoryIds: nextRepositoryIds,
+      branches: [],
+      repositoryBranchScopes: nextRepositoryBranchScopes,
+    }]);
+  };
+
+  const toggleExpandedRepository = (repositoryId: string) => {
+    setExpandedRepositoryIds((current) =>
+      current.includes(repositoryId)
+        ? current.filter((id) => id !== repositoryId)
+        : [...current, repositoryId],
+    );
+  };
+
+  const toggleRepositoryBranch = (repositoryId: string, branchName: string) => {
+    const baseSubscription = getBaseSubscription();
+    const repositoryIds = allRepositoriesSelected
+      ? [repositoryId]
+      : selectedRepositoryIds.includes(repositoryId)
+        ? selectedRepositoryIds
+        : [...selectedRepositoryIds, repositoryId];
+    const currentBranches = normalizedRepositoryBranchScopes[repositoryId] ?? [];
+    const nextBranches = currentBranches.includes(branchName)
+      ? currentBranches.filter((branch) => branch !== branchName)
+      : [...currentBranches, branchName].sort((left, right) => left.localeCompare(right));
+
+    setSubscriptions([{
+      ...baseSubscription,
+      repositoryIds,
+      branches: [],
+      repositoryBranchScopes: {
+        ...normalizedRepositoryBranchScopes,
+        [repositoryId]: nextBranches,
+      },
+    }]);
+  };
+
+  const resetRepositoryBranches = (repositoryId: string) => {
+    if (allRepositoriesSelected || !selectedRepositoryIds.includes(repositoryId)) {
+      return;
+    }
+
+    const baseSubscription = getBaseSubscription();
+    setSubscriptions([{
+      ...baseSubscription,
+      branches: [],
+      repositoryBranchScopes: {
+        ...normalizedRepositoryBranchScopes,
+        [repositoryId]: [],
+      },
+    }]);
+  };
+
   const currentSubscription = subscriptions[0];
-  const selectedEvents = currentSubscription?.events ?? DEFAULT_EVENTS;
+  const selectedEvents = normalizeSelectedEvents(currentSubscription?.events);
+  const selectedRepositoryIds = currentSubscription?.repositoryIds ?? [];
+  const allRepositoriesSelected = selectedRepositoryIds.length === 0;
+  const availableRepositoryIds = useMemo(() => repositories.map((repository) => repository.id), [repositories]);
+  const availableRepositoryIdSet = useMemo(() => new Set(availableRepositoryIds), [availableRepositoryIds]);
+  const normalizedRepositoryBranchScopes: RepositoryBranchScopeMap = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(currentSubscription?.repositoryBranchScopes ?? {})
+          .filter(([repositoryId]) => availableRepositoryIdSet.has(repositoryId))
+          .map(([repositoryId, branches]) => [
+            repositoryId,
+            Array.from(new Set(branches)).sort((left, right) => left.localeCompare(right)),
+          ]),
+      ),
+    [availableRepositoryIdSet, currentSubscription?.repositoryBranchScopes],
+  );
+  const visibleRepositories = useMemo(() => (
+    repositoryListMode === 'monitored'
+      ? repositories.filter((repository) =>
+          allRepositoriesSelected
+            ? repository.isActive
+            : selectedRepositoryIds.includes(repository.id),
+        )
+      : repositories
+  ), [allRepositoriesSelected, repositories, repositoryListMode, selectedRepositoryIds]);
+  const filteredRepositories = useMemo(() => {
+    const keyword = repositorySearch.trim().toLowerCase();
+    if (!keyword) return visibleRepositories;
+    return visibleRepositories.filter((repository) =>
+      repository.fullName.toLowerCase().includes(keyword) ||
+      repository.name.toLowerCase().includes(keyword),
+    );
+  }, [repositorySearch, visibleRepositories]);
 
   const copyPermissionScopes = async () => {
     await navigator.clipboard.writeText(FEISHU_PERMISSION_SCOPES_JSON);
@@ -323,8 +624,8 @@ export function FeishuIntegrationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="border-[var(--github-border)] bg-[#0d1117] text-white sm:max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] flex-col overflow-hidden border-[var(--github-border)] bg-[#0d1117] text-white sm:max-h-[min(760px,calc(100dvh-3rem))] sm:max-w-2xl">
+        <DialogHeader className="shrink-0">
           <div className="flex items-center gap-3">
             <DialogTitle>{t('settings.integrations.feishu.title')}</DialogTitle>
             {connected ? (
@@ -339,19 +640,19 @@ export function FeishuIntegrationDialog({
         </DialogHeader>
 
         {loadingStatus ? (
-          <div className="flex items-center justify-center py-10">
+          <div className="flex min-h-0 flex-1 items-center justify-center py-10">
             <Loader2 className="h-5 w-5 animate-spin text-[var(--github-accent)]" />
           </div>
         ) : (
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-            <TabsList className="grid w-full grid-cols-4 border border-[var(--github-border)] bg-[var(--github-surface)]">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col gap-4">
+            <TabsList className="grid w-full shrink-0 grid-cols-4 border border-[var(--github-border)] bg-[var(--github-surface)]">
               <TabsTrigger value="credentials">{t('settings.integrations.feishu.tab.credentials')}</TabsTrigger>
               <TabsTrigger value="test">{t('settings.integrations.feishu.tab.test')}</TabsTrigger>
               <TabsTrigger value="binding">{t('settings.integrations.feishu.tab.binding')}</TabsTrigger>
               <TabsTrigger value="subscriptions">{t('settings.integrations.feishu.tab.subscriptions')}</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="credentials" className="space-y-4">
+            <TabsContent value="credentials" className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="feishu-app-id">{t('settings.integrations.feishu.appId')}</Label>
@@ -409,7 +710,7 @@ export function FeishuIntegrationDialog({
               </Collapsible>
             </TabsContent>
 
-            <TabsContent value="test" className="space-y-4">
+            <TabsContent value="test" className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
               <div className="grid gap-3 sm:grid-cols-5">
                 {stages.map((stage) => (
                   <div key={stage.id} className="rounded-lg border border-[var(--github-border)] bg-white/5 p-3">
@@ -439,7 +740,7 @@ export function FeishuIntegrationDialog({
               ) : null}
             </TabsContent>
 
-            <TabsContent value="binding" className="space-y-4">
+            <TabsContent value="binding" className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
               <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -466,22 +767,138 @@ export function FeishuIntegrationDialog({
               </div>
             </TabsContent>
 
-            <TabsContent value="subscriptions" className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="feishu-branches">{t('settings.integrations.feishu.branches')}</Label>
-                <Input
-                  id="feishu-branches"
-                  value={branchDraft}
-                  onChange={(event) => setBranchDraft(event.target.value)}
-                  className="border-[var(--github-border)] bg-[var(--github-surface)]"
-                  placeholder="main, release/*"
+            <TabsContent value="subscriptions" className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+              <div className="flex items-center justify-between rounded-lg border border-[var(--github-border)] bg-white/5 p-3">
+                <p className="text-sm text-white">
+                  {t('settings.integrations.feishu.subscriptionEnabled')}
+                </p>
+                <Switch
+                  checked={currentSubscription?.enabled ?? true}
+                  onCheckedChange={toggleSubscriptionEnabled}
                 />
               </div>
 
-              <div className="space-y-3">
-                {['highRisk', 'prUpdates', 'analysisComplete'].map((eventName) => (
-                  <div key={eventName} className="flex items-center justify-between rounded-lg border border-[var(--github-border)] bg-white/5 p-3">
-                    <p className="text-sm text-white">
+              <div className="space-y-2">
+                <Label>{t('settings.integrations.feishu.repositories')}</Label>
+                <div className="overflow-hidden rounded-lg border border-[var(--github-border)] bg-white/[0.02]">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className="flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left hover:bg-white/5"
+                    onClick={useAllRepositories}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        useAllRepositories();
+                      }
+                    }}
+                  >
+                    <Checkbox
+                      checked={allRepositoriesSelected}
+                      aria-label={t('settings.integrations.feishu.allRepositories')}
+                      className="pointer-events-none border-[var(--github-border)]"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white">
+                        {t('settings.integrations.feishu.allRepositories')}
+                      </p>
+                      <p className="mt-1 truncate text-xs text-[var(--github-text-secondary)]">
+                        {t('settings.integrations.feishu.allRepositoriesHint')}
+                      </p>
+                    </div>
+                  </div>
+
+                  <Separator className="bg-[var(--github-border)]" />
+
+                  <div className="p-2">
+                    <div className="mb-2 grid grid-cols-2 rounded-md border border-[var(--github-border)] bg-[var(--github-surface)] p-1">
+                      <button
+                        type="button"
+                        className={`h-8 rounded px-2 text-xs font-medium transition-colors ${
+                          repositoryListMode === 'monitored'
+                            ? 'bg-[var(--github-accent)] text-white'
+                            : 'text-[var(--github-text-secondary)] hover:bg-white/5 hover:text-white'
+                        }`}
+                        onClick={() => setRepositoryListMode('monitored')}
+                      >
+                        {t('settings.integrations.feishu.repositoryMode.monitored')}
+                      </button>
+                      <button
+                        type="button"
+                        className={`h-8 rounded px-2 text-xs font-medium transition-colors ${
+                          repositoryListMode === 'all'
+                            ? 'bg-[var(--github-accent)] text-white'
+                            : 'text-[var(--github-text-secondary)] hover:bg-white/5 hover:text-white'
+                        }`}
+                        onClick={() => setRepositoryListMode('all')}
+                      >
+                        {t('settings.integrations.feishu.repositoryMode.all')}
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--github-text-secondary)]" />
+                      <Input
+                        value={repositorySearch}
+                        onChange={(event) => setRepositorySearch(event.target.value)}
+                        className="h-9 border-[var(--github-border)] bg-[var(--github-surface)] pl-9 text-sm"
+                        placeholder={t('settings.integrations.feishu.repositorySearch')}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="max-h-80 overflow-y-auto px-2 pb-2">
+                    {loadingRepositories ? (
+                      <div className="flex items-center justify-center py-6">
+                        <Loader2 className="h-4 w-4 animate-spin text-[var(--github-accent)]" />
+                      </div>
+                    ) : visibleRepositories.length === 0 ? (
+                      <div className="px-2 py-4 text-xs text-[var(--github-text-secondary)]">
+                        {repositoryListMode === 'monitored'
+                          ? t('settings.integrations.feishu.noRepositories')
+                          : t('settings.integrations.feishu.noAllRepositories')}
+                      </div>
+                    ) : filteredRepositories.length === 0 ? (
+                      <div className="px-2 py-4 text-xs text-[var(--github-text-secondary)]">
+                        {t('settings.integrations.feishu.noRepositoryMatches')}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {filteredRepositories.map((repository) => {
+                          const selectedBranches = normalizedRepositoryBranchScopes[repository.id] ?? [];
+                          const checked = selectedRepositoryIds.includes(repository.id);
+                          const branchSummary = formatBranchSummary(
+                            selectedBranches,
+                            t('dashboard.scope.row.allBranches'),
+                          );
+
+                          return (
+                            <FeishuRepositorySubscriptionItem
+                              key={repository.id}
+                              repo={repository}
+                              checked={checked}
+                              expanded={expandedRepositoryIds.includes(repository.id)}
+                              branchSummary={branchSummary}
+                              selectedBranches={selectedBranches}
+                              allBranchesLabel={t('dashboard.scope.row.allBranches')}
+                              notSelectedLabel={t('settings.integrations.feishu.repositoryNotSelected')}
+                              onToggleRepository={toggleRepository}
+                              onToggleExpanded={toggleExpandedRepository}
+                              onToggleBranch={toggleRepositoryBranch}
+                              onResetBranches={resetRepositoryBranches}
+                              t={t}
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                {GITHUB_EVENT_TYPES.map((eventName) => (
+                  <div key={eventName} className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-[var(--github-border)] bg-white/5 p-3">
+                    <p className="truncate text-sm text-white">
                       {t(`settings.integrations.feishu.event.${eventName}`)}
                     </p>
                     <Switch
@@ -495,9 +912,9 @@ export function FeishuIntegrationDialog({
           </Tabs>
         )}
 
-        <Separator className="bg-[var(--github-border)]" />
+        <Separator className="shrink-0 bg-[var(--github-border)]" />
 
-        <DialogFooter className="gap-2">
+        <DialogFooter className="shrink-0 gap-2">
           {activeTab === 'credentials' ? (
             <Button onClick={saveCredentials} disabled={saving || !canSubmitCredentials} className="btn-x-primary gap-2">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -505,10 +922,22 @@ export function FeishuIntegrationDialog({
             </Button>
           ) : null}
           {activeTab === 'test' ? (
-            <Button onClick={testConnection} disabled={testing || !canSubmitCredentials} className="btn-x-primary gap-2">
-              {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              {t('settings.integrations.feishu.test')}
-            </Button>
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={sendTestNotification}
+                disabled={sendingTestNotification}
+                className="gap-2 border-[var(--github-border)]"
+              >
+                {sendingTestNotification ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {t('settings.integrations.feishu.testPush')}
+              </Button>
+              <Button onClick={testConnection} disabled={testing || !canSubmitCredentials} className="btn-x-primary gap-2">
+                {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {t('settings.integrations.feishu.test')}
+              </Button>
+            </>
           ) : null}
           {activeTab === 'binding' ? (
             <Button onClick={createPairingCode} disabled={pairing} className="btn-x-primary gap-2">

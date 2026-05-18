@@ -5,5 +5,6 @@ import { ImService } from './im.service';
 @Module({
   controllers: [ImController],
   providers: [ImService],
+  exports: [ImService],
 })
 export class ImModule {}

@@ -5,6 +5,7 @@ import { EventGateway } from '@modules/event/event.gateway';
 import { AIService } from '@modules/ai/ai.service';
 import { FilterService } from '@modules/filter/filter.service';
 import { NotificationService } from '@modules/notification/notification.service';
+import { ImService } from '@modules/im/im.service';
 
 const flushAsync = async () => {
   // 让 EventService.create 内的 .catch 后置链有机会跑完
@@ -29,6 +30,7 @@ describe('EventService - 后置编排韧性 (unit)', () => {
     getPreferences: jest.Mock;
     send: jest.Mock;
   };
+  let imService: { sendRepositoryEventNotification: jest.Mock };
 
   const REPO_ID = 'repo-1';
   const USER_ID = 'user-1';
@@ -98,6 +100,9 @@ describe('EventService - 后置编排韧性 (unit)', () => {
       }),
       send: jest.fn().mockResolvedValue({ status: 'SENT' }),
     };
+    imService = {
+      sendRepositoryEventNotification: jest.fn().mockResolvedValue({ sent: 0, skippedReason: 'feishu_not_configured' }),
+    };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
@@ -106,6 +111,7 @@ describe('EventService - 后置编排韧性 (unit)', () => {
         { provide: AIService, useValue: aiService },
         { provide: FilterService, useValue: filterService },
         { provide: NotificationService, useValue: notificationService },
+        { provide: ImService, useValue: imService },
       ],
     }).compile();
 
@@ -138,6 +144,15 @@ describe('EventService - 后置编排韧性 (unit)', () => {
 
     expect(gateway.broadcastNewEvent).toHaveBeenCalledTimes(1);
     expect(notificationService.send).toHaveBeenCalledTimes(1);
+    expect(imService.sendRepositoryEventNotification).toHaveBeenCalledWith(
+      USER_ID,
+      expect.objectContaining({
+        eventId: 'evt-1',
+        repositoryId: REPO_ID,
+        repositoryName: 'org/repo',
+        eventType: EventType.PUSH,
+      }),
+    );
     expect(aiService.triggerAnalysis).toHaveBeenCalledWith('evt-1');
   });
 
@@ -161,6 +176,34 @@ describe('EventService - 后置编排韧性 (unit)', () => {
         }),
       }),
     );
+  });
+
+  it('普通通知渠道为空时，仍会尝试飞书 IM 推送', async () => {
+    notificationService.getPreferences.mockResolvedValue({
+      channels: [],
+      events: {
+        highRisk: true,
+        prUpdates: true,
+        analysisComplete: true,
+        weeklyReport: false,
+      },
+      webhookUrl: null,
+      email: null,
+    });
+
+    await service.create({
+      repositoryId: REPO_ID,
+      type: EventType.PUSH,
+      action: 'push',
+      title: 'im without notification channel',
+      author: 'orch-bot',
+      externalId: 'orch-evt-im',
+    });
+
+    await flushAsync();
+
+    expect(notificationService.send).not.toHaveBeenCalled();
+    expect(imService.sendRepositoryEventNotification).toHaveBeenCalledTimes(1);
   });
 
   it('broadcast 抛错时，事件主记录仍正常返回，且 notify / AI 流程继续', async () => {

@@ -6,6 +6,13 @@ import {
   ImSubscriptionDto,
   SaveFeishuConnectionDto,
 } from './dto/im.dto';
+import {
+  DEFAULT_FEISHU_GITHUB_EVENTS,
+  RepositoryEventNotificationInput,
+  buildFeishuRepositoryEventCard,
+  formatFeishuRepositoryEventText,
+  matchesFeishuSubscription,
+} from './feishu-event-card';
 
 export type ImConnectionState = 'not_configured' | 'configured' | 'connected' | 'ready' | 'error';
 export type ImStageState = 'verified' | 'missing' | 'unknown' | 'error';
@@ -246,6 +253,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       ...subscription,
       repositoryIds: Array.from(new Set(subscription.repositoryIds || [])),
       branches: Array.from(new Set(subscription.branches || [])),
+      repositoryBranchScopes: this.normalizeRepositoryBranchScopes(subscription.repositoryBranchScopes),
       events: Array.from(new Set(subscription.events || [])),
     }));
 
@@ -255,6 +263,79 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     });
 
     return normalized;
+  }
+
+  async sendRepositoryEventNotification(
+    userId: string,
+    event: RepositoryEventNotificationInput,
+  ): Promise<{ sent: number; skippedReason?: string }> {
+    const im = await this.getImPreferences(userId);
+    const appId = im.feishu?.appId?.trim();
+    const appSecret = im.feishu?.appSecret?.trim();
+    if (!appId || !appSecret) {
+      return { sent: 0, skippedReason: 'feishu_not_configured' };
+    }
+
+    const chatIds = this.resolveFeishuNotificationChatIds(im, event);
+    if (chatIds.length === 0) {
+      return { sent: 0, skippedReason: 'feishu_chat_not_bound' };
+    }
+
+    const token = await this.getTenantAccessToken(appId, appSecret);
+    if (!token) {
+      return { sent: 0, skippedReason: 'feishu_token_unavailable' };
+    }
+
+    const sent = await this.sendFeishuEventCardToChats({
+      token,
+      chatIds,
+      event,
+      logContext: `userId=${userId} eventId=${event.eventId} source=event_notification`,
+    });
+
+    return { sent };
+  }
+
+  async sendFeishuTestNotification(userId: string): Promise<{ sent: number; message: string }> {
+    const im = await this.getImPreferences(userId);
+    const appId = im.feishu?.appId?.trim();
+    const appSecret = im.feishu?.appSecret?.trim();
+    if (!appId || !appSecret) {
+      return { sent: 0, message: '飞书机器人未配置。' };
+    }
+
+    const chatIds = this.resolveAllFeishuChatIds(im);
+    if (chatIds.length === 0) {
+      return { sent: 0, message: '还没有绑定飞书群聊。' };
+    }
+
+    const token = await this.getTenantAccessToken(appId, appSecret);
+    if (!token) {
+      return { sent: 0, message: '无法获取飞书访问令牌。' };
+    }
+
+    const sent = await this.sendFeishuEventCardToChats({
+      token,
+      chatIds,
+      event: {
+        eventId: `test-${Date.now()}`,
+        repositoryId: 'test',
+        repositoryName: 'repo-pulse/example',
+        eventType: 'PR_OPENED',
+        title: '测试飞书 GitHub 事件卡片',
+        content: '这是一条 Repo-Pulse 测试推送。真实 GitHub webhook 到达后，会按订阅规则推送类似卡片。',
+        author: 'Repo-Pulse',
+        sourceBranch: 'feature/feishu-card',
+        targetBranch: 'main',
+        externalUrl: 'https://github.com/',
+      },
+      logContext: `userId=${userId} source=test_notification`,
+    });
+
+    return {
+      sent,
+      message: sent > 0 ? '测试推送已发送。' : '测试推送发送失败。',
+    };
   }
 
   async handleFeishuEvent(payload: Record<string, any>) {
@@ -603,6 +684,117 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private resolveFeishuNotificationChatIds(
+    im: ImPreferences,
+    event: RepositoryEventNotificationInput,
+  ): string[] {
+    const chatIds = new Set<string>();
+    const allSubscriptions = im.subscriptions || [];
+    const subscriptions = allSubscriptions.filter((subscription) => {
+      return matchesFeishuSubscription(subscription, event);
+    });
+
+    for (const subscription of subscriptions) {
+      if (subscription.chatId) chatIds.add(subscription.chatId);
+    }
+
+    if (allSubscriptions.length === 0) {
+      for (const binding of im.bindings || []) {
+        if (binding.chatId) chatIds.add(binding.chatId);
+      }
+    }
+
+    return Array.from(chatIds);
+  }
+
+  private resolveAllFeishuChatIds(im: ImPreferences): string[] {
+    const chatIds = new Set<string>();
+    for (const subscription of im.subscriptions || []) {
+      if (subscription.enabled && subscription.chatId) {
+        chatIds.add(subscription.chatId);
+      }
+    }
+    for (const binding of im.bindings || []) {
+      if (binding.chatId) {
+        chatIds.add(binding.chatId);
+      }
+    }
+    return Array.from(chatIds);
+  }
+
+  private async sendFeishuEventCardToChats(params: {
+    token: string;
+    chatIds: string[];
+    event: RepositoryEventNotificationInput;
+    logContext: string;
+  }): Promise<number> {
+    let sent = 0;
+    const card = buildFeishuRepositoryEventCard(params.event);
+    const fallbackText = formatFeishuRepositoryEventText(params.event);
+
+    for (const chatId of params.chatIds) {
+      const cardResponse = await this.sendFeishuMessage({
+        token: params.token,
+        chatId,
+        msgType: 'interactive',
+        content: JSON.stringify(card),
+      });
+
+      const cardPayload = cardResponse.data as { code?: number; msg?: string };
+      if (cardResponse.status >= 200 && cardResponse.status < 300 && cardPayload.code === 0) {
+        sent += 1;
+        this.logger.log(`feishu_card_sent chatId=${chatId} ${params.logContext}`);
+        continue;
+      }
+
+      this.logger.warn(
+        `feishu_card_failed chatId=${chatId} ${params.logContext} status=${cardResponse.status} code=${cardPayload.code ?? '-'} msg=${cardPayload.msg ?? '-'}`,
+      );
+
+      const textResponse = await this.sendFeishuMessage({
+        token: params.token,
+        chatId,
+        msgType: 'text',
+        content: JSON.stringify({ text: fallbackText }),
+      });
+
+      const textPayload = textResponse.data as { code?: number; msg?: string };
+      if (textResponse.status >= 200 && textResponse.status < 300 && textPayload.code === 0) {
+        sent += 1;
+        this.logger.log(`feishu_text_fallback_sent chatId=${chatId} ${params.logContext}`);
+      } else {
+        this.logger.warn(
+          `feishu_text_fallback_failed chatId=${chatId} ${params.logContext} status=${textResponse.status} code=${textPayload.code ?? '-'} msg=${textPayload.msg ?? '-'}`,
+        );
+      }
+    }
+    return sent;
+  }
+
+  private async sendFeishuMessage(params: {
+    token: string;
+    chatId: string;
+    msgType: 'interactive' | 'text';
+    content: string;
+  }) {
+    return axios.post(
+      'https://open.feishu.cn/open-apis/im/v1/messages',
+      {
+        receive_id: params.chatId,
+        msg_type: params.msgType,
+        content: params.content,
+      },
+      {
+        timeout: 8000,
+        params: { receive_id_type: 'chat_id' },
+        headers: {
+          Authorization: `Bearer ${params.token}`,
+        },
+        validateStatus: () => true,
+      },
+    );
+  }
+
   private extractBindCode(text: string): string | null {
     const match = text.match(/(?:^|\s)\/bind\s+([A-Za-z0-9_-]+)/i);
     return match?.[1]?.trim().toUpperCase() || null;
@@ -704,10 +896,25 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
         chatId,
         repositoryIds: [],
         branches: ['main'],
-        events: ['highRisk', 'prUpdates', 'analysisComplete'],
+        repositoryBranchScopes: {},
+        events: [...DEFAULT_FEISHU_GITHUB_EVENTS],
         enabled: true,
       },
     ];
+  }
+
+  private normalizeRepositoryBranchScopes(scopes?: Record<string, string[]>): Record<string, string[]> {
+    if (!scopes || typeof scopes !== 'object') return {};
+
+    return Object.fromEntries(
+      Object.entries(scopes)
+        .filter(([repositoryId, branches]) => repositoryId.trim().length > 0 && Array.isArray(branches))
+        .map(([repositoryId, branches]) => [
+          repositoryId,
+          Array.from(new Set(branches.map((branch) => branch.trim()).filter(Boolean)))
+            .sort((left, right) => left.localeCompare(right)),
+        ]),
+    );
   }
 
   private async replyFeishuMessage(params: {

@@ -38,6 +38,11 @@ export interface FeishuConnectionTestResult {
   stages?: ImStageStatus[];
 }
 
+export interface FeishuTestNotificationResult {
+  sent: number;
+  message: string;
+}
+
 export interface PairingCodeResult {
   code: string;
   expiresAt: string;
@@ -49,6 +54,7 @@ export interface ImSubscription {
   chatId?: string;
   repositoryIds: string[];
   branches: string[];
+  repositoryBranchScopes?: Record<string, string[]>;
   events: string[];
   enabled: boolean;
 }
@@ -96,6 +102,13 @@ export const imService = {
     const { data } = await apiClient.post<ApiResponse<PairingCodeResult> | PairingCodeResult>(
       '/im/pairing-codes',
       { provider: 'feishu' },
+    );
+    return unwrap(data);
+  },
+
+  async sendFeishuTestNotification(): Promise<FeishuTestNotificationResult> {
+    const { data } = await apiClient.post<ApiResponse<FeishuTestNotificationResult> | FeishuTestNotificationResult>(
+      '/im/feishu/test-notification',
     );
     return unwrap(data);
   },

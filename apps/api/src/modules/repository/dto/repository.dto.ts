@@ -1,4 +1,5 @@
 import { IsEnum, IsString, IsOptional, IsBoolean } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { Platform } from '@repo-pulse/database';
 
 export class CreateRepositoryDto {
@@ -27,6 +28,11 @@ export class UpdateRepositoryDto {
 }
 
 export class RepositoryQueryDto {
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;

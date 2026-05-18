@@ -6,6 +6,7 @@ import { AIService } from '../ai/ai.service';
 import { FilterService } from '../filter/filter.service';
 import { NotificationService, NotificationPreferences } from '../notification/notification.service';
 import { SendNotificationDto } from '../notification/dto/notification.dto';
+import { ImService } from '../im/im.service';
 import {
   buildEventScopeWhere,
   normalizeRepositoryBranchScopes,
@@ -22,6 +23,7 @@ export class EventService {
     private readonly aiService: AIService,
     private readonly filterService: FilterService,
     private readonly notificationService: NotificationService,
+    private readonly imService: ImService,
   ) {
     this.prisma = new PrismaClient();
   }
@@ -226,9 +228,8 @@ export class EventService {
 
         const preferences = await this.notificationService.getPreferences(userId);
         const channels = this.resolveChannelsForEvent(event, preferences);
-        if (channels.length === 0) {
-          continue;
-        }
+
+        await this.sendImRepositoryEventNotification(userId, event, repository?.fullName);
 
         for (const channel of channels) {
           const dto: SendNotificationDto = {
@@ -251,6 +252,43 @@ export class EventService {
           `notification_failed eventId=${event.id} userId=${userId} stage=notify_repository_users reason=${message}`,
         );
       }
+    }
+  }
+
+  private async sendImRepositoryEventNotification(
+    userId: string,
+    event: Event,
+    repositoryName?: string,
+  ): Promise<void> {
+    try {
+      const result = await this.imService.sendRepositoryEventNotification(userId, {
+        eventId: event.id,
+        repositoryId: event.repositoryId,
+        repositoryName: repositoryName || event.repositoryId,
+        eventType: event.type,
+        title: event.title,
+        content: event.body || event.title,
+        author: event.author,
+        externalUrl: event.externalUrl || undefined,
+        branch: event.branch || undefined,
+        sourceBranch: event.sourceBranch || undefined,
+        targetBranch: event.targetBranch || undefined,
+      });
+
+      if (result.sent > 0) {
+        this.logger.log(
+          `feishu_event_notification_sent eventId=${event.id} userId=${userId} count=${result.sent}`,
+        );
+      } else if (result.skippedReason) {
+        this.logger.log(
+          `feishu_event_notification_skipped eventId=${event.id} userId=${userId} reason=${result.skippedReason}`,
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown_error';
+      this.logger.warn(
+        `feishu_event_notification_failed eventId=${event.id} userId=${userId} reason=${message}`,
+      );
     }
   }
 
