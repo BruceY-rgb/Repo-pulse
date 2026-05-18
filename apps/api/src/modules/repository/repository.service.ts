@@ -743,14 +743,19 @@ export class RepositoryService {
       action: 'sync',
       title: `Push sync (${branch}): ${commit.sha.slice(0, 7)}`,
       body: commit.commit?.message,
-      author: commit.author?.login || commit.commit?.author?.name || 'unknown',
+      author: commit.commit?.author?.name || commit.author?.login || 'unknown',
       authorAvatar: commit.author?.avatar_url,
       externalId: commit.sha,
       externalUrl: commit.html_url,
       branch,
       branches: [branch],
       occurredAt: new Date(commit.commit?.author?.date || new Date()),
-      metadata: { source: 'repository_sync', provider: 'github', branch },
+      metadata: {
+        source: 'repository_sync',
+        provider: 'github',
+        branch,
+        githubLogin: commit.author?.login || null,
+      },
     };
   }
 

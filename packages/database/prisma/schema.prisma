@@ -102,13 +102,16 @@ model User {
   id                 String   @id @default(cuid())
   email              String   @unique
   name               String
-  avatar             String?
+  avatar             String?   @db.Text
   passwordHash       String?
   githubId           String?  @unique
   githubAccessToken  String?
   githubRefreshToken String?
   gitlabId           String?  @unique
   role               Role     @default(MEMBER)
+  username           String?  @unique
+  company            String?
+  bio                String?   @db.Text
   preferences        Json     @default("{}")
 
   // AI 配置

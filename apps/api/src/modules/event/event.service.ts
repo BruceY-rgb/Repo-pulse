@@ -172,7 +172,28 @@ export class EventService {
       select: { riskLevel: true },
     });
 
+    // 获取所有用户偏好，检查监控范围
+    const allUserIds = userRepositories.map((e) => e.userId);
+    const usersWithPrefs = allUserIds.length > 0
+      ? await this.prisma.user.findMany({
+          where: { id: { in: allUserIds } },
+          select: { id: true, preferences: true },
+        })
+      : [];
+    const userScopeMap = new Map<string, string[]>();
+    for (const u of usersWithPrefs) {
+      const prefs = (u.preferences as Record<string, unknown>) || {};
+      const scope = (prefs.monitoringScope as Record<string, unknown>) || {};
+      const ids = Array.isArray(scope.repositoryIds) ? scope.repositoryIds as string[] : [];
+      userScopeMap.set(u.id, ids);
+    }
+
     for (const entry of userRepositories) {
+      // 只在仓库属于用户监控范围时才通知（未设范围则不通知）
+      const scopeIds = userScopeMap.get(entry.userId) || [];
+      if (scopeIds.length === 0 || !scopeIds.includes(event.repositoryId)) {
+        continue;
+      }
       const userId = entry.userId;
       try {
         const hasRiskRule = await this.filterService.hasRuleReferencingField(userId, 'riskLevel');
@@ -269,7 +290,7 @@ export class EventService {
     const MVP_TYPES: EventType[] = [EventType.PUSH, EventType.PR_OPENED, EventType.ISSUE_OPENED];
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
-      select: { type: true },
+      select: { type: true, repositoryId: true },
     });
 
     if (!event || !MVP_TYPES.includes(event.type)) {
@@ -277,6 +298,29 @@ export class EventService {
         `ai_skipped eventId=${eventId} reason=unsupported_event_type type=${event?.type ?? 'unknown'}`,
       );
       return;
+    }
+
+    // 检查仓库是否在任意用户的监控范围内
+    const repoUsers = await this.prisma.userRepository.findMany({
+      where: { repositoryId: event.repositoryId },
+      select: { userId: true },
+    });
+    const userIds = repoUsers.map((r) => r.userId);
+    if (userIds.length > 0) {
+      const users = await this.prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { preferences: true },
+      });
+      const anyInScope = users.some((u) => {
+        const prefs = (u.preferences as Record<string, unknown>) || {};
+        const scope = (prefs.monitoringScope as Record<string, unknown>) || {};
+        const ids = Array.isArray(scope.repositoryIds) ? scope.repositoryIds : [];
+        return ids.includes(event.repositoryId);
+      });
+      if (!anyInScope) {
+        this.logger.log(`ai_skipped eventId=${eventId} reason=not_in_monitoring_scope`);
+        return;
+      }
     }
 
     try {

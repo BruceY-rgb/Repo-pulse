@@ -18,8 +18,10 @@ export class ReportController {
   async getReports(
     @CurrentUser() user: { sub: string },
     @Query('repositoryIds') repositoryIds?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
   ) {
-    return this.reportService.getReports(user.sub, repositoryIds);
+    return this.reportService.getReports(user.sub, repositoryIds, dateFrom, dateTo);
   }
 
   @Post('generate')

@@ -21,6 +21,9 @@ import {
   EyeOff,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
+import { apiClient } from '@/services/api-client';
+import { authQueryKeys } from '@/hooks/queries/use-auth-queries';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -89,15 +92,20 @@ const apiKeys = [
 
 export function Settings() {
   const { t } = useLanguage();
+  const queryClient = useQueryClient();
   const [saved, setSaved] = useState(false);
 
   // 用户信息状态
   const [userLoading, setUserLoading] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
   const [userProfile, setUserProfile] = useState({
     name: '',
     email: '',
     avatar: '',
     githubId: '',
+    username: '',
+    company: '',
+    bio: '',
   });
 
   // AI 配置状态
@@ -152,6 +160,9 @@ export function Settings() {
           email: user.email || '',
           avatar: user.avatar || '',
           githubId: user.githubId || '',
+          username: user.username || '',
+          company: user.company || '',
+          bio: user.bio || '',
         });
       } catch (error) {
         console.error('Failed to load user profile:', error);
@@ -193,6 +204,26 @@ export function Settings() {
     };
     loadNotifPrefs();
   }, []);
+
+  const handleUpdateProfile = async () => {
+    setProfileSaving(true);
+    try {
+      await apiClient.patch('/users/me', {
+        name: userProfile.name,
+        email: userProfile.email,
+        avatar: userProfile.avatar,
+        username: userProfile.username || '',
+        company: userProfile.company || '',
+        bio: userProfile.bio || '',
+      });
+      queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });
+      toast.success(t('settings.profile.saved') || 'Saved');
+    } catch {
+      toast.error(t('settings.profile.saveFailed') || 'Failed');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
 
   const handleSaveAI = async () => {
     setAiSaving(true);
@@ -415,13 +446,33 @@ export function Settings() {
                     {userProfile.name.charAt(0) || 'U'}
                   </AvatarFallback>
                 </Avatar>
-                <div className="space-y-2">
-                  <Button variant="outline" className="border-[var(--github-border)]">
-                    {t('settings.profile.changeAvatar')}
-                  </Button>
-                  <p className="text-xs text-[var(--github-text-secondary)]">
-                    {t('settings.profile.avatarHint')}
-                  </p>
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <label className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-[var(--github-border)] bg-[var(--github-surface)] text-sm text-white cursor-pointer hover:border-[var(--github-accent)] transition-colors">
+                      {t('settings.profile.uploadAvatar') || 'Upload from computer'}
+                      <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
+                        var file = e.target.files?.[0];
+                        if (!file) return;
+                        var fd = new FormData();
+                        fd.append('file', file);
+                        try {
+                          var res = await apiClient.post('/users/me/avatar', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+                          setUserProfile({ ...userProfile, avatar: res.data.data.avatar });
+                          toast.success(t('settings.profile.avatarUploaded') || 'Avatar uploaded');
+                        } catch { toast.error('Upload failed'); }
+                      }} />
+                    </label>
+                    <Button variant="outline" size="sm" className="border-[var(--github-border)]" onClick={async () => {
+                      try {
+                        var res = await apiClient.get('/users/me/github-avatar');
+                        setUserProfile({ ...userProfile, avatar: res.data.data.avatar });
+                        toast.success(t('settings.profile.avatarRestored') || 'GitHub avatar restored');
+                      } catch { toast.error('Failed to restore'); }
+                    }}>
+                      <Github className="w-4 h-4 mr-1" />
+                      {t('settings.profile.restoreAvatar') || 'Restore GitHub avatar'}
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -441,7 +492,8 @@ export function Settings() {
                   <Label htmlFor="username" className="text-sm text-white">{t('settings.profile.username')}</Label>
                   <Input
                     id="username"
-                    defaultValue="johndoe"
+                    value={userProfile.username}
+                    onChange={(e) => setUserProfile({ ...userProfile, username: e.target.value })}
                     className="bg-[var(--github-surface)] border-[var(--github-border)]"
                   />
                 </div>
@@ -459,7 +511,8 @@ export function Settings() {
                   <Label htmlFor="company" className="text-sm text-white">{t('settings.profile.company')}</Label>
                   <Input
                     id="company"
-                    defaultValue="Acme Corp"
+                    value={userProfile.company}
+                    onChange={(e) => setUserProfile({ ...userProfile, company: e.target.value })}
                     className="bg-[var(--github-surface)] border-[var(--github-border)]"
                   />
                 </div>
@@ -470,10 +523,16 @@ export function Settings() {
                 <textarea
                   id="bio"
                   rows={3}
-                  defaultValue="Full-stack developer passionate about clean code and AI."
+                  value={userProfile.bio}
+                  onChange={(e) => setUserProfile({ ...userProfile, bio: e.target.value })}
                   className="w-full px-3 py-2 rounded-md bg-[var(--github-surface)] border border-[var(--github-border)] text-white text-sm resize-none focus:outline-none focus:border-[var(--github-accent)]"
                 />
               </div>
+
+              <Button onClick={handleUpdateProfile} disabled={profileSaving} className="gap-2">
+                {profileSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {profileSaving ? (t('settings.profile.saving') || 'Saving...') : (t('settings.profile.save') || 'Save Settings')}
+              </Button>
             </CardContent>
           </Card>
           )}

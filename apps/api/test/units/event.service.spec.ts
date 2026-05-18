@@ -20,6 +20,7 @@ describe('EventService - 后置编排韧性 (unit)', () => {
     aIAnalysis: { findFirst: jest.Mock };
     repository: { findUnique: jest.Mock };
     userRepository: { findMany: jest.Mock };
+    user: { findMany: jest.Mock };
   };
   let gateway: { broadcastNewEvent: jest.Mock };
   let aiService: { triggerAnalysis: jest.Mock };
@@ -50,7 +51,7 @@ describe('EventService - 后置编排韧性 (unit)', () => {
       event: {
         create: jest.fn().mockResolvedValue(CREATED_EVENT),
         // enqueueAnalysis 内部用 findUnique 看类型是否在白名单里
-        findUnique: jest.fn().mockResolvedValue({ type: EventType.PUSH }),
+        findUnique: jest.fn().mockResolvedValue({ type: EventType.PUSH, repositoryId: REPO_ID }),
       },
       aIAnalysis: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -60,6 +61,20 @@ describe('EventService - 后置编排韧性 (unit)', () => {
       },
       userRepository: {
         findMany: jest.fn().mockResolvedValue([{ userId: USER_ID }]),
+      },
+      user: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: USER_ID,
+            preferences: {
+              monitoringScope: {
+                repositoryIds: [REPO_ID],
+                branchNames: [],
+                repositoryBranchScopes: {},
+              },
+            },
+          },
+        ]),
       },
     };
 

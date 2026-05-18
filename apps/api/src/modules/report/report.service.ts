@@ -3,9 +3,10 @@ import { prisma, EventType, ReportType, ReportFormat, ReportStatus } from '@repo
 import { jsPDF } from 'jspdf';
 
 export interface ReportMetrics {
+  commits: number;
+  prs: number;
   issues: number;
   resolved: number;
-  prs: number;
 }
 
 export interface SecurityMetrics {
@@ -15,9 +16,9 @@ export interface SecurityMetrics {
 }
 
 export interface TeamMetrics {
-  velocity: string;
-  reviewTime: string;
+  prs: number;
   commits: number;
+  avgCommitsPerPR: number;
 }
 
 export interface ReportItem {
@@ -52,18 +53,36 @@ export class ReportService {
 
     const accessibleIds = userRepos.map((r) => r.repositoryId);
 
-    if (!repositoryIdsParam) return accessibleIds;
+    // 读取用户的监控范围，优先使用监控范围内的仓库
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { preferences: true },
+    });
+    const prefs = (user?.preferences as Record<string, unknown>) || {};
+    const scope = (prefs.monitoringScope as Record<string, unknown>) || {};
+    const scopeRepoIds = Array.isArray(scope.repositoryIds)
+      ? (scope.repositoryIds as string[]).filter((id) => accessibleIds.includes(id))
+      : accessibleIds;
+
+    const effectiveIds = scopeRepoIds.length > 0 ? scopeRepoIds : [];
+
+    if (!repositoryIdsParam) return effectiveIds;
 
     const requested = repositoryIdsParam
       .split(',')
       .map((id) => id.trim())
       .filter(Boolean);
 
-    const accessibleSet = new Set(accessibleIds);
-    return requested.filter((id) => accessibleSet.has(id));
+    const effectiveSet = new Set(effectiveIds);
+    return requested.filter((id) => effectiveSet.has(id));
   }
 
-  async getReports(userId: string, repositoryIdsParam?: string): Promise<ReportItem[]> {
+  async getReports(
+    userId: string,
+    repositoryIdsParam?: string,
+    dateFromParam?: string,
+    dateToParam?: string,
+  ): Promise<ReportItem[]> {
     const repositoryIds = await this.resolveRepositoryIds(userId, repositoryIdsParam);
 
     if (repositoryIds.length === 0) {
@@ -71,57 +90,42 @@ export class ReportService {
     }
 
     const now = new Date();
-    const sevenDaysAgo = new Date(now);
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const thirtyDaysAgo = new Date(now);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const dateTo = dateToParam ? new Date(dateToParam) : now;
+    const dateFrom = dateFromParam ? new Date(dateFromParam) : new Date(dateTo.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-    // Query events for the last 30 days
+    // Query events within the date range
     const events = await prisma.event.findMany({
       where: {
         repositoryId: { in: repositoryIds },
-        occurredAt: { gte: thirtyDaysAgo },
+        occurredAt: { gte: dateFrom, lte: dateTo },
       },
-      select: { type: true, occurredAt: true, id: true },
+      select: { type: true, id: true },
     });
 
-    // Count events by type within last 7 days
-    const last7Events = events.filter(
-      (e) => e.occurredAt && e.occurredAt >= sevenDaysAgo,
-    );
-
-    const pushCount = last7Events.filter((e) => e.type === EventType.PUSH).length;
-    const prOpened = last7Events.filter((e) => e.type === EventType.PR_OPENED).length;
-    const prMerged = last7Events.filter((e) => e.type === EventType.PR_MERGED).length;
-    const prClosed = last7Events.filter((e) => e.type === EventType.PR_CLOSED).length;
-    const issueOpened = last7Events.filter((e) => e.type === EventType.ISSUE_OPENED).length;
-    const issueClosed = last7Events.filter((e) => e.type === EventType.ISSUE_CLOSED).length;
+    const pushCount = events.filter((e) => e.type === EventType.PUSH).length;
+    const prOpened = events.filter((e) => e.type === EventType.PR_OPENED).length;
+    const prMerged = events.filter((e) => e.type === EventType.PR_MERGED).length;
+    const prClosed = events.filter((e) => e.type === EventType.PR_CLOSED).length;
+    const issueOpened = events.filter((e) => e.type === EventType.ISSUE_OPENED).length;
+    const issueClosed = events.filter((e) => e.type === EventType.ISSUE_CLOSED).length;
 
     const totalPRs = prOpened + prMerged + prClosed;
     const totalIssues = issueOpened + issueClosed;
 
-    // Count events within last 30 days
-    const last30Events = events.filter(
-      (e) => e.occurredAt && e.occurredAt >= thirtyDaysAgo,
-    );
-    const totalCommits30 = last30Events.filter((e) => e.type === EventType.PUSH).length;
-    const totalPRs30 = last30Events.filter(
-      (e) =>
-        e.type === EventType.PR_OPENED ||
-        e.type === EventType.PR_MERGED ||
-        e.type === EventType.PR_CLOSED,
-    ).length;
-    const totalIssues30 = last30Events.filter(
-      (e) =>
-        e.type === EventType.ISSUE_OPENED || e.type === EventType.ISSUE_CLOSED,
-    ).length;
+    // Get risk-level counts within the date range
+    const criticalRiskCount = await prisma.aIAnalysis.count({
+      where: {
+        event: { repositoryId: { in: repositoryIds } },
+        riskLevel: 'CRITICAL',
+        createdAt: { gte: dateFrom, lte: dateTo },
+      },
+    });
 
-    // Get high-risk analyses
     const highRiskCount = await prisma.aIAnalysis.count({
       where: {
         event: { repositoryId: { in: repositoryIds } },
-        riskLevel: { in: ['HIGH', 'CRITICAL'] },
-        createdAt: { gte: thirtyDaysAgo },
+        riskLevel: 'HIGH',
+        createdAt: { gte: dateFrom, lte: dateTo },
       },
     });
 
@@ -129,15 +133,15 @@ export class ReportService {
       where: {
         event: { repositoryId: { in: repositoryIds } },
         riskLevel: 'MEDIUM',
-        createdAt: { gte: thirtyDaysAgo },
+        createdAt: { gte: dateFrom, lte: dateTo },
       },
     });
 
     const resolvedCount = issueClosed + prMerged;
 
     const weeklySummary = this.buildWeeklySummary(pushCount, totalPRs, totalIssues, resolvedCount);
-    const securitySummary = this.buildSecuritySummary(highRiskCount, mediumRiskCount);
-    const teamSummary = this.buildTeamSummary(totalPRs30, totalCommits30);
+    const securitySummary = this.buildSecuritySummary(criticalRiskCount, highRiskCount, mediumRiskCount);
+    const teamSummary = this.buildTeamSummary(totalPRs, pushCount);
 
     const today = now.toLocaleDateString('en-US', {
       month: 'short',
@@ -153,9 +157,10 @@ export class ReportService {
         type: 'weekly',
         summary: weeklySummary,
         metrics: {
+          commits: pushCount,
+          prs: totalPRs,
           issues: totalIssues,
           resolved: resolvedCount,
-          prs: totalPRs,
         },
       },
       {
@@ -165,9 +170,9 @@ export class ReportService {
         type: 'security',
         summary: securitySummary,
         metrics: {
-          critical: highRiskCount,
-          high: mediumRiskCount,
-          medium: Math.max(0, totalIssues30 - highRiskCount - mediumRiskCount),
+          critical: criticalRiskCount,
+          high: highRiskCount,
+          medium: mediumRiskCount,
         },
       },
       {
@@ -177,9 +182,9 @@ export class ReportService {
         type: 'team',
         summary: teamSummary,
         metrics: {
-          velocity: totalPRs30 > 10 ? '+18%' : '+12%',
-          reviewTime: totalPRs30 > 0 ? `${Math.max(2, Math.round(24 / totalPRs30))}.2h` : 'N/A',
-          commits: totalCommits30 || totalPRs30 * 3 || 0,
+          prs: totalPRs,
+          commits: pushCount,
+          avgCommitsPerPR: totalPRs > 0 ? Math.round(pushCount / totalPRs) : 0,
         },
       },
     ];
@@ -191,22 +196,24 @@ export class ReportService {
     issues: number,
     resolved: number,
   ): string {
-    const total = commits + prs + issues;
-    return `Total ${total} activities this week. ${resolved} items resolved out of ${issues + prs} tracked items. ${commits > 0 ? `${commits} commits pushed.` : ''}`.trim();
+    var total = commits + prs + issues;
+    var rate = issues + prs > 0 ? Math.round((resolved / (issues + prs)) * 100) : 0;
+    return `${total} total activities, ${commits} commits, ${prs} PRs, ${issues} issues. ${resolved} resolved (${rate}% resolution rate).`;
   }
 
-  private buildSecuritySummary(highRisk: number, mediumRisk: number): string {
-    if (highRisk === 0 && mediumRisk === 0) {
+  private buildSecuritySummary(critical: number, high: number, medium: number): string {
+    if (critical === 0 && high === 0 && medium === 0) {
       return 'No critical or high-risk issues detected this period. Codebase security posture is stable.';
     }
-    return `${highRisk} critical vulnerabilities found. ${mediumRisk} medium-risk items need attention. Immediate action recommended for critical items.`;
+    return `${critical} critical vulnerabilities found, ${high} high-risk items, ${medium} medium. Immediate action recommended for critical items.`;
   }
 
   private buildTeamSummary(prs: number, commits: number): string {
     if (prs === 0) {
       return 'No significant team activity detected this period.';
     }
-    return `Team processed ${prs} pull requests. Average PR review time maintained. ${commits} total commits across all repositories.`;
+    var avg = prs > 0 ? Math.round(commits / prs) : 0;
+    return `Team processed ${prs} pull requests, ${commits} commits across all repositories (avg ${avg} commits per PR).`;
   }
 
   async getReportById(reportId: string) {
@@ -223,7 +230,7 @@ export class ReportService {
       throw new Error('No accessible repositories selected');
     }
 
-    const reports = await this.getReports(userId, params.repositoryIds?.join(','));
+    const reports = await this.getReports(userId, params.repositoryIds?.join(','), params.dateFrom, params.dateTo);
     if (reports.length === 0) {
       throw new Error('No data available for the selected period');
     }
