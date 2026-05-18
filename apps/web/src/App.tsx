@@ -12,12 +12,13 @@ import { Approvals } from '@/pages/Approvals';
 import { Landing } from '@/pages/Landing';
 import { Login } from '@/pages/Login';
 import { AuthCallback } from '@/pages/AuthCallback';
+import { DesktopWorkbench } from '@/pages/DesktopWorkbench';
 import { isDesktopRuntime } from '@/lib/desktop';
 
 function App() {
   const isDesktop = isDesktopRuntime();
   const Router = isDesktop && window.location.protocol === 'file:' ? HashRouter : BrowserRouter;
-  const defaultRoute = isDesktop ? '/dashboard' : '/landing';
+  const defaultRoute = isDesktop ? '/workbench' : '/landing';
 
   return (
     <Router>
@@ -25,11 +26,14 @@ function App() {
         {isDesktop ? <div className="desktop-window-drag-strip" aria-hidden="true" /> : null}
         <Routes>
           <Route path="/" element={<Navigate to={defaultRoute} replace />} />
-          <Route path="/landing" element={isDesktop ? <Navigate to="/dashboard" replace /> : <Landing />} />
+          <Route path="/landing" element={isDesktop ? <Navigate to="/workbench" replace /> : <Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
 
           <Route element={<ProtectedRoute />}>
+            <Route path="/workbench" element={<DesktopWorkbench />} />
+            <Route path="/workbench/:view" element={<DesktopWorkbench />} />
+            <Route path="/workbench/repository/:repositoryId" element={<DesktopWorkbench />} />
             <Route element={<Layout />}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/repositories" element={<Repositories />} />

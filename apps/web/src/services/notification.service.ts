@@ -15,7 +15,7 @@ export interface NotificationPreferences {
   email?: string | null;
 }
 
-interface Notification {
+export interface Notification {
   id: string;
   userId: string;
   eventId?: string;
