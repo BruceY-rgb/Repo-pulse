@@ -27,6 +27,7 @@ import {
   GitBranch,
   Github,
   LayoutDashboard,
+  Loader2,
   LogOut,
   MessageSquare,
   PauseCircle,
@@ -595,6 +596,7 @@ function hasRepositoryMessages(repo: Repository, messages: ConversationMessage[]
 function getRepositoryContextMenuItems({
   repository,
   isMonitored,
+  isSyncing,
   onRemoveFromMonitoring,
   onToggleRepositoryActive,
   onSyncRepository,
@@ -603,6 +605,7 @@ function getRepositoryContextMenuItems({
 }: {
   repository: Repository;
   isMonitored: boolean;
+  isSyncing: boolean;
   onRemoveFromMonitoring: (repository: Repository) => void;
   onToggleRepositoryActive: (repository: Repository) => void;
   onSyncRepository: (repository: Repository) => void;
@@ -625,8 +628,9 @@ function getRepositoryContextMenuItems({
     },
     {
       key: 'sync',
-      label: '同步',
-      icon: RotateCcw,
+      label: isSyncing ? '同步中…' : '同步',
+      icon: isSyncing ? Loader2 : RotateCcw,
+      disabled: isSyncing,
       onSelect: () => onSyncRepository(repository),
     },
     {
@@ -875,6 +879,7 @@ function RepositorySidebar({
   selectedRepositoryId,
   messages,
   monitoredRepositoryIds,
+  syncingRepoIds,
   collapsed,
   onToggleCollapsed,
   onRemoveFromMonitoring,
@@ -887,6 +892,7 @@ function RepositorySidebar({
   selectedRepositoryId?: string;
   messages: ConversationMessage[];
   monitoredRepositoryIds: string[];
+  syncingRepoIds: Set<string>;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onRemoveFromMonitoring: (repository: Repository) => void;
@@ -1048,6 +1054,7 @@ function RepositorySidebar({
               const selected = repo.id === selectedRepositoryId;
               const unread = Math.min(repoMessages.filter((message) => message.risk !== 'low').length || repo._count?.events || 0, 99);
               const avatarUrl = getRepositoryAvatarUrl(repo);
+              const isSyncing = syncingRepoIds.has(repo.id);
 
               const compactLink = (
                 <Link
@@ -1075,6 +1082,14 @@ function RepositorySidebar({
                   </Avatar>
                   {unread > 0 ? (
                     <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-background bg-primary" />
+                  ) : null}
+                  {isSyncing ? (
+                    <span
+                      className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-background bg-background"
+                      aria-label="同步中"
+                    >
+                      <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                    </span>
                   ) : null}
                 </Link>
               );
@@ -1131,6 +1146,7 @@ function RepositorySidebar({
             {getRepositoryContextMenuItems({
               repository: contextMenu.repository,
               isMonitored: monitoredRepositoryIds.includes(contextMenu.repository.id),
+              isSyncing: syncingRepoIds.has(contextMenu.repository.id),
               onRemoveFromMonitoring,
               onToggleRepositoryActive,
               onSyncRepository,
@@ -1160,7 +1176,7 @@ function RepositorySidebar({
                     setContextMenu(null);
                   }}
                 >
-                  <Icon className="h-5 w-5 shrink-0" />
+                  <Icon className={cn('h-5 w-5 shrink-0', Icon === Loader2 && 'animate-spin')} />
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
                 </button>
               );
@@ -1227,6 +1243,7 @@ function RepositorySidebar({
             const unread = Math.min(repoMessages.filter((message) => message.risk !== 'low').length || repo._count?.events || 0, 99);
             const avatarUrl = getRepositoryAvatarUrl(repo);
             const latestMessage = getLatestRepoMessage(repo, messages);
+            const isSyncing = syncingRepoIds.has(repo.id);
             return (
               <Link
                 key={repo.id}
@@ -1256,13 +1273,19 @@ function RepositorySidebar({
                   </AvatarFallback>
                 </Avatar>
                 <div className={cn('min-w-0 flex-1 overflow-hidden', unread > 0 && 'pr-14')}>
-                  <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-1.5">
                     <p
                       className="min-w-0 break-words text-sm font-semibold leading-5 text-foreground"
                       title={repo.fullName}
                     >
                       {repo.fullName}
                     </p>
+                    {isSyncing ? (
+                      <Loader2
+                        className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
+                        aria-label="同步中"
+                      />
+                    ) : null}
                   </div>
                   <p className="mt-1 block max-w-full truncate text-xs text-muted-foreground" title={latestMessage}>
                     {latestMessage}
@@ -1302,6 +1325,7 @@ function RepositorySidebar({
           {getRepositoryContextMenuItems({
             repository: contextMenu.repository,
             isMonitored: monitoredRepositoryIds.includes(contextMenu.repository.id),
+            isSyncing: syncingRepoIds.has(contextMenu.repository.id),
             onRemoveFromMonitoring,
             onToggleRepositoryActive,
             onSyncRepository,
@@ -1331,7 +1355,7 @@ function RepositorySidebar({
                   setContextMenu(null);
                 }}
               >
-                <Icon className="h-5 w-5 shrink-0" />
+                <Icon className={cn('h-5 w-5 shrink-0', Icon === Loader2 && 'animate-spin')} />
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
               </button>
             );
@@ -2227,6 +2251,7 @@ export function DesktopWorkbench() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isBranchMonitorOpen, setIsBranchMonitorOpen] = useState(false);
+  const [syncingRepoIds, setSyncingRepoIds] = useState<Set<string>>(() => new Set());
   const repositoriesQuery = useRepositoryListQuery();
   const starredQuery = useStarredRepositoryCandidatesQuery(true);
   const notificationsQuery = useNotificationsQuery();
@@ -2452,6 +2477,14 @@ export function DesktopWorkbench() {
   };
 
   const syncRepository = async (repository: Repository) => {
+    if (syncingRepoIds.has(repository.id)) {
+      return;
+    }
+    setSyncingRepoIds((current) => {
+      const next = new Set(current);
+      next.add(repository.id);
+      return next;
+    });
     try {
       await repositoryService.sync(repository.id);
       await Promise.all([
@@ -2463,6 +2496,15 @@ export function DesktopWorkbench() {
     } catch (error) {
       console.error(error);
       toast.error('同步仓库失败');
+    } finally {
+      setSyncingRepoIds((current) => {
+        if (!current.has(repository.id)) {
+          return current;
+        }
+        const next = new Set(current);
+        next.delete(repository.id);
+        return next;
+      });
     }
   };
 
@@ -2504,6 +2546,7 @@ export function DesktopWorkbench() {
             selectedRepositoryId={activeView === 'repository' ? selectedRepository?.id : undefined}
             messages={allMessages}
             monitoredRepositoryIds={monitoredRepositoryIds}
+            syncingRepoIds={syncingRepoIds}
             collapsed={isRepositorySidebarCollapsed}
             onToggleCollapsed={() => setIsRepositorySidebarCollapsed((current) => !current)}
             onRemoveFromMonitoring={removeRepositoryFromMonitoring}

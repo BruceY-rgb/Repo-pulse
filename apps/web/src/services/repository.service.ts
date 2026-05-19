@@ -76,7 +76,11 @@ export const repositoryService = {
   },
 
   async sync(id: string): Promise<Repository> {
-    const { data } = await apiClient.post<ApiResponse<Repository>>(`/repositories/${id}/sync`);
+    const { data } = await apiClient.post<ApiResponse<Repository>>(
+      `/repositories/${id}/sync`,
+      undefined,
+      { timeout: 0 },
+    );
     return data.data;
   },
 
