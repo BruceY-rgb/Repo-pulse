@@ -283,7 +283,11 @@ function ScopeRepositoryItem({
   );
 }
 
-export function Dashboard() {
+export function Dashboard({
+  scopedRepositoryId,
+}: {
+  scopedRepositoryId?: string;
+} = {}) {
   const cardsRef = useRef<HTMLDivElement>(null);
   const { t, language } = useLanguage();
 
@@ -312,13 +316,16 @@ export function Dashboard() {
     () => new Set(availableRepositoryIds),
     [availableRepositoryIds],
   );
+  const scopedRepository = useMemo(
+    () => scopedRepositoryId
+      ? repos.find((repository) => repository.id === scopedRepositoryId)
+      : undefined,
+    [repos, scopedRepositoryId],
+  );
+  const isScopedRepositoryDashboard = Boolean(scopedRepositoryId);
   const monitoredRepositoryIds = useMemo(
     () => (monitoringScope.repositoryIds ?? []).filter((repositoryId) => availableRepositoryIdSet.has(repositoryId)),
     [availableRepositoryIdSet, monitoringScope.repositoryIds],
-  );
-  const selectedRepositories = useMemo(
-    () => findRepositoriesBySelection(repos, monitoredRepositoryIds),
-    [monitoredRepositoryIds, repos],
   );
   const repositoryBranchScopes = useMemo(
     () => monitoringScope.repositoryBranchScopes ?? {},
@@ -336,9 +343,23 @@ export function Dashboard() {
       ),
     [availableRepositoryIdSet, repositoryBranchScopes],
   );
+  const dashboardRepositoryIds = useMemo(
+    () => scopedRepository
+      ? [scopedRepository.id]
+      : monitoredRepositoryIds,
+    [monitoredRepositoryIds, scopedRepository],
+  );
+  const dashboardRepositoryBranchScopes = useMemo(
+    () => scopedRepository ? {} : normalizedRepositoryBranchScopes,
+    [normalizedRepositoryBranchScopes, scopedRepository],
+  );
+  const selectedRepositories = useMemo(
+    () => findRepositoriesBySelection(repos, dashboardRepositoryIds),
+    [dashboardRepositoryIds, repos],
+  );
   const repositoriesForCurrentScopeTab = useMemo(
-    () => (scopeTab === 'selected' ? selectedRepositories : repos),
-    [repos, scopeTab, selectedRepositories],
+    () => (scopeTab === 'selected' ? findRepositoriesBySelection(repos, monitoredRepositoryIds) : repos),
+    [monitoredRepositoryIds, repos, scopeTab],
   );
   const filteredRepositoriesForCurrentScopeTab = useMemo(() => {
     const normalizedKeyword = scopeSearchValue.trim().toLowerCase();
@@ -352,7 +373,7 @@ export function Dashboard() {
     );
   }, [repositoriesForCurrentScopeTab, scopeSearchValue]);
   const hasAvailableRepositories = repos.length > 0;
-  const hasSelection = monitoredRepositoryIds.length > 0;
+  const hasSelection = dashboardRepositoryIds.length > 0;
 
   const persistMonitoredRepositoryIds = (repositoryIds: string[]) => {
     void persistMonitoringScope({
@@ -408,27 +429,27 @@ export function Dashboard() {
   ]);
 
   const statsQuery = useDashboardStatsQuery(
-    monitoredRepositoryIds,
-    normalizedRepositoryBranchScopes,
+    dashboardRepositoryIds,
+    dashboardRepositoryBranchScopes,
   );
   const recentEventsQuery = useDashboardRecentEventsQuery(
-    monitoredRepositoryIds,
-    normalizedRepositoryBranchScopes,
+    dashboardRepositoryIds,
+    dashboardRepositoryBranchScopes,
   );
   const pendingApprovalsQuery = usePendingApprovalsCountQuery(
-    monitoredRepositoryIds,
-    normalizedRepositoryBranchScopes,
+    dashboardRepositoryIds,
+    dashboardRepositoryBranchScopes,
   );
   const unreadNotificationsQuery = useUnreadNotificationsCountQuery(
-    monitoredRepositoryIds,
-    normalizedRepositoryBranchScopes,
+    dashboardRepositoryIds,
+    dashboardRepositoryBranchScopes,
   );
 
   // 周活动数据 - 来自后端 /dashboard/activity
   const activityQuery = useDashboardActivity(
     7,
-    monitoredRepositoryIds,
-    normalizedRepositoryBranchScopes,
+    dashboardRepositoryIds,
+    dashboardRepositoryBranchScopes,
   );
   const activityData = useMemo(() => {
     const data = activityQuery.data ?? [];
@@ -459,9 +480,9 @@ export function Dashboard() {
     { label: 'Time to Recovery', value: '--', target: '--', progress: 0 },
   ];
 
-  useRepositoryRealtimeSubscription(monitoredRepositoryIds);
+  useRepositoryRealtimeSubscription(dashboardRepositoryIds);
 
-  const totalRepositories = monitoredRepositoryIds.length;
+  const totalRepositories = dashboardRepositoryIds.length;
   const totalEvents = statsQuery.data?.total ?? 0;
   const pendingApprovals = pendingApprovalsQuery.data?.count ?? 0;
   const unreadNotifications = unreadNotificationsQuery.data?.count ?? 0;
@@ -647,7 +668,18 @@ export function Dashboard() {
           <p className="mt-1 text-sm text-[var(--github-text-secondary)]">
             {t('dashboard.hero.description')}
           </p>
-          {hasAvailableRepositories ? (
+          {isScopedRepositoryDashboard ? (
+            <div className="mt-1 flex items-center gap-2">
+              <span className="text-xs text-[var(--github-text-secondary)]">
+                {t('dashboard.scope.label')}:
+              </span>
+              <span className="inline-flex h-7 max-w-[360px] items-center rounded-md border border-[var(--github-border)] bg-white/[0.03] px-2 text-xs text-white">
+                <span className="truncate">
+                  {scopedRepository?.fullName ?? t('dashboard.scope.placeholder')}
+                </span>
+              </span>
+            </div>
+          ) : hasAvailableRepositories ? (
             <div className="mt-1 flex items-center gap-2">
               <span className="text-xs text-[var(--github-text-secondary)]">
                 {t('dashboard.scope.label')}:

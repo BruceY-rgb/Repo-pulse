@@ -1110,6 +1110,9 @@ function WorkbenchHeader({
     settings: '设置',
   };
   const repositoryAvatarUrl = repository ? getRepositoryAvatarUrl(repository) : undefined;
+  const dashboardHref = activeView === 'repository' && repository
+    ? `/workbench/dashboard?repositoryId=${encodeURIComponent(repository.id)}`
+    : '/workbench/dashboard';
 
   return (
     <header className="desktop-drag flex h-24 shrink-0 items-end justify-between gap-4 border-b border-border bg-background/95 px-6 pb-4 backdrop-blur">
@@ -1141,12 +1144,12 @@ function WorkbenchHeader({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button size="icon" variant="outline" asChild aria-label="看板">
-              <Link to="/workbench/dashboard">
+              <Link to={dashboardHref}>
                 <LayoutDashboard className="h-4 w-4" />
               </Link>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>仓库看板</TooltipContent>
+          <TooltipContent>{activeView === 'repository' ? '查看当前仓库看板' : '仓库看板'}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -2291,7 +2294,7 @@ export function DesktopWorkbench() {
             {activeView === 'dashboard' ? (
               <ScrollArea className="h-full">
                 <div className="p-6">
-                  <Dashboard />
+                  <Dashboard scopedRepositoryId={searchParams.get('repositoryId') ?? undefined} />
                 </div>
               </ScrollArea>
             ) : null}
