@@ -27,6 +27,7 @@ import {
   GitBranch,
   Github,
   LayoutDashboard,
+  LogOut,
   MessageSquare,
   PauseCircle,
   Plus,
@@ -74,6 +75,10 @@ import {
   notificationQueryKeys,
   useUnreadNotificationCountQuery,
 } from '@/hooks/queries/use-notification-queries';
+import {
+  useCurrentUserQuery,
+  useLogoutMutation,
+} from '@/hooks/queries/use-auth-queries';
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
 import { eventService } from '@/services/event.service';
 import { approvalService, type Approval } from '@/services/approval.service';
@@ -268,6 +273,7 @@ function MarkdownContent({
 const COLLAPSED_PRIMARY_RAIL_WIDTH = 72;
 const EXPANDED_PRIMARY_RAIL_WIDTH = 244;
 const DEFAULT_REPOSITORY_SIDEBAR_WIDTH = 320;
+const COLLAPSED_REPOSITORY_SIDEBAR_WIDTH = 68;
 const MIN_REPOSITORY_SIDEBAR_WIDTH = 260;
 const MAX_REPOSITORY_SIDEBAR_WIDTH = 440;
 const SIDEBAR_KEYBOARD_STEP = 12;
@@ -700,6 +706,9 @@ function PrimaryRail({
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
+  const navigate = useNavigate();
+  const { data: user, isLoading: isUserLoading } = useCurrentUserQuery();
+  const logoutMutation = useLogoutMutation();
   const railItems = [
     { view: 'inbox' as const, label: '仓库会话', icon: MessageSquare },
     { view: 'watch' as const, label: '关注动态', icon: Star },
@@ -707,6 +716,14 @@ function PrimaryRail({
     { view: 'settings' as const, label: '设置', icon: Settings },
   ];
   const railWidth = collapsed ? COLLAPSED_PRIMARY_RAIL_WIDTH : EXPANDED_PRIMARY_RAIL_WIDTH;
+  const userName = user?.name ?? '未知用户';
+  const userEmail = user?.email ?? '暂无邮箱';
+  const userInitial = userName.slice(0, 1).toUpperCase() || 'U';
+
+  const handleLogout = async () => {
+    await logoutMutation.mutateAsync(undefined);
+    navigate('/login', { replace: true });
+  };
 
   return (
     <aside
@@ -778,6 +795,62 @@ function PrimaryRail({
         })}
       </nav>
 
+      <div className={cn('desktop-no-drag border-t border-border', collapsed ? 'space-y-3 p-3' : 'space-y-3 p-4')}>
+        {isUserLoading ? (
+          <div
+            className={cn(
+              'flex items-center rounded-xl border border-border bg-background/40',
+              collapsed ? 'h-10 justify-center p-0' : 'h-[62px] justify-center px-3',
+            )}
+          >
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          </div>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div
+                className={cn(
+                  'flex items-center rounded-xl border border-border bg-background/40',
+                  collapsed ? 'h-10 justify-center p-0' : 'gap-3 p-3',
+                )}
+              >
+                <Avatar className="h-9 w-9 shrink-0 rounded-full">
+                  <AvatarImage src={user?.avatar ?? undefined} alt={userName} className="object-cover" />
+                  <AvatarFallback className="bg-primary/15 text-sm font-semibold text-primary">
+                    {userInitial}
+                  </AvatarFallback>
+                </Avatar>
+                {!collapsed ? (
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-foreground">{userName}</p>
+                    <p className="truncate text-xs text-muted-foreground">{userEmail}</p>
+                  </div>
+                ) : null}
+              </div>
+            </TooltipTrigger>
+            {collapsed ? <TooltipContent side="right">{userName}</TooltipContent> : null}
+          </Tooltip>
+        )}
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size={collapsed ? 'icon' : 'default'}
+              className={cn('gap-2 rounded-xl', collapsed ? 'h-10 w-10' : 'h-10 w-full justify-start')}
+              onClick={handleLogout}
+              disabled={logoutMutation.isPending}
+              aria-label="退出登录"
+            >
+              <LogOut className="h-4 w-4" />
+              {!collapsed ? <span>退出登录</span> : null}
+            </Button>
+          </TooltipTrigger>
+          {collapsed ? <TooltipContent side="right">退出登录</TooltipContent> : null}
+        </Tooltip>
+      </div>
+
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -802,6 +875,8 @@ function RepositorySidebar({
   selectedRepositoryId,
   messages,
   monitoredRepositoryIds,
+  collapsed,
+  onToggleCollapsed,
   onRemoveFromMonitoring,
   onToggleRepositoryActive,
   onSyncRepository,
@@ -812,6 +887,8 @@ function RepositorySidebar({
   selectedRepositoryId?: string;
   messages: ConversationMessage[];
   monitoredRepositoryIds: string[];
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
   onRemoveFromMonitoring: (repository: Repository) => void;
   onToggleRepositoryActive: (repository: Repository) => void;
   onSyncRepository: (repository: Repository) => void;
@@ -899,6 +976,10 @@ function RepositorySidebar({
   }, [contextMenu]);
 
   const handleResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (collapsed) {
+      return;
+    }
+
     event.preventDefault();
     resizeStartRef.current = {
       clientX: event.clientX,
@@ -908,6 +989,10 @@ function RepositorySidebar({
   };
 
   const handleResizeKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (collapsed) {
+      return;
+    }
+
     if (event.key === 'ArrowLeft') {
       event.preventDefault();
       setSidebarWidth((current) => clampRepositorySidebarWidth(current - SIDEBAR_KEYBOARD_STEP));
@@ -932,6 +1017,160 @@ function RepositorySidebar({
     }
   };
 
+  if (collapsed) {
+    return (
+      <aside
+        style={{ width: COLLAPSED_REPOSITORY_SIDEBAR_WIDTH }}
+        className="relative hidden h-screen shrink-0 overflow-visible border-r border-border bg-background/60 transition-[width] duration-200 lg:block"
+      >
+        <div className="desktop-drag flex h-24 items-end justify-center border-b border-border pb-4 pt-9">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                className="desktop-no-drag h-10 w-10 rounded-xl"
+                onClick={onToggleCollapsed}
+                aria-label="展开仓库会话列表"
+              >
+                <MessageSquare className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">展开仓库会话列表</TooltipContent>
+          </Tooltip>
+        </div>
+
+        <ScrollArea className="h-[calc(100vh-208px)]">
+          <div className="desktop-no-drag flex flex-col items-center gap-3 px-2 py-3">
+            {sortedRepositories.map((repo) => {
+              const repoMessages = getRepoMessages(repo.id, messages);
+              const selected = repo.id === selectedRepositoryId;
+              const unread = Math.min(repoMessages.filter((message) => message.risk !== 'low').length || repo._count?.events || 0, 99);
+              const avatarUrl = getRepositoryAvatarUrl(repo);
+
+              const compactLink = (
+                <Link
+                  key={repo.id}
+                  to={`/workbench/repository/${repo.id}`}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setContextMenu({
+                      x: event.clientX,
+                      y: event.clientY,
+                      repository: repo,
+                    });
+                  }}
+                  className={cn(
+                    'relative flex h-11 w-11 items-center justify-center rounded-xl border border-transparent transition-colors hover:bg-secondary',
+                    selected && 'border-primary/40 bg-primary/10',
+                  )}
+                  aria-label={repo.fullName}
+                >
+                  <Avatar className="h-9 w-9 rounded-xl">
+                    <AvatarImage src={avatarUrl} alt={repo.fullName} className="object-cover" />
+                    <AvatarFallback className="rounded-xl bg-secondary text-xs font-semibold">
+                      {getRepoInitial(repo)}
+                    </AvatarFallback>
+                  </Avatar>
+                  {unread > 0 ? (
+                    <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-background bg-primary" />
+                  ) : null}
+                </Link>
+              );
+
+              return (
+                <Tooltip key={repo.id}>
+                  <TooltipTrigger asChild>{compactLink}</TooltipTrigger>
+                  <TooltipContent side="right">
+                    <div className="max-w-[240px]">
+                      <p className="font-medium">{repo.fullName}</p>
+                      <p className="truncate text-xs text-muted-foreground">{getLatestRepoMessage(repo, messages)}</p>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </div>
+        </ScrollArea>
+
+        <div className="desktop-no-drag absolute bottom-3 left-0 right-0 flex flex-col items-center gap-2 px-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="icon" variant="outline" className="h-10 w-10 rounded-xl" asChild>
+                <Link to="/workbench/repositories" aria-label="添加仓库">
+                  <Plus className="h-4 w-4" />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">添加仓库</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-10 w-10 rounded-xl text-muted-foreground hover:text-foreground"
+                onClick={onToggleCollapsed}
+                aria-label="展开仓库会话列表"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">展开</TooltipContent>
+          </Tooltip>
+        </div>
+
+        {contextMenu ? (
+          <div
+            className="fixed z-50 w-[280px] overflow-hidden rounded-2xl border border-border bg-popover/95 p-2 shadow-2xl backdrop-blur"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {getRepositoryContextMenuItems({
+              repository: contextMenu.repository,
+              isMonitored: monitoredRepositoryIds.includes(contextMenu.repository.id),
+              onRemoveFromMonitoring,
+              onToggleRepositoryActive,
+              onSyncRepository,
+              onOpenRepository,
+              onDeleteRepository,
+            }).map((item) => {
+              if ('separator' in item) {
+                return <div key={item.key} className="my-2 h-px bg-border" />;
+              }
+
+              const Icon = item.icon;
+
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium transition-colors',
+                    item.destructive
+                      ? 'text-destructive hover:bg-destructive/10'
+                      : 'text-foreground hover:bg-secondary',
+                    item.disabled && 'cursor-not-allowed opacity-45 hover:bg-transparent',
+                  )}
+                  disabled={item.disabled}
+                  onClick={() => {
+                    item.onSelect();
+                    setContextMenu(null);
+                  }}
+                >
+                  <Icon className="h-5 w-5 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </aside>
+    );
+  }
+
   return (
     <aside
       style={{ width: sidebarWidth }}
@@ -946,11 +1185,28 @@ function RepositorySidebar({
             <p className="text-xs text-muted-foreground">Editable repositories</p>
             <h2 className="text-lg font-semibold text-foreground">仓库会话</h2>
           </div>
-          <Button size="icon" variant="outline" className="h-9 w-9" asChild>
-            <Link to="/workbench/repositories" aria-label="添加仓库">
-              <Plus className="h-4 w-4" />
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="h-9 w-9 text-muted-foreground hover:text-foreground"
+                  onClick={onToggleCollapsed}
+                  aria-label="收起仓库会话列表"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>收起仓库会话列表</TooltipContent>
+            </Tooltip>
+            <Button size="icon" variant="outline" className="h-9 w-9" asChild>
+              <Link to="/workbench/repositories" aria-label="添加仓库">
+                <Plus className="h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
         </div>
         <div className="desktop-no-drag relative mt-3">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -1967,6 +2223,7 @@ export function DesktopWorkbench() {
   const [searchParams] = useSearchParams();
   const [approvalActionId, setApprovalActionId] = useState<string>();
   const [isPrimaryRailCollapsed, setIsPrimaryRailCollapsed] = useState(true);
+  const [isRepositorySidebarCollapsed, setIsRepositorySidebarCollapsed] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isBranchMonitorOpen, setIsBranchMonitorOpen] = useState(false);
@@ -2041,6 +2298,7 @@ export function DesktopWorkbench() {
             : params.view === 'settings'
               ? 'settings'
               : 'inbox';
+  const shouldShowRepositorySidebar = activeView === 'inbox' || activeView === 'repository';
 
   const selectedMessages = getRepoMessages(selectedRepository?.id, allMessages);
   const unreadCount = unreadNotificationCountQuery.data?.count ?? allMessages.length;
@@ -2240,17 +2498,21 @@ export function DesktopWorkbench() {
           collapsed={isPrimaryRailCollapsed}
           onToggleCollapsed={() => setIsPrimaryRailCollapsed((current) => !current)}
         />
-        <RepositorySidebar
-          repositories={repositories}
-          selectedRepositoryId={selectedRepository?.id}
-          messages={allMessages}
-          monitoredRepositoryIds={monitoredRepositoryIds}
-          onRemoveFromMonitoring={removeRepositoryFromMonitoring}
-          onToggleRepositoryActive={toggleRepositoryActive}
-          onSyncRepository={syncRepository}
-          onOpenRepository={openRepository}
-          onDeleteRepository={deleteRepository}
-        />
+        {shouldShowRepositorySidebar ? (
+          <RepositorySidebar
+            repositories={repositories}
+            selectedRepositoryId={activeView === 'repository' ? selectedRepository?.id : undefined}
+            messages={allMessages}
+            monitoredRepositoryIds={monitoredRepositoryIds}
+            collapsed={isRepositorySidebarCollapsed}
+            onToggleCollapsed={() => setIsRepositorySidebarCollapsed((current) => !current)}
+            onRemoveFromMonitoring={removeRepositoryFromMonitoring}
+            onToggleRepositoryActive={toggleRepositoryActive}
+            onSyncRepository={syncRepository}
+            onOpenRepository={openRepository}
+            onDeleteRepository={deleteRepository}
+          />
+        ) : null}
         <div className="flex min-w-0 flex-1 flex-col">
           <WorkbenchHeader
             activeView={activeView}
