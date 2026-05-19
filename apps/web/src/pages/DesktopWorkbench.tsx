@@ -3,12 +3,14 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
 } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -19,19 +21,24 @@ import {
   ChevronRight,
   CircleDot,
   Command,
+  EyeOff,
   ExternalLink,
   FileText,
   GitBranch,
   Github,
   LayoutDashboard,
   MessageSquare,
+  PauseCircle,
   Plus,
+  RotateCcw,
   Search,
   Send,
   Settings,
   ShieldAlert,
   Sparkles,
   Star,
+  Trash2,
+  VolumeX,
   XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -59,6 +66,7 @@ import {
   useRepositoryBranchesQuery,
   useRepositoryListQuery,
   useStarredRepositoryCandidatesQuery,
+  repositoryQueryKeys,
 } from '@/hooks/queries/use-repository-queries';
 import { useMonitoringScopePreferences } from '@/hooks/use-monitoring-scope-preferences';
 import {
@@ -69,6 +77,7 @@ import {
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
 import { eventService } from '@/services/event.service';
 import { approvalService, type Approval } from '@/services/approval.service';
+import { repositoryService } from '@/services/repository.service';
 import type { Notification } from '@/services/notification.service';
 import { Dashboard } from '@/pages/Dashboard';
 import { Repositories } from '@/pages/Repositories';
@@ -103,6 +112,21 @@ interface ContextMenuState {
   message: ConversationMessage;
 }
 
+interface RepositoryContextMenuState {
+  x: number;
+  y: number;
+  repository: Repository;
+}
+
+type MessageFilterKey =
+  | 'all'
+  | 'approval'
+  | 'notification'
+  | 'issue'
+  | 'pull-request'
+  | 'push'
+  | 'release';
+
 const routeByView: Record<Exclude<WorkbenchView, 'repository'>, string> = {
   inbox: '/workbench',
   repositories: '/workbench/repositories',
@@ -112,6 +136,134 @@ const routeByView: Record<Exclude<WorkbenchView, 'repository'>, string> = {
   agent: '/workbench/agent',
   settings: '/workbench/settings',
 };
+
+const messageFilters: Array<{ key: MessageFilterKey; label: string }> = [
+  { key: 'all', label: '全部' },
+  { key: 'issue', label: 'Issue' },
+  { key: 'pull-request', label: 'PR' },
+  { key: 'push', label: 'Push' },
+  { key: 'release', label: 'Release' },
+  { key: 'approval', label: '审批' },
+  { key: 'notification', label: '通知' },
+];
+
+const markdownComponents: Components = {
+  a({ children, href, title }) {
+    return (
+      <a href={href} title={title} target="_blank" rel="noreferrer">
+        {children}
+      </a>
+    );
+  },
+  p({ children }) {
+    return <p className="my-2 leading-7">{children}</p>;
+  },
+  h1({ children }) {
+    return <h1 className="mb-3 mt-4 text-2xl font-semibold leading-tight text-foreground">{children}</h1>;
+  },
+  h2({ children }) {
+    return <h2 className="mb-2 mt-4 text-xl font-semibold leading-tight text-foreground">{children}</h2>;
+  },
+  h3({ children }) {
+    return <h3 className="mb-2 mt-3 text-lg font-semibold leading-tight text-foreground">{children}</h3>;
+  },
+  h4({ children }) {
+    return <h4 className="mb-2 mt-3 text-base font-semibold leading-tight text-foreground">{children}</h4>;
+  },
+  ul({ children }) {
+    return <ul className="my-3 list-disc space-y-1 pl-5">{children}</ul>;
+  },
+  ol({ children }) {
+    return <ol className="my-3 list-decimal space-y-1 pl-5">{children}</ol>;
+  },
+  li({ children }) {
+    return <li className="pl-1 leading-7">{children}</li>;
+  },
+  blockquote({ children }) {
+    return (
+      <blockquote className="my-3 border-l-2 border-primary/60 pl-4 text-muted-foreground">
+        {children}
+      </blockquote>
+    );
+  },
+  code({ children, className }) {
+    return (
+      <code className={cn('rounded bg-secondary px-1 py-0.5 text-[0.9em] text-foreground', className)}>
+        {children}
+      </code>
+    );
+  },
+  pre({ children }) {
+    return (
+      <pre className="my-3 overflow-x-auto rounded-lg border border-border bg-background p-3 text-xs leading-5">
+        {children}
+      </pre>
+    );
+  },
+  hr() {
+    return <hr className="my-5 border-border" />;
+  },
+  table({ children }) {
+    return (
+      <div className="my-3 overflow-x-auto rounded-lg border border-border">
+        <table className="w-full border-collapse text-sm">
+          {children}
+        </table>
+      </div>
+    );
+  },
+  thead({ children }) {
+    return <thead className="bg-secondary/80">{children}</thead>;
+  },
+  tr({ children }) {
+    return <tr className="border-b border-border last:border-b-0">{children}</tr>;
+  },
+  th({ children }) {
+    return <th className="px-3 py-2 text-left font-medium text-foreground">{children}</th>;
+  },
+  td({ children }) {
+    return <td className="px-3 py-2 align-top text-muted-foreground">{children}</td>;
+  },
+  input(props: ComponentProps<'input'>) {
+    return <input {...props} className="mr-2 align-middle accent-primary" disabled />;
+  },
+  img({ src, alt, title }) {
+    return (
+      <img
+        src={src}
+        alt={alt ?? ''}
+        title={title}
+        loading="lazy"
+        className="my-3 max-h-80 rounded-lg border border-border object-contain"
+      />
+    );
+  },
+};
+
+function MarkdownContent({
+  children,
+  className,
+}: {
+  children: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn(
+      'prose prose-sm prose-invert max-w-none text-muted-foreground',
+      'prose-headings:text-foreground prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1',
+      'prose-a:text-info-foreground prose-strong:text-foreground prose-hr:border-border',
+      className,
+    )}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        skipHtml
+        components={markdownComponents}
+      >
+        {children}
+      </ReactMarkdown>
+    </div>
+  );
+}
 
 const COLLAPSED_PRIMARY_RAIL_WIDTH = 72;
 const EXPANDED_PRIMARY_RAIL_WIDTH = 244;
@@ -434,9 +586,107 @@ function hasRepositoryMessages(repo: Repository, messages: ConversationMessage[]
   return messages.some((item) => item.sourceRepositoryId === repo.id);
 }
 
+function getRepositoryContextMenuItems({
+  repository,
+  isMonitored,
+  onRemoveFromMonitoring,
+  onToggleRepositoryActive,
+  onSyncRepository,
+  onOpenRepository,
+  onDeleteRepository,
+}: {
+  repository: Repository;
+  isMonitored: boolean;
+  onRemoveFromMonitoring: (repository: Repository) => void;
+  onToggleRepositoryActive: (repository: Repository) => void;
+  onSyncRepository: (repository: Repository) => void;
+  onOpenRepository: (repository: Repository) => void;
+  onDeleteRepository: (repository: Repository) => void;
+}) {
+  return [
+    {
+      key: 'remove-monitoring',
+      label: '移出监控范围',
+      icon: Plus,
+      disabled: !isMonitored,
+      onSelect: () => onRemoveFromMonitoring(repository),
+    },
+    {
+      key: 'toggle-active',
+      label: repository.isActive ? '停用' : '启用',
+      icon: PauseCircle,
+      onSelect: () => onToggleRepositoryActive(repository),
+    },
+    {
+      key: 'sync',
+      label: '同步',
+      icon: RotateCcw,
+      onSelect: () => onSyncRepository(repository),
+    },
+    {
+      key: 'open',
+      label: '打开',
+      icon: ExternalLink,
+      onSelect: () => onOpenRepository(repository),
+    },
+    { key: 'separator-1', separator: true },
+    {
+      key: 'mute',
+      label: '消息免打扰',
+      icon: VolumeX,
+      disabled: true,
+      onSelect: () => {},
+    },
+    {
+      key: 'hide',
+      label: '不显示此会话',
+      icon: EyeOff,
+      disabled: true,
+      onSelect: () => {},
+    },
+    {
+      key: 'settings',
+      label: '会话设置',
+      icon: Settings,
+      disabled: true,
+      onSelect: () => {},
+    },
+    { key: 'separator-2', separator: true },
+    {
+      key: 'delete',
+      label: '移除仓库',
+      icon: Trash2,
+      destructive: true,
+      onSelect: () => onDeleteRepository(repository),
+    },
+  ];
+}
+
 function getWatchDescription(item: SearchResult) {
   const language = item.language ? `${item.language} · ` : '';
   return `${language}${item.stargazersCount.toLocaleString()} stars · ${item.description || '关注仓库正在发生新的生态变化'}`;
+}
+
+function doesMessageMatchFilter(message: ConversationMessage, filter: MessageFilterKey) {
+  if (filter === 'all') {
+    return true;
+  }
+
+  if (filter === 'approval' || filter === 'notification') {
+    return message.kind === filter;
+  }
+
+  if (filter === 'pull-request') {
+    return message.eventTypeLabel === 'Pull Request';
+  }
+
+  const expectedLabelMap: Record<Exclude<MessageFilterKey, 'all' | 'approval' | 'notification' | 'pull-request'>, string> = {
+    issue: 'Issue',
+    push: 'Push',
+    release: 'Release',
+  };
+
+  return message.eventTypeLabel === expectedLabelMap[filter];
 }
 
 function PrimaryRail({
@@ -551,30 +801,58 @@ function RepositorySidebar({
   repositories,
   selectedRepositoryId,
   messages,
+  monitoredRepositoryIds,
+  onRemoveFromMonitoring,
+  onToggleRepositoryActive,
+  onSyncRepository,
+  onOpenRepository,
+  onDeleteRepository,
 }: {
   repositories: Repository[];
   selectedRepositoryId?: string;
   messages: ConversationMessage[];
+  monitoredRepositoryIds: string[];
+  onRemoveFromMonitoring: (repository: Repository) => void;
+  onToggleRepositoryActive: (repository: Repository) => void;
+  onSyncRepository: (repository: Repository) => void;
+  onOpenRepository: (repository: Repository) => void;
+  onDeleteRepository: (repository: Repository) => void;
 }) {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_REPOSITORY_SIDEBAR_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
+  const [contextMenu, setContextMenu] = useState<RepositoryContextMenuState | null>(null);
+  const [repositorySearch, setRepositorySearch] = useState('');
   const resizeStartRef = useRef({
     clientX: 0,
     width: DEFAULT_REPOSITORY_SIDEBAR_WIDTH,
   });
+  const normalizedRepositorySearch = repositorySearch.trim().toLowerCase();
   const sortedRepositories = useMemo(
-    () => [...repositories].sort((left, right) => {
-      const leftHasMessages = hasRepositoryMessages(left, messages);
-      const rightHasMessages = hasRepositoryMessages(right, messages);
-      if (leftHasMessages !== rightHasMessages) {
-        return rightHasMessages ? 1 : -1;
-      }
+    () => repositories
+      .filter((repository) => {
+        if (!normalizedRepositorySearch) {
+          return true;
+        }
 
-      const rightLatestAt = getRepositorySortTime(right, messages);
-      const leftLatestAt = getRepositorySortTime(left, messages);
-      return rightLatestAt - leftLatestAt;
-    }),
-    [messages, repositories],
+        return [
+          repository.name,
+          repository.fullName,
+          repository.defaultBranch,
+          getLatestRepoMessage(repository, messages),
+        ].join(' ').toLowerCase().includes(normalizedRepositorySearch);
+      })
+      .sort((left, right) => {
+        const leftHasMessages = hasRepositoryMessages(left, messages);
+        const rightHasMessages = hasRepositoryMessages(right, messages);
+        if (leftHasMessages !== rightHasMessages) {
+          return rightHasMessages ? 1 : -1;
+        }
+
+        const rightLatestAt = getRepositorySortTime(right, messages);
+        const leftLatestAt = getRepositorySortTime(left, messages);
+        return rightLatestAt - leftLatestAt;
+      }),
+    [messages, normalizedRepositorySearch, repositories],
   );
 
   useEffect(() => {
@@ -606,6 +884,19 @@ function RepositorySidebar({
       window.removeEventListener('pointerup', handlePointerUp);
     };
   }, [isResizing]);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+
+    function close() {
+      setContextMenu(null);
+    }
+
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [contextMenu]);
 
   const handleResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -661,6 +952,15 @@ function RepositorySidebar({
             </Link>
           </Button>
         </div>
+        <div className="desktop-no-drag relative mt-3">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={repositorySearch}
+            onChange={(event) => setRepositorySearch(event.target.value)}
+            placeholder="搜索仓库会话"
+            className="h-8 rounded-lg border-border bg-background/70 pl-8 text-xs"
+          />
+        </div>
       </div>
 
       <ScrollArea className="h-[calc(100vh-98px)] overflow-hidden">
@@ -675,6 +975,14 @@ function RepositorySidebar({
               <Link
                 key={repo.id}
                 to={`/workbench/repository/${repo.id}`}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setContextMenu({
+                    x: event.clientX,
+                    y: event.clientY,
+                    repository: repo,
+                  });
+                }}
                 className={cn(
                   'relative flex w-full min-w-0 overflow-hidden gap-3 rounded-xl border border-transparent px-3 py-3 text-left transition-colors hover:bg-secondary/70',
                   selected && 'border-primary/30 bg-primary/10',
@@ -729,6 +1037,51 @@ function RepositorySidebar({
       >
         <span className="absolute right-[3px] top-0 h-full w-px bg-transparent transition-colors group-hover:bg-primary/50 group-focus-visible:bg-primary" />
       </div>
+      {contextMenu ? (
+        <div
+          className="fixed z-50 w-[280px] overflow-hidden rounded-2xl border border-border bg-popover/95 p-2 shadow-2xl backdrop-blur"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {getRepositoryContextMenuItems({
+            repository: contextMenu.repository,
+            isMonitored: monitoredRepositoryIds.includes(contextMenu.repository.id),
+            onRemoveFromMonitoring,
+            onToggleRepositoryActive,
+            onSyncRepository,
+            onOpenRepository,
+            onDeleteRepository,
+          }).map((item) => {
+            if ('separator' in item) {
+              return <div key={item.key} className="my-2 h-px bg-border" />;
+            }
+
+            const Icon = item.icon;
+
+            return (
+              <button
+                key={item.key}
+                type="button"
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium transition-colors',
+                  item.destructive
+                    ? 'text-destructive hover:bg-destructive/10'
+                    : 'text-foreground hover:bg-secondary',
+                  item.disabled && 'cursor-not-allowed opacity-45 hover:bg-transparent',
+                )}
+                disabled={item.disabled}
+                onClick={() => {
+                  item.onSelect();
+                  setContextMenu(null);
+                }}
+              >
+                <Icon className="h-5 w-5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
     </aside>
   );
 }
@@ -889,11 +1242,9 @@ function ConversationBubble({
           ) : null}
         </div>
         <h3 className="mt-3 text-base font-semibold text-foreground">{message.title}</h3>
-        <div className="prose prose-sm prose-invert mt-2 line-clamp-3 max-w-none text-muted-foreground prose-p:my-1 prose-pre:my-2 prose-pre:bg-background prose-code:text-foreground">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {message.body}
-          </ReactMarkdown>
-        </div>
+        <MarkdownContent className="mt-2 line-clamp-3 prose-headings:my-1 prose-h1:text-base prose-h2:text-sm prose-h3:text-sm prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-pre:my-2 prose-pre:max-h-32">
+          {message.body}
+        </MarkdownContent>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           {message.externalUrl ? (
             <Button size="sm" variant="outline" className="gap-2" asChild onClick={(event) => event.stopPropagation()}>
@@ -1025,11 +1376,7 @@ function MessageDetailSheet({
 
               <div className="rounded-xl border border-border bg-card p-5">
                 <p className="mb-3 text-sm font-medium text-foreground">消息正文</p>
-                <div className="prose prose-sm prose-invert max-w-none text-muted-foreground prose-headings:text-foreground prose-a:text-info-foreground prose-pre:border prose-pre:border-border prose-pre:bg-background prose-code:text-foreground">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {message.body}
-                  </ReactMarkdown>
-                </div>
+                <MarkdownContent>{message.body}</MarkdownContent>
               </div>
 
               <div className="flex flex-wrap gap-2">
@@ -1268,6 +1615,11 @@ function RepositoryConversation({
 }) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<ConversationMessage | null>(null);
+  const [activeFilter, setActiveFilter] = useState<MessageFilterKey>('all');
+  const filteredMessages = useMemo(
+    () => messages.filter((message) => doesMessageMatchFilter(message, activeFilter)),
+    [activeFilter, messages],
+  );
 
   useEffect(() => {
     if (!contextMenu) {
@@ -1284,10 +1636,26 @@ function RepositoryConversation({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      <div className="border-b border-border bg-background px-6 py-3">
+        <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-2">
+          {messageFilters.map((filter) => (
+            <Button
+              key={filter.key}
+              type="button"
+              size="sm"
+              variant={activeFilter === filter.key ? 'default' : 'outline'}
+              className="h-8 rounded-full"
+              onClick={() => setActiveFilter(filter.key)}
+            >
+              {filter.label}
+            </Button>
+          ))}
+        </div>
+      </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 py-6">
-          {messages.length > 0 ? (
-            messages.map((message) => (
+          {filteredMessages.length > 0 ? (
+            filteredMessages.map((message) => (
               <ConversationBubble
                 key={message.id}
                 message={message}
@@ -1306,9 +1674,13 @@ function RepositoryConversation({
           ) : (
             <div className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 px-6 text-center">
               <MessageSquare className="h-10 w-10 text-muted-foreground" />
-              <h2 className="mt-4 text-lg font-semibold text-foreground">暂无真实会话消息</h2>
+              <h2 className="mt-4 text-lg font-semibold text-foreground">
+                {messages.length > 0 ? '当前类型暂无消息' : '暂无真实会话消息'}
+              </h2>
               <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-                当前仓库还没有从后端返回事件、审批或通知。新的 GitHub 事件进入系统后，会直接转化为这里的消息卡片。
+                {messages.length > 0
+                  ? '切换上方消息类型筛选，可以查看这个仓库的其他消息。'
+                  : '当前仓库还没有从后端返回事件、审批或通知。新的 GitHub 事件进入系统后，会直接转化为这里的消息卡片。'}
               </p>
             </div>
           )}
@@ -1794,6 +2166,68 @@ export function DesktopWorkbench() {
     toast.success('已切换为监控全部分支');
   };
 
+  const removeRepositoryFromMonitoring = async (repository: Repository) => {
+    const nextRepositoryIds = monitoredRepositoryIds.filter((repositoryId) => repositoryId !== repository.id);
+    const nextBranchScopes = { ...(monitoringScope.repositoryBranchScopes ?? {}) };
+    delete nextBranchScopes[repository.id];
+
+    await persistMonitoringScope({
+      repositoryIds: nextRepositoryIds,
+      branchNames: [],
+      repositoryBranchScopes: nextBranchScopes,
+    });
+    toast.success(`${repository.fullName} 已移出监控范围`);
+  };
+
+  const toggleRepositoryActive = async (repository: Repository) => {
+    try {
+      await repositoryService.update(repository.id, { isActive: !repository.isActive });
+      await queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.all });
+      toast.success(repository.isActive ? '仓库已停用' : '仓库已启用');
+    } catch (error) {
+      console.error(error);
+      toast.error('更新仓库状态失败');
+    }
+  };
+
+  const syncRepository = async (repository: Repository) => {
+    try {
+      await repositoryService.sync(repository.id);
+      await Promise.all([
+        repositoriesQuery.refetch(),
+        eventsQuery.refetch(),
+        approvalsQuery.refetch(),
+      ]);
+      toast.success(`${repository.fullName} 已同步`);
+    } catch (error) {
+      console.error(error);
+      toast.error('同步仓库失败');
+    }
+  };
+
+  const openRepository = (repository: Repository) => {
+    window.open(repository.url, '_blank', 'noopener,noreferrer');
+  };
+
+  const deleteRepository = async (repository: Repository) => {
+    const confirmed = window.confirm(`确定要移除 ${repository.fullName} 吗？`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await repositoryService.delete(repository.id);
+      await queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.all });
+      if (selectedRepository?.id === repository.id) {
+        navigate('/workbench', { replace: true });
+      }
+      toast.success(`${repository.fullName} 已移除`);
+    } catch (error) {
+      console.error(error);
+      toast.error('移除仓库失败');
+    }
+  };
+
   return (
     <TooltipProvider>
       <div className="flex h-screen overflow-hidden bg-background text-foreground">
@@ -1807,6 +2241,12 @@ export function DesktopWorkbench() {
           repositories={repositories}
           selectedRepositoryId={selectedRepository?.id}
           messages={allMessages}
+          monitoredRepositoryIds={monitoredRepositoryIds}
+          onRemoveFromMonitoring={removeRepositoryFromMonitoring}
+          onToggleRepositoryActive={toggleRepositoryActive}
+          onSyncRepository={syncRepository}
+          onOpenRepository={openRepository}
+          onDeleteRepository={deleteRepository}
         />
         <div className="flex min-w-0 flex-1 flex-col">
           <WorkbenchHeader
