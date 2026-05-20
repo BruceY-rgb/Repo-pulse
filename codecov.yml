@@ -1,0 +1,20 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto      # 以上次为基准，不退步即可
+        threshold: 5%     # 允许 5% 以内的波动
+    patch:
+      default:
+        target: auto
+        threshold: 10%    # PR 新增代码的覆盖率门禁
+  ignore:
+    - "apps/api/src/main.ts"
+    - "apps/api/src/**/*.module.ts"
+    - "apps/api/src/**/*.dto.ts"
+    - "apps/web/**"       # 前端暂不统计
+
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default
+  require_changes: true   # 只有覆盖率有变化时才评论 PR

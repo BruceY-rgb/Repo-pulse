@@ -57,8 +57,16 @@ jobs:
       - name: Build api (tsc)
         run: pnpm --filter=@repo-pulse/api build
 
-      - name: Run unit tests
-        run: pnpm --filter=@repo-pulse/api test
+      - name: Run unit tests with coverage
+        run: pnpm --filter=@repo-pulse/api test:cov
+
+      - name: Upload unit coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: apps/api/coverage/lcov.info
+          flags: unit
+          fail_ci_if_error: false
 
   # ──────────────────────────────────────────────────────────────────────────────
   # Job 2: 用真实 DB + Redis 跑端到端测试

@@ -99,6 +99,15 @@
       "^@/(.*)$": "<rootDir>/src/$1",
       "^@modules/(.*)$": "<rootDir>/src/modules/$1"
     },
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "!src/main.ts",
+      "!src/**/*.module.ts",
+      "!src/**/*.dto.ts",
+      "!src/**/*.d.ts"
+    ],
+    "coverageDirectory": "coverage",
+    "coverageReporters": ["lcov", "text-summary"]
   }
 }
