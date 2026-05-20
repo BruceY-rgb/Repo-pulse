@@ -26,6 +26,7 @@ export class UserService {
     name: string;
     avatar?: string;
     githubId?: string;
+    githubLogin?: string;
     githubAccessToken?: string;
     githubRefreshToken?: string;
     password?: string;
@@ -35,6 +36,7 @@ export class UserService {
       name: data.name,
       avatar: data.avatar,
       githubId: data.githubId,
+      githubLogin: data.githubLogin,
       githubAccessToken: data.githubAccessToken,
       githubRefreshToken: data.githubRefreshToken,
     };
@@ -50,6 +52,7 @@ export class UserService {
     id: string,
     data: {
       githubId?: string;
+      githubLogin?: string;
       githubAccessToken?: string;
       githubRefreshToken?: string;
       name?: string;
@@ -59,6 +62,9 @@ export class UserService {
     const updateData: any = {};
     if (data.githubId !== undefined) {
       updateData.githubId = data.githubId;
+    }
+    if (data.githubLogin !== undefined) {
+      updateData.githubLogin = data.githubLogin;
     }
     if (data.githubAccessToken !== undefined) {
       updateData.githubAccessToken = data.githubAccessToken;

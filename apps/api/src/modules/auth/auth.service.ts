@@ -92,6 +92,7 @@ export class AuthService {
     id: string;
     email: string | undefined;
     displayName: string;
+    githubLogin?: string;
     avatar: string;
     githubAccessToken: string;
     githubRefreshToken: string;
@@ -116,6 +117,7 @@ export class AuthService {
       if (existingUserByEmail) {
         user = await this.userService.update(existingUserByEmail.id, {
           githubId: profile.id,
+          githubLogin: profile.githubLogin,
           githubAccessToken: profile.githubAccessToken,
           githubRefreshToken: profile.githubRefreshToken,
           name: profile.displayName || existingUserByEmail.name,
@@ -128,6 +130,7 @@ export class AuthService {
           name: profile.displayName || 'GitHub User',
           avatar: profile.avatar,
           githubId: profile.id,
+          githubLogin: profile.githubLogin,
           githubAccessToken: profile.githubAccessToken,
           githubRefreshToken: profile.githubRefreshToken,
         });
@@ -135,11 +138,12 @@ export class AuthService {
       }
     } else {
       this.logger.log(`github_oauth_lookup_by_github_id_hit githubId=${profile.id} userId=${user.id}`);
-      user = await this.userService.update(user.id, {
-        githubId: profile.id,
-        githubAccessToken: profile.githubAccessToken,
-        githubRefreshToken: profile.githubRefreshToken,
-      });
+        user = await this.userService.update(user.id, {
+          githubId: profile.id,
+          githubLogin: profile.githubLogin,
+          githubAccessToken: profile.githubAccessToken,
+          githubRefreshToken: profile.githubRefreshToken,
+        });
     }
 
     this.logger.log(`github_oauth_handle_success userId=${user.id} email=${user.email}`);
@@ -183,6 +187,7 @@ export class AuthService {
       if (existingUserByEmail) {
         user = await this.userService.update(existingUserByEmail.id, {
           githubId,
+          githubLogin: profile.login,
           githubAccessToken: githubToken,
           name: displayName,
           avatar: profile.avatar_url,
@@ -193,11 +198,13 @@ export class AuthService {
           name: displayName,
           avatar: profile.avatar_url,
           githubId,
+          githubLogin: profile.login,
           githubAccessToken: githubToken,
         });
       }
     } else {
       user = await this.userService.update(user.id, {
+        githubLogin: profile.login,
         githubAccessToken: githubToken,
         name: displayName,
         avatar: profile.avatar_url,

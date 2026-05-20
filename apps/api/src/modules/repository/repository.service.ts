@@ -1,11 +1,25 @@
-import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaClient, Platform, Repository, EventType } from '@repo-pulse/database';
+import {
+  EventType,
+  Platform,
+  PrismaClient,
+  Repository,
+  RepositoryAccessLevel,
+  RepositoryAccessMode,
+  Role,
+} from '@repo-pulse/database';
 import { randomBytes } from 'crypto';
-import { GithubBranchInfo, GithubService } from './services/github.service';
-import { GitlabBranchInfo, GitlabService } from './services/gitlab.service';
-import { CreateRepositoryDto, UpdateRepositoryDto } from './dto/repository.dto';
+import {
+  assertUserCanAccessRepository,
+  assertUserCanEditRepository,
+  getUserMonitoredRepositoryIds,
+  isEditableRepositoryAccessLevel,
+} from '../../common/utils/repository-access';
 import { EventService } from '../event/event.service';
+import { CreateRepositoryDto, UpdateRepositoryDto } from './dto/repository.dto';
+import { GithubBranchInfo, GithubRepoResponse, GithubService } from './services/github.service';
+import { GitlabBranchInfo, GitlabService } from './services/gitlab.service';
 
 interface SyncSummary {
   repositoryId: string;
@@ -41,6 +55,21 @@ interface NormalizedSyncEvent {
   metadata: Record<string, unknown>;
 }
 
+type RepositoryAccessLevelApi =
+  | 'owner'
+  | 'admin'
+  | 'maintain'
+  | 'write'
+  | 'triage'
+  | 'read'
+  | 'none';
+
+type RepositoryMembershipView = {
+  role?: Role | string;
+  accessMode?: RepositoryAccessMode | null;
+  accessLevel?: RepositoryAccessLevel | null;
+};
+
 @Injectable()
 export class RepositoryService {
   private readonly logger = new Logger(RepositoryService.name);
@@ -55,7 +84,17 @@ export class RepositoryService {
     this.prisma = new PrismaClient();
   }
 
-  async create(userId: string, dto: CreateRepositoryDto, userOAuthToken?: string) {
+  async create(
+    userId: string,
+    dto: CreateRepositoryDto,
+    options?: {
+      userOAuthToken?: string;
+      accessMode?: RepositoryAccessMode;
+      accessLevel?: RepositoryAccessLevel;
+      role?: Role;
+      githubLogin?: string;
+    },
+  ) {
     const { platform, owner, repo } = dto;
 
     let repoInfo: {
@@ -65,9 +104,14 @@ export class RepositoryService {
       url: string;
       defaultBranch: string;
     };
+    let accessLevel = options?.accessLevel ?? RepositoryAccessLevel.WRITE;
 
     if (platform === Platform.GITHUB) {
-      const githubRepo = await this.githubService.getRepository(owner, repo, userOAuthToken);
+      const githubRepo = await this.githubService.getRepository(
+        owner,
+        repo,
+        options?.userOAuthToken,
+      );
       repoInfo = {
         externalId: String(githubRepo.id),
         name: githubRepo.name,
@@ -75,6 +119,9 @@ export class RepositoryService {
         url: githubRepo.html_url,
         defaultBranch: githubRepo.default_branch || 'main',
       };
+      accessLevel =
+        options?.accessLevel ??
+        this.resolveGithubAccessLevel(githubRepo, options?.githubLogin);
     } else {
       const gitlabRepo = await this.gitlabService.getRepository(owner, repo);
       repoInfo = {
@@ -84,9 +131,16 @@ export class RepositoryService {
         url: gitlabRepo.web_url,
         defaultBranch: gitlabRepo.default_branch || 'main',
       };
+      accessLevel = options?.accessLevel ?? RepositoryAccessLevel.WRITE;
     }
 
-    const webhookSecret = this.generateWebhookSecret();
+    const accessMode =
+      options?.accessMode ?? this.resolveAccessModeFromLevel(accessLevel);
+    const shouldRegisterWebhook = accessMode === RepositoryAccessMode.EDITABLE;
+    const webhookSecret = shouldRegisterWebhook ? this.generateWebhookSecret() : null;
+    const role =
+      options?.role ??
+      (isEditableRepositoryAccessLevel(accessLevel) ? 'ADMIN' : 'VIEWER');
 
     const repository = await this.prisma.repository.upsert({
       where: {
@@ -97,7 +151,7 @@ export class RepositoryService {
       },
       update: {
         isActive: true,
-        webhookSecret,
+        ...(shouldRegisterWebhook ? { webhookSecret } : {}),
       },
       create: {
         name: repoInfo.name,
@@ -117,51 +171,67 @@ export class RepositoryService {
           repositoryId: repository.id,
         },
       },
-      update: {},
+      update: {
+        accessMode,
+        accessLevel,
+        role,
+      },
       create: {
         userId,
         repositoryId: repository.id,
-        role: 'ADMIN' as const,
+        role,
+        accessMode,
+        accessLevel,
       },
     });
 
     const apiUrl = this.configService.get<string>('API_URL', 'http://localhost:3001');
-    try {
-      if (platform === Platform.GITHUB) {
-        const webhookUrl = `${apiUrl}/webhooks/github`;
-        const webhookId = await this.githubService.createWebhook(
-          owner,
-          repo,
-          webhookUrl,
-          webhookSecret,
-          userOAuthToken,
-        );
-        if (webhookId) {
-          await this.prisma.repository.update({
-            where: { id: repository.id },
-            data: { webhookId: String(webhookId) },
-          });
+    if (shouldRegisterWebhook) {
+      const editableWebhookSecret = webhookSecret ?? this.generateWebhookSecret();
+      try {
+        if (platform === Platform.GITHUB) {
+          const webhookUrl = `${apiUrl}/webhooks/github`;
+          const webhookId = await this.githubService.createWebhook(
+            owner,
+            repo,
+            webhookUrl,
+            editableWebhookSecret,
+            options?.userOAuthToken,
+          );
+          if (webhookId) {
+            await this.prisma.repository.update({
+              where: { id: repository.id },
+              data: { webhookId: String(webhookId) },
+            });
+          }
+        } else {
+          const webhookUrl = `${apiUrl}/webhooks/gitlab`;
+          await this.gitlabService.createWebhook(owner, repo, webhookUrl, editableWebhookSecret);
         }
-      } else {
-        const webhookUrl = `${apiUrl}/webhooks/gitlab`;
-        await this.gitlabService.createWebhook(owner, repo, webhookUrl, webhookSecret);
+      } catch (error) {
+        this.logger.error(`Failed to register webhook for ${repoInfo.fullName}`, error);
       }
-    } catch (error) {
-      this.logger.error(`Failed to register webhook for ${repoInfo.fullName}`, error);
     }
 
-    this.logger.log(`Repository ${repoInfo.fullName} added successfully for user ${userId}`);
-    return repository;
+    this.logger.log(
+      `Repository ${repoInfo.fullName} added successfully for user ${userId} with accessLevel=${accessLevel}`,
+    );
+    return this.attachRepositoryAccessView(repository, {
+      role,
+      accessMode,
+      accessLevel,
+    });
   }
 
   async findAll(userId: string, options?: { isActive?: boolean }) {
+    const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
     const where: Record<string, unknown> = {};
 
     if (options?.isActive !== undefined) {
       where.isActive = options.isActive;
     }
 
-    return this.prisma.repository.findMany({
+    const repositories = await this.prisma.repository.findMany({
       where: {
         users: {
           some: { userId },
@@ -169,15 +239,33 @@ export class RepositoryService {
         ...where,
       },
       include: {
+        users: {
+          where: { userId },
+          select: {
+            userId: true,
+            role: true,
+            accessMode: true,
+            accessLevel: true,
+          },
+        },
         _count: {
           select: { events: true },
         },
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    const monitoredSet = new Set(monitoredRepositoryIds);
+    return repositories.map(({ users, ...repository }) =>
+      this.attachRepositoryAccessView(repository, users[0], monitoredSet.has(repository.id)),
+    );
   }
 
-  async findById(id: string): Promise<Repository & Record<string, unknown>> {
+  async findById(userId: string, id: string): Promise<Repository & Record<string, unknown>> {
+    const [membership, monitoredRepositoryIds] = await Promise.all([
+      assertUserCanAccessRepository(userId, id),
+      getUserMonitoredRepositoryIds(userId),
+    ]);
     const repository = await this.prisma.repository.findUnique({
       where: { id },
       include: {
@@ -204,10 +292,16 @@ export class RepositoryService {
       throw new NotFoundException('Repository not found');
     }
 
-    return repository as Repository & Record<string, unknown>;
+    return this.attachRepositoryAccessView(
+      repository as Repository & Record<string, unknown>,
+      membership,
+      monitoredRepositoryIds.includes(id),
+    );
   }
 
   async getBranches(userId: string, id: string): Promise<RepositoryBranchOption[]> {
+    await assertUserCanAccessRepository(userId, id);
+
     const repository = await this.prisma.repository.findUnique({
       where: { id },
       include: {
@@ -226,11 +320,6 @@ export class RepositoryService {
 
     if (!repository) {
       throw new NotFoundException('Repository not found');
-    }
-
-    const membership = repository.users.find((entry) => entry.userId === userId);
-    if (!membership) {
-      throw new ForbiddenException('You do not have access to this repository');
     }
 
     const [owner, repo] = this.parseRepositoryPath(repository.fullName);
@@ -312,7 +401,17 @@ export class RepositoryService {
     });
   }
 
+  async updateForUser(userId: string, id: string, dto: UpdateRepositoryDto) {
+    await assertUserCanEditRepository(userId, id);
+    return this.prisma.repository.update({
+      where: { id },
+      data: dto,
+    });
+  }
+
   async delete(userId: string, id: string) {
+    await assertUserCanEditRepository(userId, id);
+
     const repository = await this.prisma.repository.findUnique({
       where: { id },
       include: {
@@ -331,11 +430,6 @@ export class RepositoryService {
 
     if (!repository) {
       throw new NotFoundException('Repository not found');
-    }
-
-    const membership = repository.users.find((entry) => entry.userId === userId);
-    if (!membership) {
-      throw new ForbiddenException('You do not have access to this repository');
     }
 
     const [owner, repo] = this.parseRepositoryPath(repository.fullName);
@@ -389,10 +483,10 @@ export class RepositoryService {
     if (!repository) {
       throw new NotFoundException('Repository not found');
     }
-
     const [owner, repo] = this.parseRepositoryPath(repository.fullName);
     const daysBack = options?.daysBack ?? 7;
-    const sinceDate = repository.lastSyncAt ?? new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
+    const sinceDate =
+      repository.lastSyncAt ?? new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
     const since = sinceDate.toISOString();
     const failedSources: string[] = [];
     let createdCount = 0;
@@ -410,22 +504,21 @@ export class RepositoryService {
           repo,
           tokenOwner.user.githubAccessToken || undefined,
         );
-        const branchNames = branches.length > 0
-          ? branches.map((branch) => branch.name)
-          : [repository.defaultBranch];
-        const commitSources = branchNames.map(
-          (branchName) => ({
-            name: `github_commits:${branchName}`,
-            fetch: () =>
-              this.githubService.getCommits(
-                owner,
-                repo,
-                { branch: branchName, since },
-                tokenOwner.user.githubAccessToken || undefined,
-              ),
-            normalize: (item: unknown) => this.normalizeGithubCommit(item, branchName),
-          }),
-        );
+        const branchNames =
+          branches.length > 0
+            ? branches.map((branch) => branch.name)
+            : [repository.defaultBranch];
+        const commitSources = branchNames.map((branchName) => ({
+          name: `github_commits:${branchName}`,
+          fetch: () =>
+            this.githubService.getCommits(
+              owner,
+              repo,
+              { branch: branchName, since },
+              tokenOwner.user.githubAccessToken || undefined,
+            ),
+          normalize: (item: unknown) => this.normalizeGithubCommit(item, branchName),
+        }));
         const sources = [
           ...commitSources,
           {
@@ -460,20 +553,19 @@ export class RepositoryService {
       }
     } else {
       const branches = await this.gitlabService.getBranches(owner, repo);
-      const branchNames = branches.length > 0
-        ? branches.map((branch) => branch.name)
-        : [repository.defaultBranch];
-      const commitSources = branchNames.map(
-        (branchName) => ({
-          name: `gitlab_commits:${branchName}`,
-          fetch: () =>
-            this.gitlabService.getCommits(owner, repo, {
-              branch: branchName,
-              since,
-            }),
-          normalize: (item: unknown) => this.normalizeGitlabCommit(item, branchName),
-        }),
-      );
+      const branchNames =
+        branches.length > 0
+          ? branches.map((branch) => branch.name)
+          : [repository.defaultBranch];
+      const commitSources = branchNames.map((branchName) => ({
+        name: `gitlab_commits:${branchName}`,
+        fetch: () =>
+          this.gitlabService.getCommits(owner, repo, {
+            branch: branchName,
+            since,
+          }),
+        normalize: (item: unknown) => this.normalizeGitlabCommit(item, branchName),
+      }));
       const sources = [
         ...commitSources,
         {
@@ -544,35 +636,47 @@ export class RepositoryService {
   }
 
   async searchUserRepositories(
+    userId: string,
     userOAuthToken: string,
     userRefreshToken?: string,
+    githubLogin?: string | null,
   ) {
     if (!userOAuthToken) {
       this.logger.warn('No user OAuth token available for repository lookup');
       return [];
     }
 
+    const monitoredSet = new Set(await getUserMonitoredRepositoryIds(userId));
     const repos = await this.githubService.getUserRepositories(
       userOAuthToken,
       userRefreshToken,
     );
-    return repos.map((repo) => ({
-      id: repo.id,
-      name: repo.name,
-      fullName: repo.full_name,
-      description: repo.description,
-      htmlUrl: repo.html_url,
-      stargazersCount: repo.stargazers_count,
-      language: repo.language,
-      owner: {
-        login: repo.owner.login,
-        avatarUrl: repo.owner.avatar_url,
-      },
-      platform: 'GITHUB' as const,
-    }));
+    return repos.map((repo) => {
+      const accessLevel = this.resolveGithubAccessLevel(repo, githubLogin);
+      const isEditable = isEditableRepositoryAccessLevel(accessLevel);
+      return {
+        id: repo.id,
+        name: repo.name,
+        fullName: repo.full_name,
+        description: repo.description,
+        htmlUrl: repo.html_url,
+        stargazersCount: repo.stargazers_count,
+        language: repo.language,
+        owner: {
+          login: repo.owner.login,
+          avatarUrl: repo.owner.avatar_url,
+        },
+        platform: 'GITHUB' as const,
+        accessLevel: this.mapAccessLevelToApi(accessLevel),
+        canOperate: isEditable,
+        isEditable,
+        isMonitored: monitoredSet.has(String(repo.id)),
+      };
+    });
   }
 
   async searchStarredRepositories(
+    userId: string,
     userOAuthToken: string,
     userRefreshToken?: string,
   ) {
@@ -581,6 +685,7 @@ export class RepositoryService {
       return [];
     }
 
+    const monitoredSet = new Set(await getUserMonitoredRepositoryIds(userId));
     const repos = await this.githubService.getStarredRepos(
       userOAuthToken,
       userRefreshToken,
@@ -598,7 +703,20 @@ export class RepositoryService {
         avatarUrl: repo.owner.avatar_url,
       },
       platform: 'GITHUB' as const,
+      accessLevel: this.mapAccessLevelToApi(RepositoryAccessLevel.READ),
+      canOperate: false,
+      isEditable: false,
+      isMonitored: monitoredSet.has(String(repo.id)),
     }));
+  }
+
+  async syncForUser(
+    userId: string,
+    id: string,
+    options?: { daysBack?: number },
+  ): Promise<SyncSummary> {
+    await assertUserCanEditRepository(userId, id);
+    return this.sync(id, options);
   }
 
   private async syncSources(
@@ -712,6 +830,81 @@ export class RepositoryService {
 
   private mergeBranches(existingBranches: string[], incomingBranches: string[]): string[] {
     return this.resolveBranches([...existingBranches, ...incomingBranches], []);
+  }
+
+  private resolveGithubAccessLevel(
+    repo: GithubRepoResponse,
+    githubLogin?: string | null,
+  ): RepositoryAccessLevel {
+    if (githubLogin && repo.owner?.login?.toLowerCase() === githubLogin.toLowerCase()) {
+      return RepositoryAccessLevel.OWNER;
+    }
+
+    const permissions = repo.permissions;
+    if (permissions?.admin) {
+      return RepositoryAccessLevel.ADMIN;
+    }
+    if (permissions?.maintain) {
+      return RepositoryAccessLevel.MAINTAIN;
+    }
+    if (permissions?.push) {
+      return RepositoryAccessLevel.WRITE;
+    }
+    if (permissions?.triage) {
+      return RepositoryAccessLevel.TRIAGE;
+    }
+    if (permissions?.pull) {
+      return RepositoryAccessLevel.READ;
+    }
+
+    return RepositoryAccessLevel.NONE;
+  }
+
+  private resolveAccessModeFromLevel(accessLevel: RepositoryAccessLevel): RepositoryAccessMode {
+    return isEditableRepositoryAccessLevel(accessLevel)
+      ? RepositoryAccessMode.EDITABLE
+      : RepositoryAccessMode.MONITOR;
+  }
+
+  private mapAccessLevelToApi(accessLevel: RepositoryAccessLevel): RepositoryAccessLevelApi {
+    switch (accessLevel) {
+      case RepositoryAccessLevel.OWNER:
+        return 'owner';
+      case RepositoryAccessLevel.ADMIN:
+        return 'admin';
+      case RepositoryAccessLevel.MAINTAIN:
+        return 'maintain';
+      case RepositoryAccessLevel.WRITE:
+        return 'write';
+      case RepositoryAccessLevel.TRIAGE:
+        return 'triage';
+      case RepositoryAccessLevel.READ:
+        return 'read';
+      default:
+        return 'none';
+    }
+  }
+
+  private attachRepositoryAccessView<T extends Record<string, unknown>>(
+    repository: T,
+    membership?: RepositoryMembershipView | null,
+    isMonitored = false,
+  ): T & {
+    accessLevel: RepositoryAccessLevelApi;
+    canOperate: boolean;
+    isMonitored: boolean;
+    isEditable: boolean;
+  } {
+    const accessLevel = membership?.accessLevel ?? RepositoryAccessLevel.NONE;
+    const isEditable = isEditableRepositoryAccessLevel(accessLevel);
+
+    return {
+      ...repository,
+      accessLevel: this.mapAccessLevelToApi(accessLevel),
+      canOperate: isEditable,
+      isMonitored,
+      isEditable,
+    };
   }
 
   private parseRepositoryPath(fullName: string): [string, string] {
@@ -830,7 +1023,11 @@ export class RepositoryService {
       pull_request?: unknown;
     };
 
-    if (issue.pull_request || !issue.id || !this.isRecentEnough(issue.updated_at ?? issue.created_at, sinceDate)) {
+    if (
+      issue.pull_request ||
+      !issue.id ||
+      !this.isRecentEnough(issue.updated_at ?? issue.created_at, sinceDate)
+    ) {
       return null;
     }
 

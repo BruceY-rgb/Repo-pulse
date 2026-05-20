@@ -60,11 +60,13 @@ describe('RepositoryService.getBranches', () => {
     });
     prismaMock.event.findMany.mockResolvedValue([
       {
+        branches: [],
         branch: 'feature/auth',
         sourceBranch: 'release/1.0',
         targetBranch: null,
       },
       {
+        branches: [],
         branch: null,
         sourceBranch: null,
         targetBranch: 'hotfix/login',
@@ -127,11 +129,13 @@ describe('RepositoryService.getBranches', () => {
     });
     prismaMock.event.findMany.mockResolvedValue([
       {
+        branches: [],
         branch: 'feature/alerts',
         sourceBranch: null,
         targetBranch: null,
       },
       {
+        branches: [],
         branch: null,
         sourceBranch: 'develop',
         targetBranch: 'release/2.0',

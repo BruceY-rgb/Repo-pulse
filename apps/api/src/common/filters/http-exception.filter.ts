@@ -25,10 +25,24 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
+    const exceptionResponse =
+      exception instanceof HttpException ? exception.getResponse() : null;
+    const responsePayload =
+      exceptionResponse && typeof exceptionResponse === 'object'
+        ? (exceptionResponse as Record<string, unknown>)
+        : null;
+
     const message =
-      exception instanceof HttpException
-        ? exception.message
-        : 'Internal server error';
+      typeof responsePayload?.message === 'string'
+        ? responsePayload.message
+        : exception instanceof HttpException
+          ? exception.message
+          : 'Internal server error';
+
+    const code =
+      typeof responsePayload?.code === 'string' || typeof responsePayload?.code === 'number'
+        ? responsePayload.code
+        : status;
 
     if (status >= 500) {
       const oauthDetails = extractOAuthErrorDetails(exception);
@@ -53,7 +67,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     response.status(status).json({
-      code: status,
+      code,
       data: null,
       message,
       timestamp: new Date().toISOString(),

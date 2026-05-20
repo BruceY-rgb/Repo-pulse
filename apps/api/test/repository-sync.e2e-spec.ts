@@ -30,7 +30,7 @@ describe('Repository sync (e2e)', () => {
     getCommits: jest.fn(),
     getPullRequests: jest.fn(),
     getIssues: jest.fn(),
-    getBranches: jest.fn().mockResolvedValue(['main']),
+    getBranches: jest.fn().mockResolvedValue([{ name: 'main' }]),
     searchRepositories: jest.fn(),
     getUserRepositories: jest.fn(),
     getStarredRepos: jest.fn(),
@@ -73,7 +73,7 @@ describe('Repository sync (e2e)', () => {
         author: { login: 'sync-bot', avatar_url: 'https://avatar/1.png' },
       },
     ]);
-    githubServiceMock.getBranches.mockResolvedValue(['main']);
+    githubServiceMock.getBranches.mockResolvedValue([{ name: 'main' }]);
     githubServiceMock.getPullRequests.mockResolvedValue([
       {
         id: 101,

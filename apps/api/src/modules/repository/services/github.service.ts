@@ -15,6 +15,13 @@ export interface GithubRepoResponse {
     login: string;
     avatar_url: string;
   };
+  permissions?: {
+    admin?: boolean;
+    maintain?: boolean;
+    push?: boolean;
+    triage?: boolean;
+    pull?: boolean;
+  };
 }
 
 export interface GithubSearchResult {
