@@ -11,6 +11,11 @@ import {
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
+import {
+  AnalysisCompletedPayload,
+  EventCreatedPayload,
+  REALTIME_EVENTS,
+} from '@repo-pulse/shared';
 import { Server, Socket } from 'socket.io';
 
 interface JwtPayload {
@@ -103,24 +108,22 @@ export class EventGateway
     return { event: 'left', room: roomName };
   }
 
-  broadcastNewEvent(repositoryId: string, eventData: unknown) {
-    const roomName = `repo:${repositoryId}`;
-    this.server.to(roomName).emit('event:new', {
-      type: 'event:new',
-      repositoryId,
-      data: eventData,
-      timestamp: new Date().toISOString(),
-    });
-    this.logger.log(`Broadcast event:new to room ${roomName}`);
+  broadcastEventCreated(payload: EventCreatedPayload) {
+    const roomName = `repo:${payload.repositoryId}`;
+    this.server.to(roomName).emit(REALTIME_EVENTS.EVENT_CREATED, payload);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.EVENT_CREATED} to room ${roomName} eventId=${payload.eventId}`,
+    );
   }
 
-  broadcastAnalysisCompleted(eventId: string) {
-    this.server.emit('analysis:completed', {
-      type: 'analysis:completed',
-      eventId,
-      timestamp: new Date().toISOString(),
-    });
-    this.logger.log(`Broadcast analysis:completed eventId=${eventId}`);
+  broadcastAnalysisCompleted(payload: AnalysisCompletedPayload) {
+    const roomName = `repo:${payload.repositoryId}`;
+    this.server
+      .to(roomName)
+      .emit(REALTIME_EVENTS.ANALYSIS_COMPLETED, payload);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.ANALYSIS_COMPLETED} to room ${roomName} eventId=${payload.eventId}`,
+    );
   }
 
   private extractToken(client: UserSocket): string | null {
