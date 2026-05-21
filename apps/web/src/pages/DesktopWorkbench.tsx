@@ -278,9 +278,33 @@ const COLLAPSED_REPOSITORY_SIDEBAR_WIDTH = 68;
 const MIN_REPOSITORY_SIDEBAR_WIDTH = 260;
 const MAX_REPOSITORY_SIDEBAR_WIDTH = 440;
 const SIDEBAR_KEYBOARD_STEP = 12;
+const CONTEXT_MENU_VIEWPORT_PADDING = 12;
+const REPOSITORY_CONTEXT_MENU_WIDTH = 280;
+const REPOSITORY_CONTEXT_MENU_ESTIMATED_HEIGHT = 420;
+const MESSAGE_CONTEXT_MENU_WIDTH = 224;
+const MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT = 136;
 
 function clampRepositorySidebarWidth(width: number) {
   return Math.min(MAX_REPOSITORY_SIDEBAR_WIDTH, Math.max(MIN_REPOSITORY_SIDEBAR_WIDTH, width));
+}
+
+function getSafeContextMenuPosition(
+  clientX: number,
+  clientY: number,
+  menuWidth: number,
+  menuHeight: number,
+) {
+  if (typeof window === 'undefined') {
+    return { x: clientX, y: clientY };
+  }
+
+  const maxX = Math.max(CONTEXT_MENU_VIEWPORT_PADDING, window.innerWidth - menuWidth - CONTEXT_MENU_VIEWPORT_PADDING);
+  const maxY = Math.max(CONTEXT_MENU_VIEWPORT_PADDING, window.innerHeight - menuHeight - CONTEXT_MENU_VIEWPORT_PADDING);
+
+  return {
+    x: Math.min(Math.max(clientX, CONTEXT_MENU_VIEWPORT_PADDING), maxX),
+    y: Math.min(Math.max(clientY, CONTEXT_MENU_VIEWPORT_PADDING), maxY),
+  };
 }
 
 function formatRelativeTime(dateString?: string | null) {
@@ -1062,9 +1086,15 @@ function RepositorySidebar({
                   to={`/workbench/repository/${repo.id}`}
                   onContextMenu={(event) => {
                     event.preventDefault();
+                    const position = getSafeContextMenuPosition(
+                      event.clientX,
+                      event.clientY,
+                      REPOSITORY_CONTEXT_MENU_WIDTH,
+                      REPOSITORY_CONTEXT_MENU_ESTIMATED_HEIGHT,
+                    );
                     setContextMenu({
-                      x: event.clientX,
-                      y: event.clientY,
+                      x: position.x,
+                      y: position.y,
                       repository: repo,
                     });
                   }}
@@ -1139,8 +1169,12 @@ function RepositorySidebar({
 
         {contextMenu ? (
           <div
-            className="fixed z-50 w-[280px] overflow-hidden rounded-2xl border border-border bg-popover/95 p-2 shadow-2xl backdrop-blur"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
+            className="fixed z-50 w-[280px] overflow-y-auto rounded-2xl border border-border bg-popover/95 p-2 shadow-2xl backdrop-blur"
+            style={{
+              left: contextMenu.x,
+              top: contextMenu.y,
+              maxHeight: `calc(100vh - ${contextMenu.y + CONTEXT_MENU_VIEWPORT_PADDING}px)`,
+            }}
             onClick={(event) => event.stopPropagation()}
           >
             {getRepositoryContextMenuItems({
@@ -1250,9 +1284,15 @@ function RepositorySidebar({
                 to={`/workbench/repository/${repo.id}`}
                 onContextMenu={(event) => {
                   event.preventDefault();
+                  const position = getSafeContextMenuPosition(
+                    event.clientX,
+                    event.clientY,
+                    REPOSITORY_CONTEXT_MENU_WIDTH,
+                    REPOSITORY_CONTEXT_MENU_ESTIMATED_HEIGHT,
+                  );
                   setContextMenu({
-                    x: event.clientX,
-                    y: event.clientY,
+                    x: position.x,
+                    y: position.y,
                     repository: repo,
                   });
                 }}
@@ -1318,8 +1358,12 @@ function RepositorySidebar({
       </div>
       {contextMenu ? (
         <div
-          className="fixed z-50 w-[280px] overflow-hidden rounded-2xl border border-border bg-popover/95 p-2 shadow-2xl backdrop-blur"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
+          className="fixed z-50 w-[280px] overflow-y-auto rounded-2xl border border-border bg-popover/95 p-2 shadow-2xl backdrop-blur"
+          style={{
+            left: contextMenu.x,
+            top: contextMenu.y,
+            maxHeight: `calc(100vh - ${contextMenu.y + CONTEXT_MENU_VIEWPORT_PADDING}px)`,
+          }}
           onClick={(event) => event.stopPropagation()}
         >
           {getRepositoryContextMenuItems({
@@ -1950,7 +1994,13 @@ function RepositoryConversation({
                 approvalActionId={approvalActionId}
                 onContextMenu={(event, selectedMessage) => {
                   event.preventDefault();
-                  setContextMenu({ x: event.clientX, y: event.clientY, message: selectedMessage });
+                  const position = getSafeContextMenuPosition(
+                    event.clientX,
+                    event.clientY,
+                    MESSAGE_CONTEXT_MENU_WIDTH,
+                    MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT,
+                  );
+                  setContextMenu({ x: position.x, y: position.y, message: selectedMessage });
                 }}
               />
             ))
@@ -1989,8 +2039,12 @@ function RepositoryConversation({
 
       {contextMenu ? (
         <div
-          className="fixed z-50 w-56 overflow-hidden rounded-xl border border-border bg-popover p-1 shadow-xl"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
+          className="fixed z-50 w-56 overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-xl"
+          style={{
+            left: contextMenu.x,
+            top: contextMenu.y,
+            maxHeight: `calc(100vh - ${contextMenu.y + CONTEXT_MENU_VIEWPORT_PADDING}px)`,
+          }}
         >
           <button
             type="button"
