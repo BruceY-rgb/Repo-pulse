@@ -15,6 +15,9 @@ import {
   AnalysisCompletedPayload,
   EventCreatedPayload,
   REALTIME_EVENTS,
+  RepositorySyncFailedPayload,
+  RepositorySyncProgressPayload,
+  RepositorySyncedPayload,
 } from '@repo-pulse/shared';
 import { Server, Socket } from 'socket.io';
 
@@ -123,6 +126,36 @@ export class EventGateway
       .emit(REALTIME_EVENTS.ANALYSIS_COMPLETED, payload);
     this.logger.log(
       `Broadcast ${REALTIME_EVENTS.ANALYSIS_COMPLETED} to room ${roomName} eventId=${payload.eventId}`,
+    );
+  }
+
+  broadcastRepositorySyncProgress(payload: RepositorySyncProgressPayload) {
+    const roomName = `repo:${payload.repositoryId}`;
+    this.server
+      .to(roomName)
+      .emit(REALTIME_EVENTS.REPOSITORY_SYNC_PROGRESS, payload);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.REPOSITORY_SYNC_PROGRESS} to room ${roomName} jobId=${payload.jobId} stage=${payload.stage} progress=${payload.progress}`,
+    );
+  }
+
+  broadcastRepositorySynced(payload: RepositorySyncedPayload) {
+    const roomName = `repo:${payload.repositoryId}`;
+    this.server
+      .to(roomName)
+      .emit(REALTIME_EVENTS.REPOSITORY_SYNCED, payload);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.REPOSITORY_SYNCED} to room ${roomName} jobId=${payload.jobId} durationMs=${payload.durationMs}`,
+    );
+  }
+
+  broadcastRepositorySyncFailed(payload: RepositorySyncFailedPayload) {
+    const roomName = `repo:${payload.repositoryId}`;
+    this.server
+      .to(roomName)
+      .emit(REALTIME_EVENTS.REPOSITORY_SYNC_FAILED, payload);
+    this.logger.warn(
+      `Broadcast ${REALTIME_EVENTS.REPOSITORY_SYNC_FAILED} to room ${roomName} jobId=${payload.jobId} reason=${payload.reason}`,
     );
   }
 

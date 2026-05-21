@@ -5,20 +5,24 @@ import {
   Patch,
   Delete,
   Body,
+  HttpCode,
   Param,
   Query,
   UseGuards,
   Req,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { QUEUE_NAMES } from '@repo-pulse/shared';
 import { RepositoryService } from './repository.service';
 import { UserService } from '../user/user.service';
 import {
   CreateRepositoryDto,
   UpdateRepositoryDto,
   RepositoryQueryDto,
-  RepositorySyncSummaryDto,
 } from './dto/repository.dto';
+import type { RepositorySyncJob } from './repository-sync.processor';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Request } from 'express';
 
@@ -30,6 +34,8 @@ export class RepositoryController {
   constructor(
     private readonly repositoryService: RepositoryService,
     private readonly userService: UserService,
+    @InjectQueue(QUEUE_NAMES.REPOSITORY_SYNC)
+    private readonly syncQueue: Queue<RepositorySyncJob>,
   ) {}
 
   @Post()
@@ -113,8 +119,14 @@ export class RepositoryController {
   }
 
   @Post(':id/sync')
-  @ApiOperation({ summary: 'Sync repository history' })
-  async sync(@Param('id') id: string): Promise<RepositorySyncSummaryDto> {
-    return this.repositoryService.sync(id);
+  @HttpCode(202)
+  @ApiOperation({ summary: 'Enqueue repository history sync (async)' })
+  async sync(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req.user as { sub: string }).sub;
+    const job = await this.syncQueue.add('sync', {
+      repositoryId: id,
+      userId,
+    });
+    return { status: 'queued' as const, jobId: job.id };
   }
 }

@@ -44,6 +44,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useSyncProgressStore } from '@/stores/sync-progress.store';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -597,6 +598,7 @@ function getRepositoryContextMenuItems({
   repository,
   isMonitored,
   isSyncing,
+  syncProgress,
   onRemoveFromMonitoring,
   onToggleRepositoryActive,
   onSyncRepository,
@@ -606,6 +608,7 @@ function getRepositoryContextMenuItems({
   repository: Repository;
   isMonitored: boolean;
   isSyncing: boolean;
+  syncProgress?: number;
   onRemoveFromMonitoring: (repository: Repository) => void;
   onToggleRepositoryActive: (repository: Repository) => void;
   onSyncRepository: (repository: Repository) => void;
@@ -628,7 +631,9 @@ function getRepositoryContextMenuItems({
     },
     {
       key: 'sync',
-      label: isSyncing ? '同步中…' : '同步',
+      label: isSyncing
+        ? `同步中 ${Math.round(syncProgress ?? 0)}%`
+        : '同步',
       icon: isSyncing ? Loader2 : RotateCcw,
       disabled: isSyncing,
       onSelect: () => onSyncRepository(repository),
@@ -905,6 +910,7 @@ function RepositorySidebar({
   const [isResizing, setIsResizing] = useState(false);
   const [contextMenu, setContextMenu] = useState<RepositoryContextMenuState | null>(null);
   const [repositorySearch, setRepositorySearch] = useState('');
+  const syncProgressByRepoId = useSyncProgressStore((s) => s.byRepoId);
   const resizeStartRef = useRef({
     clientX: 0,
     width: DEFAULT_REPOSITORY_SIDEBAR_WIDTH,
@@ -1147,6 +1153,7 @@ function RepositorySidebar({
               repository: contextMenu.repository,
               isMonitored: monitoredRepositoryIds.includes(contextMenu.repository.id),
               isSyncing: syncingRepoIds.has(contextMenu.repository.id),
+              syncProgress: syncProgressByRepoId[contextMenu.repository.id]?.progress,
               onRemoveFromMonitoring,
               onToggleRepositoryActive,
               onSyncRepository,
@@ -1281,10 +1288,15 @@ function RepositorySidebar({
                       {repo.fullName}
                     </p>
                     {isSyncing ? (
-                      <Loader2
-                        className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
-                        aria-label="同步中"
-                      />
+                      <>
+                        <Loader2
+                          className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
+                          aria-label="同步中"
+                        />
+                        <span className="shrink-0 text-xs font-medium text-muted-foreground">
+                          {Math.round(syncProgressByRepoId[repo.id]?.progress ?? 0)}%
+                        </span>
+                      </>
                     ) : null}
                   </div>
                   <p className="mt-1 block max-w-full truncate text-xs text-muted-foreground" title={latestMessage}>
@@ -1326,6 +1338,7 @@ function RepositorySidebar({
             repository: contextMenu.repository,
             isMonitored: monitoredRepositoryIds.includes(contextMenu.repository.id),
             isSyncing: syncingRepoIds.has(contextMenu.repository.id),
+            syncProgress: syncProgressByRepoId[contextMenu.repository.id]?.progress,
             onRemoveFromMonitoring,
             onToggleRepositoryActive,
             onSyncRepository,
@@ -2251,7 +2264,11 @@ export function DesktopWorkbench() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isBranchMonitorOpen, setIsBranchMonitorOpen] = useState(false);
-  const [syncingRepoIds, setSyncingRepoIds] = useState<Set<string>>(() => new Set());
+  const syncProgressByRepoId = useSyncProgressStore((s) => s.byRepoId);
+  const syncingRepoIds = useMemo(
+    () => new Set(Object.keys(syncProgressByRepoId)),
+    [syncProgressByRepoId],
+  );
   const repositoriesQuery = useRepositoryListQuery();
   const starredQuery = useStarredRepositoryCandidatesQuery(true);
   const notificationsQuery = useNotificationsQuery();
@@ -2480,31 +2497,13 @@ export function DesktopWorkbench() {
     if (syncingRepoIds.has(repository.id)) {
       return;
     }
-    setSyncingRepoIds((current) => {
-      const next = new Set(current);
-      next.add(repository.id);
-      return next;
-    });
     try {
-      await repositoryService.sync(repository.id);
-      await Promise.all([
-        repositoriesQuery.refetch(),
-        eventsQuery.refetch(),
-        approvalsQuery.refetch(),
-      ]);
-      toast.success(`${repository.fullName} 已同步`);
+      const { jobId } = await repositoryService.sync(repository.id);
+      useSyncProgressStore.getState().start(repository.id, jobId);
+      toast.success(`已开始同步 ${repository.fullName}`);
     } catch (error) {
       console.error(error);
-      toast.error('同步仓库失败');
-    } finally {
-      setSyncingRepoIds((current) => {
-        if (!current.has(repository.id)) {
-          return current;
-        }
-        const next = new Set(current);
-        next.delete(repository.id);
-        return next;
-      });
+      toast.error('同步入队失败');
     }
   };
 

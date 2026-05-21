@@ -12,6 +12,7 @@ import {
   Star,
   Trash2,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { enUS, zhCN } from 'date-fns/locale';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -243,8 +244,13 @@ export function Repositories() {
   };
 
   const syncRepository = async (id: string) => {
-    await syncMutation.mutateAsync(id);
-    await refreshRepositories();
+    try {
+      await syncMutation.mutateAsync(id);
+      toast.success('已开始同步');
+      // 完成后由 WS repository.synced 事件失效列表查询，无需手动 refetch
+    } catch {
+      toast.error('同步入队失败');
+    }
   };
 
   const removeRepository = async (id: string) => {

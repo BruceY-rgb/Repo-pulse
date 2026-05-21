@@ -75,12 +75,10 @@ export const repositoryService = {
     await apiClient.delete(`/repositories/${id}`);
   },
 
-  async sync(id: string): Promise<Repository> {
-    const { data } = await apiClient.post<ApiResponse<Repository>>(
-      `/repositories/${id}/sync`,
-      undefined,
-      { timeout: 0 },
-    );
+  async sync(id: string): Promise<{ status: 'queued'; jobId: string }> {
+    const { data } = await apiClient.post<
+      ApiResponse<{ status: 'queued'; jobId: string }>
+    >(`/repositories/${id}/sync`);
     return data.data;
   },
 

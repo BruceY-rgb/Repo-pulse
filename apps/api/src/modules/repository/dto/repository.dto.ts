@@ -37,18 +37,3 @@ export class RepositoryQueryDto {
   @IsOptional()
   isActive?: boolean;
 }
-
-export class RepositorySyncSummaryDto {
-  @IsString()
-  repositoryId!: string;
-
-  createdCount!: number;
-
-  skippedCount!: number;
-
-  updatedCount!: number;
-
-  failedSources!: string[];
-
-  lastSyncAt!: string;
-}

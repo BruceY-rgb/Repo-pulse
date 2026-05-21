@@ -5,6 +5,7 @@ export const REALTIME_EVENTS = {
   APPROVAL_UPDATED: 'approval.updated',
   REPOSITORY_SYNC_PROGRESS: 'repository.sync.progress',
   REPOSITORY_SYNCED: 'repository.synced',
+  REPOSITORY_SYNC_FAILED: 'repository.sync.failed',
   ANALYSIS_COMPLETED: 'analysis.completed',
 } as const;
 
@@ -43,6 +44,13 @@ export interface RepositorySyncedPayload {
   syncedAt: string;
 }
 
+export interface RepositorySyncFailedPayload {
+  repositoryId: string;
+  jobId: string;
+  reason: string;
+  failedAt: string;
+}
+
 export interface AnalysisCompletedPayload {
   eventId: string;
   repositoryId: string;
@@ -54,6 +62,7 @@ export interface RealtimeEventPayloadMap {
   [REALTIME_EVENTS.APPROVAL_UPDATED]: ApprovalUpdatedPayload;
   [REALTIME_EVENTS.REPOSITORY_SYNC_PROGRESS]: RepositorySyncProgressPayload;
   [REALTIME_EVENTS.REPOSITORY_SYNCED]: RepositorySyncedPayload;
+  [REALTIME_EVENTS.REPOSITORY_SYNC_FAILED]: RepositorySyncFailedPayload;
   [REALTIME_EVENTS.ANALYSIS_COMPLETED]: AnalysisCompletedPayload;
 }
 

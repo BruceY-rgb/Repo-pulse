@@ -369,7 +369,13 @@ export class RepositoryService {
     return { success: true };
   }
 
-  async sync(id: string, options?: { daysBack?: number }): Promise<SyncSummary> {
+  async sync(
+    id: string,
+    options?: {
+      daysBack?: number;
+      onStageStart?: (stage: 'commits' | 'prs' | 'issues') => Promise<void> | void;
+    },
+  ): Promise<SyncSummary> {
     const repository = await this.prisma.repository.findUnique({
       where: { id },
       include: {
@@ -400,6 +406,18 @@ export class RepositoryService {
     let updatedCount = 0;
     let successfulSources = 0;
 
+    const accumulate = (summary: {
+      createdCount: number;
+      skippedCount: number;
+      updatedCount: number;
+      successfulSources: number;
+    }) => {
+      createdCount += summary.createdCount;
+      skippedCount += summary.skippedCount;
+      updatedCount += summary.updatedCount;
+      successfulSources += summary.successfulSources;
+    };
+
     if (repository.platform === Platform.GITHUB) {
       const tokenOwner = repository.users.find((entry) => entry.user.githubAccessToken);
       if (!tokenOwner?.user.githubAccessToken) {
@@ -413,6 +431,8 @@ export class RepositoryService {
         const branchNames = branches.length > 0
           ? branches.map((branch) => branch.name)
           : [repository.defaultBranch];
+
+        await options?.onStageStart?.('commits');
         const commitSources = branchNames.map(
           (branchName) => ({
             name: `github_commits:${branchName}`,
@@ -426,43 +446,57 @@ export class RepositoryService {
             normalize: (item: unknown) => this.normalizeGithubCommit(item, branchName),
           }),
         );
-        const sources = [
-          ...commitSources,
-          {
-            name: 'github_pull_requests',
-            fetch: () =>
-              this.githubService.getPullRequests(
-                owner,
-                repo,
-                'all',
-                tokenOwner.user.githubAccessToken || undefined,
-              ),
-            normalize: (item: unknown) => this.normalizeGithubPullRequest(item, sinceDate),
-          },
-          {
-            name: 'github_issues',
-            fetch: () =>
-              this.githubService.getIssues(
-                owner,
-                repo,
-                'all',
-                tokenOwner.user.githubAccessToken || undefined,
-              ),
-            normalize: (item: unknown) => this.normalizeGithubIssue(item, sinceDate),
-          },
-        ];
+        accumulate(await this.syncSources(repository.id, commitSources, failedSources));
 
-        const summary = await this.syncSources(repository.id, sources, failedSources);
-        createdCount += summary.createdCount;
-        skippedCount += summary.skippedCount;
-        updatedCount += summary.updatedCount;
-        successfulSources += summary.successfulSources;
+        await options?.onStageStart?.('prs');
+        accumulate(
+          await this.syncSources(
+            repository.id,
+            [
+              {
+                name: 'github_pull_requests',
+                fetch: () =>
+                  this.githubService.getPullRequests(
+                    owner,
+                    repo,
+                    'all',
+                    tokenOwner.user.githubAccessToken || undefined,
+                  ),
+                normalize: (item: unknown) => this.normalizeGithubPullRequest(item, sinceDate),
+              },
+            ],
+            failedSources,
+          ),
+        );
+
+        await options?.onStageStart?.('issues');
+        accumulate(
+          await this.syncSources(
+            repository.id,
+            [
+              {
+                name: 'github_issues',
+                fetch: () =>
+                  this.githubService.getIssues(
+                    owner,
+                    repo,
+                    'all',
+                    tokenOwner.user.githubAccessToken || undefined,
+                  ),
+                normalize: (item: unknown) => this.normalizeGithubIssue(item, sinceDate),
+              },
+            ],
+            failedSources,
+          ),
+        );
       }
     } else {
       const branches = await this.gitlabService.getBranches(owner, repo);
       const branchNames = branches.length > 0
         ? branches.map((branch) => branch.name)
         : [repository.defaultBranch];
+
+      await options?.onStageStart?.('commits');
       const commitSources = branchNames.map(
         (branchName) => ({
           name: `gitlab_commits:${branchName}`,
@@ -474,25 +508,37 @@ export class RepositoryService {
           normalize: (item: unknown) => this.normalizeGitlabCommit(item, branchName),
         }),
       );
-      const sources = [
-        ...commitSources,
-        {
-          name: 'gitlab_merge_requests',
-          fetch: () => this.gitlabService.getMergeRequests(owner, repo, 'all'),
-          normalize: (item: unknown) => this.normalizeGitlabMergeRequest(item, sinceDate),
-        },
-        {
-          name: 'gitlab_issues',
-          fetch: () => this.gitlabService.getIssues(owner, repo, 'all'),
-          normalize: (item: unknown) => this.normalizeGitlabIssue(item, sinceDate),
-        },
-      ];
+      accumulate(await this.syncSources(repository.id, commitSources, failedSources));
 
-      const summary = await this.syncSources(repository.id, sources, failedSources);
-      createdCount += summary.createdCount;
-      skippedCount += summary.skippedCount;
-      updatedCount += summary.updatedCount;
-      successfulSources += summary.successfulSources;
+      await options?.onStageStart?.('prs');
+      accumulate(
+        await this.syncSources(
+          repository.id,
+          [
+            {
+              name: 'gitlab_merge_requests',
+              fetch: () => this.gitlabService.getMergeRequests(owner, repo, 'all'),
+              normalize: (item: unknown) => this.normalizeGitlabMergeRequest(item, sinceDate),
+            },
+          ],
+          failedSources,
+        ),
+      );
+
+      await options?.onStageStart?.('issues');
+      accumulate(
+        await this.syncSources(
+          repository.id,
+          [
+            {
+              name: 'gitlab_issues',
+              fetch: () => this.gitlabService.getIssues(owner, repo, 'all'),
+              normalize: (item: unknown) => this.normalizeGitlabIssue(item, sinceDate),
+            },
+          ],
+          failedSources,
+        ),
+      );
     }
 
     const completedAt =
