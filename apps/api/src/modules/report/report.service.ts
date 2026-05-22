@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { prisma, EventType, ReportType, ReportFormat, ReportStatus } from '@repo-pulse/database';
 import { jsPDF } from 'jspdf';
+import { RepositoryOperationForbiddenException } from '../../common/exceptions/repository-operation-forbidden.exception';
+import { getAccessibleRepositoryIds } from '../../common/utils/repository-access';
 
 export interface ReportMetrics {
   commits: number;
@@ -45,13 +47,11 @@ export class ReportService {
   private async resolveRepositoryIds(
     userId: string,
     repositoryIdsParam?: string,
+    options?: { editableOnly?: boolean },
   ): Promise<string[]> {
-    const userRepos = await prisma.userRepository.findMany({
-      where: { userId },
-      select: { repositoryId: true },
+    const accessibleIds = await getAccessibleRepositoryIds(userId, {
+      editableOnly: options?.editableOnly,
     });
-
-    const accessibleIds = userRepos.map((r) => r.repositoryId);
 
     // 读取用户的监控范围，优先使用监控范围内的仓库
     const user = await prisma.user.findUnique({
@@ -224,13 +224,19 @@ export class ReportService {
     const repositoryIds = await this.resolveRepositoryIds(
       userId,
       params.repositoryIds?.join(','),
+      { editableOnly: true },
     );
 
     if (repositoryIds.length === 0) {
-      throw new Error('No accessible repositories selected');
+      throw new RepositoryOperationForbiddenException();
     }
 
-    const reports = await this.getReports(userId, params.repositoryIds?.join(','), params.dateFrom, params.dateTo);
+    const reports = await this.getReports(
+      userId,
+      repositoryIds.join(','),
+      params.dateFrom,
+      params.dateTo,
+    );
     if (reports.length === 0) {
       throw new Error('No data available for the selected period');
     }

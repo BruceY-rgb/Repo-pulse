@@ -61,6 +61,7 @@ export class GithubStrategy extends PassportStrategy(Strategy, 'github') {
       emails: { value: string }[];
       displayName: string;
       photos: { value: string }[];
+      username?: string;
     },
   ) {
     this.logger.log(
@@ -71,6 +72,7 @@ export class GithubStrategy extends PassportStrategy(Strategy, 'github') {
       id: profile.id,
       email: profile.emails[0]?.value,
       displayName: profile.displayName,
+      githubLogin: profile.username,
       avatar: profile.photos[0]?.value,
       githubAccessToken: accessToken,
       githubRefreshToken: refreshToken,

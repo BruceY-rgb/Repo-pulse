@@ -17,6 +17,7 @@ import { SyncModule } from './modules/sync/sync.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReportModule } from './modules/report/report.module';
 import { ImModule } from './modules/im/im.module';
+import { WorkbenchModule } from './modules/workbench/workbench.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { HttpExceptionFilter } from './common/filters';
@@ -71,6 +72,7 @@ import { envValidationSchema } from './config/env.validation';
     DashboardModule,
     ReportModule,
     ImModule,
+    WorkbenchModule,
 
     // Future modules (uncomment as implemented):
     // DashboardModule,
