@@ -173,8 +173,8 @@ export class RepositoryService {
     const apiUrl = this.configService.get<string>('API_URL', 'http://localhost:3001');
 
     if (params.platform === Platform.GITHUB) {
+      const webhookUrl = `${apiUrl}/webhooks/github`;
       try {
-        const webhookUrl = `${apiUrl}/webhooks/github`;
         const webhookId = await this.githubService.createWebhook(
           params.owner,
           params.repo,
@@ -183,25 +183,44 @@ export class RepositoryService {
           params.userOAuthToken,
         );
         const webhookIdStr = String(webhookId);
-        await this.prisma.repository.update({
-          where: { id: params.repositoryId },
-          data: { webhookId: webhookIdStr },
+        await this.persistWebhookState(params.repositoryId, {
+          webhookId: webhookIdStr,
+          webhookStatus: WebhookStatus.ACTIVE,
+          webhookError: null,
         });
         return {
           webhookStatus: WebhookStatus.ACTIVE,
           webhookId: webhookIdStr,
         };
       } catch (error) {
+        // 自愈：GitHub 报 "Hook already exists" 时，找到旧 webhook → 删除 → 重新用当前 secret 建
+        if (this.isHookAlreadyExistsError(error)) {
+          const healed = await this.healExistingWebhook({
+            owner: params.owner,
+            repo: params.repo,
+            webhookUrl,
+            webhookSecret: params.webhookSecret,
+            userOAuthToken: params.userOAuthToken,
+            repositoryId: params.repositoryId,
+            repositoryFullName: params.repositoryFullName,
+          });
+          if (healed) {
+            return healed;
+          }
+        }
+
         const classified = this.classifyWebhookError(error, params.repositoryFullName);
         // create 路径下，GitHub 对"无 admin 权限"的仓库返回 404 而非 403；
         // 而创建仓库时上游 getRepository 已确认仓库存在，所以此处 NOT_FOUND 实为权限问题
-        if (classified.webhookStatus === WebhookStatus.NOT_FOUND) {
-          return {
-            webhookStatus: WebhookStatus.INSUFFICIENT_SCOPE,
-            webhookError: classified.webhookError,
-          };
-        }
-        return classified;
+        const finalStatus =
+          classified.webhookStatus === WebhookStatus.NOT_FOUND
+            ? WebhookStatus.INSUFFICIENT_SCOPE
+            : classified.webhookStatus;
+        await this.persistWebhookState(params.repositoryId, {
+          webhookStatus: finalStatus,
+          webhookError: classified.webhookError ?? null,
+        });
+        return { webhookStatus: finalStatus, webhookError: classified.webhookError };
       }
     }
 
@@ -213,9 +232,106 @@ export class RepositoryService {
         webhookUrl,
         params.webhookSecret,
       );
+      await this.persistWebhookState(params.repositoryId, {
+        webhookStatus: WebhookStatus.ACTIVE,
+        webhookError: null,
+      });
       return { webhookStatus: WebhookStatus.ACTIVE };
     } catch (error) {
-      return this.classifyWebhookError(error, params.repositoryFullName);
+      const classified = this.classifyWebhookError(error, params.repositoryFullName);
+      await this.persistWebhookState(params.repositoryId, {
+        webhookStatus: classified.webhookStatus,
+        webhookError: classified.webhookError ?? null,
+      });
+      return classified;
+    }
+  }
+
+  private async persistWebhookState(
+    repositoryId: string,
+    patch: { webhookId?: string | null; webhookStatus: WebhookStatus; webhookError: string | null },
+  ) {
+    const data: { webhookId?: string | null; webhookStatus: string; webhookError: string | null } = {
+      webhookStatus: patch.webhookStatus,
+      webhookError: patch.webhookError,
+    };
+    if (patch.webhookId !== undefined) {
+      data.webhookId = patch.webhookId;
+    }
+    await this.prisma.repository.update({
+      where: { id: repositoryId },
+      data,
+    });
+  }
+
+  private isHookAlreadyExistsError(error: unknown): boolean {
+    const response = (error as { response?: { status?: number; data?: unknown } })?.response;
+    if (response?.status !== 422) {
+      return false;
+    }
+    const data = response.data as { errors?: Array<{ message?: string }> } | undefined;
+    return Boolean(data?.errors?.some((entry) => entry.message?.toLowerCase().includes('already exists')));
+  }
+
+  /**
+   * 自愈：GitHub 上已有相同 URL 的 webhook，删除旧的再用我们当前 DB 的 secret 重建
+   * 必须重建：旧 webhook 的 secret 跟我们存的不一致，验签会失败
+   */
+  private async healExistingWebhook(params: {
+    owner: string;
+    repo: string;
+    webhookUrl: string;
+    webhookSecret: string;
+    userOAuthToken?: string;
+    repositoryId: string;
+    repositoryFullName: string;
+  }): Promise<WebhookProvisionResult | null> {
+    try {
+      const existing = await this.githubService.listWebhooks(
+        params.owner,
+        params.repo,
+        params.userOAuthToken,
+      );
+      const stale = existing.find((hook) => hook.config?.url === params.webhookUrl);
+      if (!stale) {
+        this.logger.warn(
+          `webhook_self_heal_no_match repo=${params.repositoryFullName} url=${params.webhookUrl}`,
+        );
+        return null;
+      }
+
+      await this.githubService.deleteWebhook(
+        params.owner,
+        params.repo,
+        String(stale.id),
+        params.userOAuthToken,
+      );
+
+      const newId = await this.githubService.createWebhook(
+        params.owner,
+        params.repo,
+        params.webhookUrl,
+        params.webhookSecret,
+        params.userOAuthToken,
+      );
+      const newIdStr = String(newId);
+
+      await this.persistWebhookState(params.repositoryId, {
+        webhookId: newIdStr,
+        webhookStatus: WebhookStatus.ACTIVE,
+        webhookError: null,
+      });
+
+      this.logger.log(
+        `webhook_self_heal_success repo=${params.repositoryFullName} oldId=${stale.id} newId=${newIdStr}`,
+      );
+      return { webhookStatus: WebhookStatus.ACTIVE, webhookId: newIdStr };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown_error';
+      this.logger.warn(
+        `webhook_self_heal_failed repo=${params.repositoryFullName} message=${message}`,
+      );
+      return null;
     }
   }
 
@@ -479,13 +595,14 @@ export class RepositoryService {
     const webhookUrl = `${apiUrl}/webhooks/${webhookEndpoint}`;
 
     if (!repository.webhookId) {
+      const persistedStatus = (repository.webhookStatus as WebhookStatus | null) ?? null;
       return {
         repositoryId: repository.id,
         url: webhookUrl,
         secret: repository.webhookSecret,
         webhookId: null,
-        status: WebhookStatus.NOT_CONFIGURED,
-        lastError: null,
+        status: persistedStatus ?? WebhookStatus.NOT_CONFIGURED,
+        lastError: repository.webhookError ?? null,
         active: false,
         lastResponse: null,
       };

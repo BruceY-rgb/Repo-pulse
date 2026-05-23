@@ -254,6 +254,22 @@ export class GithubService {
   }
 
   /**
+   * 列出仓库所有 webhook（用于自愈：当 create 报 "Hook already exists" 时找到旧的）
+   */
+  async listWebhooks(
+    owner: string,
+    repo: string,
+    userToken?: string,
+  ): Promise<GithubWebhookDetail[]> {
+    const client = this.createUserClient(userToken);
+    const response = await client.get<GithubWebhookDetail[]>(
+      `/repos/${owner}/${repo}/hooks`,
+      { params: { per_page: 100 } },
+    );
+    return response.data;
+  }
+
+  /**
    * 让 GitHub 重发一个 ping 事件，用于端到端验证 webhook 链路
    * @throws AxiosError 由调用方处理
    */

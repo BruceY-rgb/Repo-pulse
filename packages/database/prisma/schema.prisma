@@ -140,6 +140,8 @@ model Repository {
   defaultBranch String   @default("main")
   webhookId     String?
   webhookSecret String?
+  webhookStatus String?
+  webhookError  String?
   isActive      Boolean  @default(true)
   lastSyncAt    DateTime?
   createdAt     DateTime @default(now())

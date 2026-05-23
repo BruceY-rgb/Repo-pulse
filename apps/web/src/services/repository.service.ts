@@ -1,4 +1,5 @@
 import { apiClient } from './api-client';
+import type { WebhookStatus } from '@repo-pulse/shared';
 import type {
   ApiResponse,
   Repository,
@@ -9,6 +10,33 @@ import type {
   Event,
   SearchResult,
 } from '@/types/api';
+
+export interface WebhookLastResponse {
+  code: number | null;
+  status: string | null;
+  message: string | null;
+}
+
+export interface WebhookStatusResponse {
+  repositoryId: string;
+  url: string;
+  secret: string | null;
+  webhookId: string | null;
+  status: WebhookStatus;
+  lastError: string | null;
+  active: boolean;
+  lastResponse: WebhookLastResponse | null;
+}
+
+export interface WebhookProvisionResponse {
+  webhookStatus: WebhookStatus;
+  webhookError?: string;
+  webhookId?: string | null;
+}
+
+export interface WebhookTestResponse {
+  success: boolean;
+}
 
 export function normalizeBranchOption(rawBranch: unknown): RepositoryBranchScopeOption | null {
   if (typeof rawBranch === 'string') {
@@ -129,6 +157,36 @@ export const repositoryService = {
    */
   async getStarred(): Promise<SearchResult[]> {
     const { data } = await apiClient.get<ApiResponse<SearchResult[]>>('/repositories/starred');
+    return data.data;
+  },
+
+  /**
+   * 查询仓库 webhook 状态（实时调 GitHub 验证）
+   */
+  async getWebhookStatus(id: string): Promise<WebhookStatusResponse> {
+    const { data } = await apiClient.get<ApiResponse<WebhookStatusResponse>>(
+      `/repositories/${id}/webhook`,
+    );
+    return data.data;
+  },
+
+  /**
+   * 重新创建仓库的 webhook
+   */
+  async retryWebhook(id: string): Promise<WebhookProvisionResponse> {
+    const { data } = await apiClient.post<ApiResponse<WebhookProvisionResponse>>(
+      `/repositories/${id}/webhook/retry`,
+    );
+    return data.data;
+  },
+
+  /**
+   * 让 GitHub 重发 ping 事件验证 webhook 链路
+   */
+  async testWebhook(id: string): Promise<WebhookTestResponse> {
+    const { data } = await apiClient.post<ApiResponse<WebhookTestResponse>>(
+      `/repositories/${id}/webhook/test`,
+    );
     return data.data;
   },
 };
