@@ -356,8 +356,9 @@ pnpm --filter api test -- notification.service.spec.ts
 
 | 时间 | 覆盖率 | 说明 |
 | :--- | :---: | :--- |
-| 初始状态 | ~69% | 合并前基线 |
+| 初始状态 | ~69% | feat/authority 合并前基线 |
 | 2026-05 补全单元测试 | ~81% | 新增 `notification.service`、`event.service`、`webhook.channel`、`report.service`、`approval.service`、`repository.service` 等模块的覆盖 |
+| feat/authority 合并后 | ~66% | 新增了大量业务代码（权限模型、accessLevel 字段、新接口），对应单元测试尚未补全，覆盖率回落 |
 
 覆盖率报告在 CI `build` Job 中生成，上传至 Codecov（`flags: unit`）。本地查看：
 
