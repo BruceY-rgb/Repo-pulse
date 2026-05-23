@@ -42,7 +42,8 @@ export class RepositoryController {
   @ApiOperation({ summary: 'Create repository' })
   async create(@Req() req: Request, @Body() dto: CreateRepositoryDto) {
     const userId = (req.user as { sub: string }).sub;
-    return this.repositoryService.create(userId, dto);
+    const user = await this.userService.findById(userId);
+    return this.repositoryService.create(userId, dto, user?.githubAccessToken ?? undefined);
   }
 
   @Get()
@@ -128,5 +129,26 @@ export class RepositoryController {
       userId,
     });
     return { status: 'queued' as const, jobId: job.id };
+  }
+
+  @Get(':id/webhook')
+  @ApiOperation({ summary: 'Get repository webhook status (live-checked against GitHub)' })
+  async getWebhookStatus(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.getWebhookStatus(userId, id);
+  }
+
+  @Post(':id/webhook/retry')
+  @ApiOperation({ summary: 'Recreate webhook on GitHub for this repository' })
+  async retryWebhook(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.retryWebhook(userId, id);
+  }
+
+  @Post(':id/webhook/test')
+  @ApiOperation({ summary: 'Ask GitHub to redeliver a ping event for this webhook' })
+  async testWebhook(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.testWebhook(userId, id);
   }
 }

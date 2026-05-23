@@ -1,11 +1,20 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient, Platform, Repository, EventType } from '@repo-pulse/database';
+import { WebhookStatus } from '@repo-pulse/shared';
 import { randomBytes } from 'crypto';
 import { GithubBranchInfo, GithubService } from './services/github.service';
 import { GitlabBranchInfo, GitlabService } from './services/gitlab.service';
 import { CreateRepositoryDto, UpdateRepositoryDto } from './dto/repository.dto';
 import { EventService } from '../event/event.service';
+
+export interface WebhookProvisionResult {
+  webhookStatus: WebhookStatus;
+  webhookError?: string;
+  webhookId?: string | null;
+}
+
+export type RepositoryWithWebhookStatus = Repository & WebhookProvisionResult;
 
 interface SyncSummary {
   repositoryId: string;
@@ -125,33 +134,116 @@ export class RepositoryService {
       },
     });
 
-    const apiUrl = this.configService.get<string>('API_URL', 'http://localhost:3001');
-    try {
-      if (platform === Platform.GITHUB) {
-        const webhookUrl = `${apiUrl}/webhooks/github`;
-        const webhookId = await this.githubService.createWebhook(
-          owner,
-          repo,
-          webhookUrl,
-          webhookSecret,
-          userOAuthToken,
-        );
-        if (webhookId) {
-          await this.prisma.repository.update({
-            where: { id: repository.id },
-            data: { webhookId: String(webhookId) },
-          });
-        }
-      } else {
-        const webhookUrl = `${apiUrl}/webhooks/gitlab`;
-        await this.gitlabService.createWebhook(owner, repo, webhookUrl, webhookSecret);
-      }
-    } catch (error) {
-      this.logger.error(`Failed to register webhook for ${repoInfo.fullName}`, error);
-    }
+    const provision = await this.provisionWebhook({
+      platform,
+      owner,
+      repo,
+      repositoryId: repository.id,
+      repositoryFullName: repoInfo.fullName,
+      webhookSecret,
+      userOAuthToken,
+    });
 
     this.logger.log(`Repository ${repoInfo.fullName} added successfully for user ${userId}`);
-    return repository;
+
+    const finalRepository = provision.webhookId
+      ? { ...repository, webhookId: provision.webhookId }
+      : repository;
+
+    return {
+      ...finalRepository,
+      webhookStatus: provision.webhookStatus,
+      webhookError: provision.webhookError,
+    } as RepositoryWithWebhookStatus;
+  }
+
+  /**
+   * 创建或更新仓库的 webhook，返回状态与错误码（不抛异常）
+   * 调用方：create() 创建仓库时，retry 端点重试时
+   */
+  async provisionWebhook(params: {
+    platform: Platform;
+    owner: string;
+    repo: string;
+    repositoryId: string;
+    repositoryFullName: string;
+    webhookSecret: string;
+    userOAuthToken?: string;
+  }): Promise<WebhookProvisionResult> {
+    const apiUrl = this.configService.get<string>('API_URL', 'http://localhost:3001');
+
+    if (params.platform === Platform.GITHUB) {
+      try {
+        const webhookUrl = `${apiUrl}/webhooks/github`;
+        const webhookId = await this.githubService.createWebhook(
+          params.owner,
+          params.repo,
+          webhookUrl,
+          params.webhookSecret,
+          params.userOAuthToken,
+        );
+        const webhookIdStr = String(webhookId);
+        await this.prisma.repository.update({
+          where: { id: params.repositoryId },
+          data: { webhookId: webhookIdStr },
+        });
+        return {
+          webhookStatus: WebhookStatus.ACTIVE,
+          webhookId: webhookIdStr,
+        };
+      } catch (error) {
+        const classified = this.classifyWebhookError(error, params.repositoryFullName);
+        // create 路径下，GitHub 对"无 admin 权限"的仓库返回 404 而非 403；
+        // 而创建仓库时上游 getRepository 已确认仓库存在，所以此处 NOT_FOUND 实为权限问题
+        if (classified.webhookStatus === WebhookStatus.NOT_FOUND) {
+          return {
+            webhookStatus: WebhookStatus.INSUFFICIENT_SCOPE,
+            webhookError: classified.webhookError,
+          };
+        }
+        return classified;
+      }
+    }
+
+    try {
+      const webhookUrl = `${apiUrl}/webhooks/gitlab`;
+      await this.gitlabService.createWebhook(
+        params.owner,
+        params.repo,
+        webhookUrl,
+        params.webhookSecret,
+      );
+      return { webhookStatus: WebhookStatus.ACTIVE };
+    } catch (error) {
+      return this.classifyWebhookError(error, params.repositoryFullName);
+    }
+  }
+
+  private classifyWebhookError(error: unknown, repositoryFullName: string): WebhookProvisionResult {
+    const response = (error as { response?: { status?: number; data?: unknown } })?.response;
+    const status = response?.status;
+    const data = response?.data as
+      | { message?: string; errors?: Array<{ message?: string; resource?: string; code?: string }> }
+      | undefined;
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    const baseMessage = data?.message ?? rawMessage;
+    const errorsDetail = data?.errors
+      ?.map((entry) => entry.message || entry.code)
+      .filter((entry): entry is string => Boolean(entry))
+      .join('; ');
+    const detailMessage = errorsDetail ? `${baseMessage}: ${errorsDetail}` : baseMessage;
+
+    this.logger.error(
+      `webhook_provision_failed repo=${repositoryFullName} status=${status ?? 'unknown'} message=${detailMessage}`,
+    );
+
+    if (status === 401 || status === 403) {
+      return { webhookStatus: WebhookStatus.INSUFFICIENT_SCOPE, webhookError: detailMessage };
+    }
+    if (status === 404) {
+      return { webhookStatus: WebhookStatus.NOT_FOUND, webhookError: detailMessage };
+    }
+    return { webhookStatus: WebhookStatus.FAILED, webhookError: detailMessage };
   }
 
   async findAll(userId: string, options?: { isActive?: boolean }) {
@@ -367,6 +459,183 @@ export class RepositoryService {
 
     this.logger.log(`Repository ${repository.fullName} deleted by user ${userId}`);
     return { success: true };
+  }
+
+  /**
+   * 查询 webhook 的当前状态（用户访问详情页时调用）
+   * - 若 webhookId 为空 → NOT_CONFIGURED
+   * - 若 GitHub 仍返回 hook 且 active → ACTIVE
+   * - 若 GitHub 404 → NOT_FOUND（被用户在 GitHub 上手动删了）
+   * - 若 401/403 → INSUFFICIENT_SCOPE
+   */
+  async getWebhookStatus(userId: string, repositoryId: string) {
+    const { repository, owner, repo, accessToken } = await this.loadRepositoryForWebhookOps(
+      userId,
+      repositoryId,
+    );
+
+    const apiUrl = this.configService.get<string>('API_URL', 'http://localhost:3001');
+    const webhookEndpoint = repository.platform === Platform.GITHUB ? 'github' : 'gitlab';
+    const webhookUrl = `${apiUrl}/webhooks/${webhookEndpoint}`;
+
+    if (!repository.webhookId) {
+      return {
+        repositoryId: repository.id,
+        url: webhookUrl,
+        secret: repository.webhookSecret,
+        webhookId: null,
+        status: WebhookStatus.NOT_CONFIGURED,
+        lastError: null,
+        active: false,
+        lastResponse: null,
+      };
+    }
+
+    if (repository.platform !== Platform.GITHUB) {
+      return {
+        repositoryId: repository.id,
+        url: webhookUrl,
+        secret: repository.webhookSecret,
+        webhookId: repository.webhookId,
+        status: WebhookStatus.ACTIVE,
+        lastError: null,
+        active: true,
+        lastResponse: null,
+      };
+    }
+
+    try {
+      const detail = await this.githubService.getWebhook(
+        owner,
+        repo,
+        repository.webhookId,
+        accessToken,
+      );
+      return {
+        repositoryId: repository.id,
+        url: webhookUrl,
+        secret: repository.webhookSecret,
+        webhookId: repository.webhookId,
+        status: detail.active ? WebhookStatus.ACTIVE : WebhookStatus.FAILED,
+        lastError: detail.last_response?.message ?? null,
+        active: detail.active,
+        lastResponse: detail.last_response ?? null,
+      };
+    } catch (error) {
+      const classified = this.classifyWebhookError(error, repository.fullName);
+      return {
+        repositoryId: repository.id,
+        url: webhookUrl,
+        secret: repository.webhookSecret,
+        webhookId: repository.webhookId,
+        status: classified.webhookStatus,
+        lastError: classified.webhookError ?? null,
+        active: false,
+        lastResponse: null,
+      };
+    }
+  }
+
+  /**
+   * 重新创建 webhook（在 GitHub 上删除旧的再建新的，或仅在没有 webhookId 时创建）
+   */
+  async retryWebhook(userId: string, repositoryId: string): Promise<WebhookProvisionResult> {
+    const { repository, owner, repo, accessToken } = await this.loadRepositoryForWebhookOps(
+      userId,
+      repositoryId,
+    );
+
+    if (repository.platform === Platform.GITHUB && repository.webhookId) {
+      try {
+        await this.githubService.deleteWebhook(owner, repo, repository.webhookId, accessToken);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown_error';
+        this.logger.warn(
+          `webhook_retry_cleanup_failed repo=${repository.fullName} message=${message}`,
+        );
+      }
+      await this.prisma.repository.update({
+        where: { id: repository.id },
+        data: { webhookId: null },
+      });
+    }
+
+    let webhookSecret = repository.webhookSecret;
+    if (!webhookSecret) {
+      webhookSecret = this.generateWebhookSecret();
+      await this.prisma.repository.update({
+        where: { id: repository.id },
+        data: { webhookSecret },
+      });
+    }
+
+    return this.provisionWebhook({
+      platform: repository.platform,
+      owner,
+      repo,
+      repositoryId: repository.id,
+      repositoryFullName: repository.fullName,
+      webhookSecret,
+      userOAuthToken: accessToken,
+    });
+  }
+
+  /**
+   * 让 GitHub 重发 ping 事件，用于端到端验证 webhook 链路
+   */
+  async testWebhook(userId: string, repositoryId: string) {
+    const { repository, owner, repo, accessToken } = await this.loadRepositoryForWebhookOps(
+      userId,
+      repositoryId,
+    );
+
+    if (repository.platform !== Platform.GITHUB) {
+      throw new ForbiddenException('Test ping only supported for GitHub webhooks');
+    }
+    if (!repository.webhookId) {
+      throw new NotFoundException('Webhook not configured for this repository');
+    }
+
+    await this.githubService.pingWebhook(owner, repo, repository.webhookId, accessToken);
+    return { success: true };
+  }
+
+  /**
+   * 加载仓库 + 权限校验（必须为 ADMIN）+ 解析 owner/repo + 找到一个可用的 githubAccessToken
+   */
+  private async loadRepositoryForWebhookOps(userId: string, repositoryId: string) {
+    const repository = await this.prisma.repository.findUnique({
+      where: { id: repositoryId },
+      include: {
+        users: {
+          include: {
+            user: {
+              select: { id: true, githubAccessToken: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!repository) {
+      throw new NotFoundException('Repository not found');
+    }
+
+    const membership = repository.users.find((entry) => entry.userId === userId);
+    if (!membership) {
+      throw new ForbiddenException('You do not have access to this repository');
+    }
+    if (membership.role !== 'ADMIN') {
+      throw new ForbiddenException('Admin role required to manage webhooks');
+    }
+
+    const [owner, repo] = this.parseRepositoryPath(repository.fullName);
+    const callerToken = membership.user.githubAccessToken;
+    const fallbackToken = repository.users.find((entry) => entry.user.githubAccessToken)?.user
+      .githubAccessToken;
+    const accessToken = callerToken ?? fallbackToken ?? undefined;
+
+    return { repository, owner, repo, accessToken: accessToken ?? undefined };
   }
 
   async sync(

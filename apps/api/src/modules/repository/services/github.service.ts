@@ -117,6 +117,22 @@ interface GithubWebhookResponse {
   id: number;
 }
 
+export interface GithubWebhookDetail {
+  id: number;
+  active: boolean;
+  events: string[];
+  config: {
+    url: string;
+    content_type?: string;
+  };
+  updated_at?: string;
+  last_response?: {
+    code: number | null;
+    status: string | null;
+    message: string | null;
+  };
+}
+
 @Injectable()
 export class GithubService {
   private readonly logger = new Logger(GithubService.name);
@@ -171,6 +187,7 @@ export class GithubService {
    * 为仓库注册 Webhook
    * @param userToken 用户的 OAuth Token（必须有 admin:repo_hook 权限）
    * @returns Webhook ID（用于后续删除）
+   * @throws AxiosError 让调用方根据 response.status 识别 403/404 等
    */
   async createWebhook(
     owner: string,
@@ -178,41 +195,35 @@ export class GithubService {
     webhookUrl: string,
     secret: string,
     userToken?: string,
-  ): Promise<number | null> {
-    try {
-      const client = this.createUserClient(userToken);
-      const payload: GithubWebhookCreatePayload = {
-        name: 'web',
-        config: {
-          url: webhookUrl,
-          secret,
-          content_type: 'json',
-          insecure_ssl: '0',
-        },
-        events: [
-          'push',
-          'pull_request',
-          'pull_request_review',
-          'issues',
-          'issue_comment',
-          'release',
-          'create',
-          'delete',
-        ],
-        active: true,
-      };
+  ): Promise<number> {
+    const client = this.createUserClient(userToken);
+    const payload: GithubWebhookCreatePayload = {
+      name: 'web',
+      config: {
+        url: webhookUrl,
+        secret,
+        content_type: 'json',
+        insecure_ssl: '0',
+      },
+      events: [
+        'push',
+        'pull_request',
+        'pull_request_review',
+        'issues',
+        'issue_comment',
+        'release',
+        'create',
+        'delete',
+      ],
+      active: true,
+    };
 
-      const response = await client.post<GithubWebhookResponse>(
-        `/repos/${owner}/${repo}/hooks`,
-        payload,
-      );
-      this.logger.log(`Webhook created for ${owner}/${repo}, id: ${response.data.id}`);
-      return response.data.id;
-    } catch (error) {
-      this.logger.error(`Failed to create webhook for ${owner}/${repo}`, error);
-      // 不抛出异常，让调用方决定如何处理
-      return null;
-    }
+    const response = await client.post<GithubWebhookResponse>(
+      `/repos/${owner}/${repo}/hooks`,
+      payload,
+    );
+    this.logger.log(`Webhook created for ${owner}/${repo}, id: ${response.data.id}`);
+    return response.data.id;
   }
 
   async deleteWebhook(owner: string, repo: string, webhookId: string, userToken?: string): Promise<void> {
@@ -223,6 +234,38 @@ export class GithubService {
     } catch (error) {
       this.logger.error(`Failed to delete webhook for ${owner}/${repo}`, error);
     }
+  }
+
+  /**
+   * 查询 webhook 详情（用于验证 webhook 在 GitHub 上是否仍然存在/活跃）
+   * @throws AxiosError 让调用方根据 response.status 识别 404
+   */
+  async getWebhook(
+    owner: string,
+    repo: string,
+    webhookId: string,
+    userToken?: string,
+  ): Promise<GithubWebhookDetail> {
+    const client = this.createUserClient(userToken);
+    const response = await client.get<GithubWebhookDetail>(
+      `/repos/${owner}/${repo}/hooks/${webhookId}`,
+    );
+    return response.data;
+  }
+
+  /**
+   * 让 GitHub 重发一个 ping 事件，用于端到端验证 webhook 链路
+   * @throws AxiosError 由调用方处理
+   */
+  async pingWebhook(
+    owner: string,
+    repo: string,
+    webhookId: string,
+    userToken?: string,
+  ): Promise<void> {
+    const client = this.createUserClient(userToken);
+    await client.post(`/repos/${owner}/${repo}/hooks/${webhookId}/pings`);
+    this.logger.log(`Webhook ${webhookId} ping requested for ${owner}/${repo}`);
   }
 
   async getCommits(
