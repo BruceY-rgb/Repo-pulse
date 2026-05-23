@@ -13,6 +13,8 @@ const mockEventFindMany = jest.fn();
 jest.mock('@repo-pulse/database', () => ({
   ApprovalStatus: { PENDING: 'PENDING', APPROVED: 'APPROVED', REJECTED: 'REJECTED', EDITED: 'EDITED' },
   RiskLevel: { LOW: 'LOW', MEDIUM: 'MEDIUM', HIGH: 'HIGH', CRITICAL: 'CRITICAL' },
+  RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
+  RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
   prisma: {
     event: {
       findUnique: (...a: any[]) => mockEventFindUnique(...a),
@@ -35,6 +37,7 @@ function makeApproval(overrides: object = {}) {
   return {
     id: 'appr-1',
     eventId: 'evt-1',
+    event: { id: 'evt-1', repositoryId: 'r1' },
     reviewerId: null,
     status: ApprovalStatus.PENDING,
     originalContent: 'summary text',
@@ -52,6 +55,7 @@ function makeEvent(riskLevel: string, overrides: object = {}) {
     analyses: [
       { riskLevel, summary: `${riskLevel} risk summary`, status: 'COMPLETED', createdAt: new Date() },
     ],
+    repository: { users: [{ userId: 'u1' }] },
     ...overrides,
   };
 }
@@ -61,6 +65,7 @@ describe('ApprovalService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUserRepoFindMany.mockResolvedValue([{ repositoryId: 'r1' }]);
     service = new ApprovalService();
   });
 
@@ -95,7 +100,7 @@ describe('ApprovalService', () => {
     );
 
     it('returns null when event has no analyses', async () => {
-      mockEventFindUnique.mockResolvedValue({ id: 'evt-1', analyses: [] });
+      mockEventFindUnique.mockResolvedValue({ id: 'evt-1', analyses: [], repository: { users: [{ userId: 'u1' }] } });
       const result = await service.createFromAIAnalysis('evt-1');
       expect(result).toBeFalsy();
     });

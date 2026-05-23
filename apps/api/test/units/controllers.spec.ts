@@ -1,3 +1,21 @@
+jest.mock('@repo-pulse/database', () => ({
+  Role: { ADMIN: 'ADMIN', MANAGER: 'MANAGER', MEMBER: 'MEMBER', VIEWER: 'VIEWER' },
+  Platform: { GITHUB: 'GITHUB', GITLAB: 'GITLAB' },
+  EventType: { PUSH: 'PUSH', PR_OPENED: 'PR_OPENED', PR_MERGED: 'PR_MERGED', PR_CLOSED: 'PR_CLOSED', PR_REVIEW: 'PR_REVIEW', ISSUE_OPENED: 'ISSUE_OPENED', ISSUE_CLOSED: 'ISSUE_CLOSED', ISSUE_COMMENT: 'ISSUE_COMMENT', RELEASE: 'RELEASE', BRANCH_CREATED: 'BRANCH_CREATED', BRANCH_DELETED: 'BRANCH_DELETED' },
+  RiskLevel: { LOW: 'LOW', MEDIUM: 'MEDIUM', HIGH: 'HIGH', CRITICAL: 'CRITICAL' },
+  AnalysisStatus: { PENDING: 'PENDING', PROCESSING: 'PROCESSING', COMPLETED: 'COMPLETED', FAILED: 'FAILED', SKIPPED: 'SKIPPED' },
+  FilterAction: { INCLUDE: 'INCLUDE', EXCLUDE: 'EXCLUDE', TAG: 'TAG' },
+  ApprovalStatus: { PENDING: 'PENDING', APPROVED: 'APPROVED', REJECTED: 'REJECTED', EDITED: 'EDITED' },
+  NotificationChannel: { EMAIL: 'EMAIL', DINGTALK: 'DINGTALK', FEISHU: 'FEISHU', WEBHOOK: 'WEBHOOK', IN_APP: 'IN_APP' },
+  NotificationStatus: { PENDING: 'PENDING', SENT: 'SENT', FAILED: 'FAILED', READ: 'READ' },
+  ReportType: { WEEKLY: 'WEEKLY', MONTHLY: 'MONTHLY', CUSTOM: 'CUSTOM' },
+  ReportFormat: { MARKDOWN: 'MARKDOWN', PDF: 'PDF', HTML: 'HTML' },
+  ReportStatus: { GENERATING: 'GENERATING', COMPLETED: 'COMPLETED', FAILED: 'FAILED' },
+  RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
+  RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
+  prisma: {},
+}));
+
 /**
  * Thin delegation tests for all remaining controllers.
  * Each controller is instantiated directly with mocked services.
@@ -247,8 +265,8 @@ describe('ApprovalController', () => {
   });
 
   it('getById delegates to service', async () => {
-    const result = await controller.getById('a1');
-    expect(service.getById).toHaveBeenCalledWith('a1');
+    const result = await controller.getById(user, 'a1');
+    expect(service.getById).toHaveBeenCalledWith('u1', 'a1');
     expect(result).toHaveProperty('id', 'a1');
   });
 
@@ -265,12 +283,12 @@ describe('ApprovalController', () => {
 
   it('delete throws NotFoundException when approval not found', async () => {
     service.getById.mockResolvedValue(null);
-    await expect(controller.delete('bad-id')).rejects.toThrow(NotFoundException);
+    await expect(controller.delete(user, 'bad-id')).rejects.toThrow(NotFoundException);
   });
 
   it('delete succeeds when approval exists', async () => {
-    const result = await controller.delete('a1');
-    expect(service.delete).toHaveBeenCalledWith('a1');
+    const result = await controller.delete(user, 'a1');
+    expect(service.delete).toHaveBeenCalledWith('u1', 'a1');
     expect(result).toEqual({ success: true });
   });
 

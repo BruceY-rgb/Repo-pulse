@@ -1,6 +1,10 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { RepositoryService } from '../../src/modules/repository/repository.service';
 
+const mockAssertUserCanAccessRepository = jest.fn();
+const mockAssertUserCanEditRepository = jest.fn();
+const mockGetUserMonitoredRepositoryIds = jest.fn();
+
 const mockRepoFindUnique = jest.fn();
 const mockRepoFindMany = jest.fn();
 const mockRepoUpsert = jest.fn();
@@ -10,6 +14,16 @@ const mockUserRepoUpsert = jest.fn();
 const mockUserRepoFindMany = jest.fn();
 const mockEventFindMany = jest.fn();
 const mockEventUpdate = jest.fn();
+
+jest.mock('../../src/common/utils/repository-access', () => ({
+  assertUserCanAccessRepository: (...a: any[]) => mockAssertUserCanAccessRepository(...a),
+  assertUserCanEditRepository: (...a: any[]) => mockAssertUserCanEditRepository(...a),
+  getUserMonitoredRepositoryIds: (...a: any[]) => mockGetUserMonitoredRepositoryIds(...a),
+  getAccessibleRepositoryIds: jest.fn().mockResolvedValue([]),
+  getUserRepositoryMembership: jest.fn().mockResolvedValue(null),
+  isEditableRepositoryAccessLevel: (level: string) =>
+    ['OWNER', 'ADMIN', 'MAINTAIN', 'WRITE'].includes(level),
+}));
 
 jest.mock('@repo-pulse/database', () => ({
   Platform: { GITHUB: 'GITHUB', GITLAB: 'GITLAB' },
@@ -21,6 +35,8 @@ jest.mock('@repo-pulse/database', () => ({
     ISSUE_OPENED: 'ISSUE_OPENED',
     ISSUE_CLOSED: 'ISSUE_CLOSED',
   },
+  RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
+  RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
   PrismaClient: jest.fn().mockImplementation(() => ({
     repository: {
       findUnique: (...a: any[]) => mockRepoFindUnique(...a),
@@ -69,6 +85,8 @@ function makeRepo(overrides: object = {}) {
   };
 }
 
+const defaultMembership = { accessLevel: 'WRITE', accessMode: 'EDITABLE', role: 'ADMIN' };
+
 describe('RepositoryService', () => {
   let service: RepositoryService;
   let mockConfigService: { get: jest.Mock };
@@ -78,6 +96,10 @@ describe('RepositoryService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAssertUserCanAccessRepository.mockResolvedValue(defaultMembership);
+    mockAssertUserCanEditRepository.mockResolvedValue(defaultMembership);
+    mockGetUserMonitoredRepositoryIds.mockResolvedValue([]);
+
     mockConfigService = { get: jest.fn().mockReturnValue('http://localhost:3001') };
     mockGithubService = {
       getRepository: jest.fn(),
@@ -116,14 +138,14 @@ describe('RepositoryService', () => {
   describe('findById', () => {
     it('throws NotFoundException when repo not found', async () => {
       mockRepoFindUnique.mockResolvedValue(null);
-      await expect(service.findById('r99')).rejects.toThrow(NotFoundException);
+      await expect(service.findById('u1', 'r99')).rejects.toThrow(NotFoundException);
     });
 
     it('returns repository when found', async () => {
       const repo = makeRepo();
       mockRepoFindUnique.mockResolvedValue(repo);
-      const result = await service.findById('r1');
-      expect(result).toBe(repo);
+      const result = await service.findById('u1', 'r1');
+      expect(result).toMatchObject({ id: repo.id });
     });
   });
 
@@ -133,7 +155,7 @@ describe('RepositoryService', () => {
       const repos = [makeRepo()];
       mockRepoFindMany.mockResolvedValue(repos);
       const result = await service.findAll('u1');
-      expect(result).toBe(repos);
+      expect(result).toHaveLength(1);
       expect(mockRepoFindMany.mock.calls[0][0].where.users.some.userId).toBe('u1');
     });
 
@@ -169,7 +191,7 @@ describe('RepositoryService', () => {
     });
 
     it('throws ForbiddenException when user not a member', async () => {
-      mockRepoFindUnique.mockResolvedValue(makeRepo({ users: [{ userId: 'other-user', user: { githubAccessToken: null } }] }));
+      mockAssertUserCanAccessRepository.mockRejectedValueOnce(new ForbiddenException());
       await expect(service.getBranches('u1', 'r1')).rejects.toThrow(ForbiddenException);
     });
 
@@ -233,7 +255,7 @@ describe('RepositoryService', () => {
     });
 
     it('throws ForbiddenException when user not a member', async () => {
-      mockRepoFindUnique.mockResolvedValue(makeRepo({ users: [{ userId: 'other', user: { githubAccessToken: null } }] }));
+      mockAssertUserCanEditRepository.mockRejectedValueOnce(new ForbiddenException());
       await expect(service.delete('u1', 'r1')).rejects.toThrow(ForbiddenException);
     });
 
@@ -277,6 +299,7 @@ describe('RepositoryService', () => {
       mockGithubService.getRepository.mockResolvedValue({
         id: 123, name: 'repo', full_name: 'org/repo',
         html_url: 'https://github.com/org/repo', default_branch: 'main',
+        permissions: { push: true },
       });
       const repo = makeRepo({ id: 'r-new' });
       mockRepoUpsert.mockResolvedValue(repo);
@@ -284,7 +307,7 @@ describe('RepositoryService', () => {
       mockRepoUpdate.mockResolvedValue(repo);
 
       const result = await service.create('u1', { platform: 'GITHUB' as any, owner: 'org', repo: 'repo' });
-      expect(result).toBe(repo);
+      expect(result).toMatchObject({ id: 'r-new' });
       expect(mockGithubService.createWebhook).toHaveBeenCalled();
     });
 
@@ -298,7 +321,7 @@ describe('RepositoryService', () => {
       mockUserRepoUpsert.mockResolvedValue({});
 
       const result = await service.create('u1', { platform: 'GITLAB' as any, owner: 'org', repo: 'glrepo' });
-      expect(result).toBe(repo);
+      expect(result).toMatchObject({ id: 'r-gl' });
       expect(mockGitlabService.createWebhook).toHaveBeenCalled();
     });
   });
@@ -397,7 +420,7 @@ describe('RepositoryService', () => {
   // ── searchUserRepositories ────────────────────────────────────────────────
   describe('searchUserRepositories', () => {
     it('returns empty array when no token provided', async () => {
-      const result = await service.searchUserRepositories('');
+      const result = await service.searchUserRepositories('u1', '');
       expect(result).toEqual([]);
     });
 
@@ -407,7 +430,7 @@ describe('RepositoryService', () => {
         html_url: 'url', stargazers_count: 0, language: null,
         owner: { login: 'me', avatar_url: 'av' },
       }]);
-      const result = await service.searchUserRepositories('token');
+      const result = await service.searchUserRepositories('u1', 'token');
       expect(result[0].fullName).toBe('me/my-repo');
     });
   });
@@ -415,7 +438,7 @@ describe('RepositoryService', () => {
   // ── searchStarredRepositories ─────────────────────────────────────────────
   describe('searchStarredRepositories', () => {
     it('returns empty array when no token provided', async () => {
-      const result = await service.searchStarredRepositories('');
+      const result = await service.searchStarredRepositories('u1', '');
       expect(result).toEqual([]);
     });
   });

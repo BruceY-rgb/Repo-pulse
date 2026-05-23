@@ -6,6 +6,7 @@ const mockRepoFindMany = jest.fn();
 const mockRepoUpdate = jest.fn();
 const mockUserRepoFindUnique = jest.fn();
 const mockUserRepoCreate = jest.fn();
+const mockUserRepoUpdate = jest.fn();
 const mockEventFindFirst = jest.fn();
 const mockEventCreate = jest.fn();
 
@@ -19,6 +20,8 @@ jest.mock('@repo-pulse/database', () => ({
     ISSUE_CLOSED: 'ISSUE_CLOSED',
   },
   Platform: { GITHUB: 'GITHUB' },
+  RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
+  RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
   prisma: {
     user: { findUnique: (...a: any[]) => mockUserFindUnique(...a) },
     repository: {
@@ -30,6 +33,7 @@ jest.mock('@repo-pulse/database', () => ({
     userRepository: {
       findUnique: (...a: any[]) => mockUserRepoFindUnique(...a),
       create: (...a: any[]) => mockUserRepoCreate(...a),
+      update: (...a: any[]) => mockUserRepoUpdate(...a),
     },
     event: {
       findFirst: (...a: any[]) => mockEventFindFirst(...a),
@@ -104,7 +108,7 @@ describe('SyncService', () => {
       expect(mockRepositoryService.create).toHaveBeenCalledWith(
         'u1',
         expect.objectContaining({ platform: 'GITHUB', owner: 'org', repo: 'new-repo' }),
-        'token',
+        expect.objectContaining({ userOAuthToken: 'token' }),
       );
     });
 
@@ -119,7 +123,7 @@ describe('SyncService', () => {
 
       await service.syncUserRepositories('u1');
       expect(mockUserRepoCreate).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ userId: 'u1', role: 'MEMBER' }) }),
+        expect.objectContaining({ data: expect.objectContaining({ userId: 'u1', role: 'VIEWER' }) }),
       );
       expect(mockRepositoryService.create).not.toHaveBeenCalled();
     });

@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { ReportService } from '../../src/modules/report/report.service';
 
 const mockUserRepoFindMany = jest.fn();
@@ -19,6 +20,8 @@ jest.mock('@repo-pulse/database', () => ({
   ReportType: { WEEKLY: 'WEEKLY', SECURITY: 'SECURITY', TEAM: 'TEAM' },
   ReportFormat: { PDF: 'PDF', MARKDOWN: 'MARKDOWN' },
   ReportStatus: { COMPLETED: 'COMPLETED', PENDING: 'PENDING' },
+  RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
+  RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
   prisma: {
     userRepository: { findMany: (...a: any[]) => mockUserRepoFindMany(...a) },
     user: { findUnique: (...a: any[]) => mockUserFindUnique(...a) },
@@ -224,7 +227,7 @@ describe('ReportService', () => {
   // ── generateReport ─────────────────────────────────────────────────────────
   it('throws when no accessible repositories', async () => {
     mockResolveRepos([]);
-    await expect(service.generateReport('u1', { type: 'WEEKLY' as any, format: 'MARKDOWN' as any })).rejects.toThrow('No accessible repositories');
+    await expect(service.generateReport('u1', { type: 'WEEKLY' as any, format: 'MARKDOWN' as any })).rejects.toThrow(ForbiddenException);
   });
 
   it('generates markdown report and saves to DB', async () => {

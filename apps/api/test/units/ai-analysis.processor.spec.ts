@@ -2,6 +2,8 @@ const mockEventFindUnique = jest.fn();
 
 jest.mock('@repo-pulse/database', () => ({
   NotificationChannel: { IN_APP: 'IN_APP', EMAIL: 'EMAIL' },
+  RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
+  RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
   prisma: {
     event: { findUnique: (...a: any[]) => mockEventFindUnique(...a) },
   },

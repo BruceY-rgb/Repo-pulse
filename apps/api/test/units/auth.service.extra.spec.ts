@@ -1,3 +1,11 @@
+jest.mock('@repo-pulse/database', () => ({
+  RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
+  RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
+  NotificationChannel: { EMAIL: 'EMAIL', DINGTALK: 'DINGTALK', FEISHU: 'FEISHU', WEBHOOK: 'WEBHOOK', IN_APP: 'IN_APP' },
+  prisma: {},
+  PrismaClient: jest.fn().mockImplementation(() => ({})),
+}));
+
 import { UnauthorizedException } from '@nestjs/common';
 import axios from 'axios';
 import * as bcrypt from 'bcrypt';

@@ -8,6 +8,8 @@ const mockApprovalFindUnique = jest.fn();
 jest.mock('@repo-pulse/database', () => ({
   ApprovalStatus: { PENDING: 'PENDING', APPROVED: 'APPROVED', REJECTED: 'REJECTED', EDITED: 'EDITED' },
   RiskLevel: { LOW: 'LOW', MEDIUM: 'MEDIUM', HIGH: 'HIGH', CRITICAL: 'CRITICAL' },
+  RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
+  RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
   prisma: {
     event: { findUnique: jest.fn(), findMany: (...a: any[]) => mockEventFindMany(...a) },
     approval: {
@@ -24,13 +26,17 @@ jest.mock('@repo-pulse/database', () => ({
   },
 }));
 
+import { NotFoundException } from '@nestjs/common';
 import { ApprovalService } from '../../src/modules/approval/approval.service';
+
+const approvalWithEvent = { id: 'a1', status: 'PENDING', event: { id: 'evt-1', repositoryId: 'r1' } };
 
 describe('ApprovalService - additional coverage', () => {
   let service: ApprovalService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUserRepoFindMany.mockResolvedValue([{ repositoryId: 'r1' }]);
     service = new ApprovalService();
   });
 
@@ -42,16 +48,16 @@ describe('ApprovalService - additional coverage', () => {
       expect(result).toEqual({ approvals: [], total: 0 });
     });
 
-    it('returns empty when no events in repos', async () => {
+    it('returns empty when no approvals exist for repos', async () => {
       mockUserRepoFindMany.mockResolvedValue([{ repositoryId: 'r1' }]);
-      mockEventFindMany.mockResolvedValue([]);
+      mockApprovalFindMany.mockResolvedValue([]);
+      mockApprovalCount.mockResolvedValue(0);
       const result = await service.getApprovals('u1');
       expect(result).toEqual({ approvals: [], total: 0 });
     });
 
     it('returns approvals and total count', async () => {
       mockUserRepoFindMany.mockResolvedValue([{ repositoryId: 'r1' }]);
-      mockEventFindMany.mockResolvedValue([{ id: 'e1' }]);
       const approvals = [{ id: 'a1', status: 'PENDING' }];
       mockApprovalFindMany.mockResolvedValue(approvals);
       mockApprovalCount.mockResolvedValue(1);
@@ -63,7 +69,6 @@ describe('ApprovalService - additional coverage', () => {
 
     it('filters by status when provided', async () => {
       mockUserRepoFindMany.mockResolvedValue([{ repositoryId: 'r1' }]);
-      mockEventFindMany.mockResolvedValue([{ id: 'e1' }]);
       mockApprovalFindMany.mockResolvedValue([]);
       mockApprovalCount.mockResolvedValue(0);
 
@@ -74,7 +79,6 @@ describe('ApprovalService - additional coverage', () => {
 
     it('uses default limit=20 and offset=0', async () => {
       mockUserRepoFindMany.mockResolvedValue([{ repositoryId: 'r1' }]);
-      mockEventFindMany.mockResolvedValue([{ id: 'e1' }]);
       mockApprovalFindMany.mockResolvedValue([]);
       mockApprovalCount.mockResolvedValue(0);
 
@@ -86,7 +90,6 @@ describe('ApprovalService - additional coverage', () => {
 
     it('respects custom limit and offset', async () => {
       mockUserRepoFindMany.mockResolvedValue([{ repositoryId: 'r1' }]);
-      mockEventFindMany.mockResolvedValue([{ id: 'e1' }]);
       mockApprovalFindMany.mockResolvedValue([]);
       mockApprovalCount.mockResolvedValue(0);
 
@@ -100,30 +103,30 @@ describe('ApprovalService - additional coverage', () => {
   // ── getById ───────────────────────────────────────────────────────────────
   describe('getById', () => {
     it('returns approval when found', async () => {
-      const approval = { id: 'a1', status: 'PENDING' };
-      mockApprovalFindUnique.mockResolvedValue(approval);
-      const result = await service.getById('a1');
-      expect(result).toBe(approval);
+      mockApprovalFindUnique.mockResolvedValue(approvalWithEvent);
+      const result = await service.getById('u1', 'a1');
+      expect(result).toMatchObject({ id: 'a1' });
     });
 
-    it('returns null when not found', async () => {
+    it('throws NotFoundException when not found', async () => {
       mockApprovalFindUnique.mockResolvedValue(null);
-      const result = await service.getById('bad-id');
-      expect(result).toBeNull();
+      await expect(service.getById('u1', 'bad-id')).rejects.toThrow(NotFoundException);
     });
   });
 
   // ── delete ────────────────────────────────────────────────────────────────
   describe('delete', () => {
     it('calls prisma.approval.delete with correct id', async () => {
+      mockApprovalFindUnique.mockResolvedValue(approvalWithEvent);
       mockApprovalDelete.mockResolvedValue({});
-      await service.delete('a1');
+      await service.delete('u1', 'a1');
       expect(mockApprovalDelete).toHaveBeenCalledWith({ where: { id: 'a1' } });
     });
 
     it('resolves to undefined', async () => {
+      mockApprovalFindUnique.mockResolvedValue(approvalWithEvent);
       mockApprovalDelete.mockResolvedValue({});
-      await expect(service.delete('a1')).resolves.toBeUndefined();
+      await expect(service.delete('u1', 'a1')).resolves.toBeUndefined();
     });
   });
 

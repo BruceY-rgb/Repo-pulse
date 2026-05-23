@@ -2,6 +2,8 @@ jest.mock('jspdf', () => ({ jsPDF: jest.fn() }), { virtual: true });
 jest.mock('@repo-pulse/database', () => ({
   ReportType: { WEEKLY: 'WEEKLY', MONTHLY: 'MONTHLY' },
   ReportFormat: { PDF: 'PDF', MARKDOWN: 'MARKDOWN' },
+  RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
+  RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
   prisma: {},
 }));
 
