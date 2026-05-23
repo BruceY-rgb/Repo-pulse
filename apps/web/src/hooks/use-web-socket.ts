@@ -15,6 +15,7 @@ import { analysisQueryKeys } from '@/hooks/use-analysis';
 import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
 import { useSyncProgressStore } from '@/stores/sync-progress.store';
 import { getSocketUrl } from '@/lib/desktop';
+import { getLastSeq, setLastSeq } from '@/lib/event-seq';
 
 type RealtimeEventHandlers = {
   [K in RealtimeEventName]: (payload: RealtimeEventPayloadMap[K]) => void;
@@ -43,10 +44,15 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
     }
 
     const nextRooms = new Set(getTargetRepositoryIds());
+    const userId = currentUser?.id;
 
     for (const id of nextRooms) {
       if (!subscribedRoomsRef.current.has(id)) {
-        socketRef.current.emit('join:repository', { repositoryId: id });
+        const sinceSeq = userId ? getLastSeq(userId, id) : undefined;
+        socketRef.current.emit('join:repository', {
+          repositoryId: id,
+          ...(typeof sinceSeq === 'number' ? { sinceSeq } : {}),
+        });
       }
     }
 
@@ -57,7 +63,7 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
     }
 
     subscribedRoomsRef.current = nextRooms;
-  }, [getTargetRepositoryIds]);
+  }, [currentUser?.id, getTargetRepositoryIds]);
 
   const connect = useCallback(() => {
     if (!currentUser || isAuthLoading || socketRef.current || connectTimeoutRef.current !== null) {
@@ -90,7 +96,10 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
       });
 
       const handlers: RealtimeEventHandlers = {
-        [REALTIME_EVENTS.EVENT_CREATED]: ({ repositoryId, eventType }) => {
+        [REALTIME_EVENTS.EVENT_CREATED]: ({ repositoryId, eventType, seq }) => {
+          if (currentUser?.id && typeof seq === 'number' && seq > 0) {
+            setLastSeq(currentUser.id, repositoryId, seq);
+          }
           queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
           queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
           queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.detail(repositoryId) });
@@ -99,6 +108,16 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
           }
           queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
           queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
+        },
+        [REALTIME_EVENTS.EVENT_REPLAY_DONE]: ({ repositoryId, replayed, hasMore, lastSeq }) => {
+          if (currentUser?.id && lastSeq > 0) {
+            setLastSeq(currentUser.id, repositoryId, lastSeq);
+          }
+          if (replayed > 0) {
+            console.log(
+              `[ws] replay done repo=${repositoryId} replayed=${replayed} hasMore=${hasMore} lastSeq=${lastSeq}`,
+            );
+          }
         },
         [REALTIME_EVENTS.ANALYSIS_COMPLETED]: ({ eventId }) => {
           queryClient.invalidateQueries({ queryKey: analysisQueryKeys.detail(eventId) });

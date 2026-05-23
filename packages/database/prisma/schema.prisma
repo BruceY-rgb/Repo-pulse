@@ -165,6 +165,7 @@ model UserRepository {
 
 model Event {
   id            String    @id @default(cuid())
+  seq           BigInt    @default(autoincrement())
   repositoryId  String
   type          EventType
   action        String
@@ -192,6 +193,7 @@ model Event {
   @@index([type, createdAt])
   @@index([repositoryId, occurredAt])
   @@index([type, occurredAt])
+  @@index([repositoryId, seq])
 }
 
 model AIAnalysis {

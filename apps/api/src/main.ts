@@ -10,6 +10,13 @@ import { AppModule } from './app.module';
 import { RedisIoAdapter } from './adapters/redis-io.adapter';
 import { join } from 'path';
 
+// 全局补丁：让 BigInt 能被 JSON.stringify 序列化（默认抛 TypeError）
+// Event.seq 是 BigInt，会被 NestJS 自动 JSON 响应序列化。
+// 安全：seq 从 1 开始自增，远低于 Number.MAX_SAFE_INTEGER (2^53)，转 Number 无精度损失。
+(BigInt.prototype as unknown as { toJSON(): number }).toJSON = function () {
+  return Number(this);
+};
+
 async function bootstrap() {
   // 保留 Raw Body 供 Webhook 验签使用
   const app = await NestFactory.create(AppModule, {

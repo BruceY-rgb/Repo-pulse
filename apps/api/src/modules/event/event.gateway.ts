@@ -11,15 +11,19 @@ import {
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
+import { PrismaClient } from '@repo-pulse/database';
 import {
   AnalysisCompletedPayload,
   EventCreatedPayload,
+  EventReplayDonePayload,
   REALTIME_EVENTS,
   RepositorySyncFailedPayload,
   RepositorySyncProgressPayload,
   RepositorySyncedPayload,
 } from '@repo-pulse/shared';
 import { Server, Socket } from 'socket.io';
+
+const REPLAY_BATCH_LIMIT = 200;
 
 interface JwtPayload {
   sub: string;
@@ -48,6 +52,7 @@ export class EventGateway
 
   private readonly logger = new Logger(EventGateway.name);
   private readonly jwtSecret: string;
+  private readonly prisma = new PrismaClient();
 
   constructor(private readonly configService: ConfigService) {
     this.jwtSecret =
@@ -86,16 +91,83 @@ export class EventGateway
   }
 
   @SubscribeMessage('join:repository')
-  handleJoinRepository(
+  async handleJoinRepository(
     @ConnectedSocket() client: UserSocket,
-    @MessageBody() data: { repositoryId: string },
+    @MessageBody() data: { repositoryId: string; sinceSeq?: number },
   ) {
     const roomName = `repo:${data.repositoryId}`;
+
+    // 1. 先把离线期间漏掉的事件补发到当前 socket（在 join room 之前，
+    //    避免新事件抢先到达打乱 seq 顺序）
+    if (typeof data.sinceSeq === 'number') {
+      await this.replayMissedEvents(client, data.repositoryId, data.sinceSeq);
+    }
+
+    // 2. 加入房间，从此刻起接收实时事件
     client.join(roomName);
     this.logger.log(
-      `Client ${client.id} joined room ${roomName} (user: ${client.userId})`,
+      `Client ${client.id} joined room ${roomName} (user: ${client.userId}${
+        typeof data.sinceSeq === 'number' ? `, sinceSeq=${data.sinceSeq}` : ''
+      })`,
     );
     return { event: 'joined', room: roomName };
+  }
+
+  private async replayMissedEvents(
+    client: UserSocket,
+    repositoryId: string,
+    sinceSeq: number,
+  ): Promise<void> {
+    try {
+      const missed = await this.prisma.event.findMany({
+        where: {
+          repositoryId,
+          seq: { gt: BigInt(sinceSeq) },
+        },
+        orderBy: { seq: 'asc' },
+        take: REPLAY_BATCH_LIMIT + 1,
+        select: {
+          id: true,
+          repositoryId: true,
+          type: true,
+          seq: true,
+          createdAt: true,
+        },
+      });
+
+      const hasMore = missed.length > REPLAY_BATCH_LIMIT;
+      const batch = hasMore ? missed.slice(0, REPLAY_BATCH_LIMIT) : missed;
+
+      for (const event of batch) {
+        const payload: EventCreatedPayload = {
+          eventId: event.id,
+          repositoryId: event.repositoryId,
+          eventType: event.type,
+          seq: Number(event.seq),
+          createdAt: event.createdAt.toISOString(),
+        };
+        client.emit(REALTIME_EVENTS.EVENT_CREATED, payload);
+      }
+
+      const donePayload: EventReplayDonePayload = {
+        repositoryId,
+        replayed: batch.length,
+        hasMore,
+        lastSeq:
+          batch.length > 0 ? Number(batch[batch.length - 1].seq) : sinceSeq,
+      };
+      client.emit(REALTIME_EVENTS.EVENT_REPLAY_DONE, donePayload);
+
+      this.logger.log(
+        `replay_complete repositoryId=${repositoryId} sinceSeq=${sinceSeq} replayed=${batch.length} hasMore=${hasMore}`,
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'unknown_error';
+      this.logger.warn(
+        `replay_failed repositoryId=${repositoryId} sinceSeq=${sinceSeq} reason=${message}`,
+      );
+    }
   }
 
   @SubscribeMessage('leave:repository')

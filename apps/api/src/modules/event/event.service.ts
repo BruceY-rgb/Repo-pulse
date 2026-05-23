@@ -385,7 +385,7 @@ export class EventService {
         eventId: event.id,
         repositoryId,
         eventType: event.type,
-        seq: 0,
+        seq: Number(event.seq),
         createdAt: event.createdAt.toISOString(),
       });
     } catch (error) {

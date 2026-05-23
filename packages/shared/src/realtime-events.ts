@@ -2,6 +2,7 @@ import type { ApprovalStatus, EventType } from './types';
 
 export const REALTIME_EVENTS = {
   EVENT_CREATED: 'event.created',
+  EVENT_REPLAY_DONE: 'event.replay-done',
   APPROVAL_UPDATED: 'approval.updated',
   REPOSITORY_SYNC_PROGRESS: 'repository.sync.progress',
   REPOSITORY_SYNCED: 'repository.synced',
@@ -57,8 +58,16 @@ export interface AnalysisCompletedPayload {
   completedAt: string;
 }
 
+export interface EventReplayDonePayload {
+  repositoryId: string;
+  replayed: number;
+  hasMore: boolean;
+  lastSeq: number;
+}
+
 export interface RealtimeEventPayloadMap {
   [REALTIME_EVENTS.EVENT_CREATED]: EventCreatedPayload;
+  [REALTIME_EVENTS.EVENT_REPLAY_DONE]: EventReplayDonePayload;
   [REALTIME_EVENTS.APPROVAL_UPDATED]: ApprovalUpdatedPayload;
   [REALTIME_EVENTS.REPOSITORY_SYNC_PROGRESS]: RepositorySyncProgressPayload;
   [REALTIME_EVENTS.REPOSITORY_SYNCED]: RepositorySyncedPayload;
