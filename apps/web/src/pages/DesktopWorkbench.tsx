@@ -97,6 +97,8 @@ import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
 import { eventService } from '@/services/event.service';
 import { approvalService, type Approval } from '@/services/approval.service';
 import { repositoryService } from '@/services/repository.service';
+import { authService } from '@/services/auth.service';
+import { isDesktopRuntime } from '@/lib/desktop';
 import type { Notification } from '@/services/notification.service';
 import { Dashboard } from '@/pages/Dashboard';
 import { Repositories } from '@/pages/Repositories';
@@ -1957,6 +1959,8 @@ function getWebhookStatusMeta(status: WebhookStatus) {
 
 function RepositoryWebhookSection({ repository }: { repository: Repository }) {
   const [secretVisible, setSecretVisible] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const autoRetryTriggeredRef = useRef(false);
   const statusQuery = useWebhookStatusQuery(repository.id);
   const retryMutation = useRetryWebhookMutation();
   const testMutation = useTestWebhookMutation();
@@ -1983,6 +1987,26 @@ function RepositoryWebhookSection({ repository }: { repository: Repository }) {
       toast.error(error instanceof Error ? error.message : '重建失败');
     }
   };
+
+  // OAuth 重新授权回来后自动 retry（URL 带 ?webhook_recheck=1）
+  useEffect(() => {
+    if (autoRetryTriggeredRef.current) {
+      return;
+    }
+    if (searchParams.get('webhook_recheck') !== '1') {
+      return;
+    }
+    autoRetryTriggeredRef.current = true;
+
+    // 先清除参数避免刷新页面又触发
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('webhook_recheck');
+    setSearchParams(nextParams, { replace: true });
+
+    toast.info('授权完成，正在自动重新创建 webhook…');
+    void handleRetry();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const handleTest = async () => {
     try {
@@ -2094,6 +2118,27 @@ function RepositoryWebhookSection({ repository }: { repository: Repository }) {
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
+        {data.status === WebhookStatus.INSUFFICIENT_SCOPE ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="default"
+            className="gap-1.5"
+            onClick={() => {
+              const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+              const authUrl = authService.getGithubAuthUrl(returnPath);
+              if (isDesktopRuntime()) {
+                void window.repoPulseDesktop?.openExternal(authUrl);
+                toast.info('已在浏览器打开 GitHub 授权页，授权完成后请回应用点 "重新创建"');
+              } else {
+                window.location.href = authUrl;
+              }
+            }}
+          >
+            <ShieldAlert className="h-3.5 w-3.5" />
+            重新授权 GitHub 权限
+          </Button>
+        ) : null}
         <Button
           type="button"
           size="sm"

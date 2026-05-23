@@ -192,13 +192,20 @@ export class AuthController {
     this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
     this.logger.log(`github_oauth_cookies_set githubId=${profile.id}`);
 
-    // 跳转到前端回调页
+    // 跳转到前端回调页（如果有 return cookie 则按 return 路径跳，附 webhook_recheck=1 让前端自动重试）
     const frontendUrl =
       this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+    const returnPath = req.cookies?.oauth_return_url as string | undefined;
+    res.clearCookie('oauth_return_url', { path: '/' });
+
+    const target = returnPath
+      ? `${frontendUrl}${returnPath}${returnPath.includes('?') ? '&' : '?'}webhook_recheck=1`
+      : `${frontendUrl}/auth/callback`;
+
     this.logger.log(
-      `github_oauth_callback_success email=${profile.email} githubId=${profile.id} redirect=${frontendUrl}/auth/callback`,
+      `github_oauth_callback_success email=${profile.email} githubId=${profile.id} redirect=${target}`,
     );
-    res.redirect(`${frontendUrl}/auth/callback`);
+    res.redirect(target);
   }
 
   /**

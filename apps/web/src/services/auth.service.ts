@@ -48,9 +48,14 @@ export const authService = {
 
   /**
    * 获取 GitHub OAuth 登录 URL
+   * @param returnPath 可选，OAuth 完成后前端跳转的相对路径（会带上 ?webhook_recheck=1）
    */
-  getGithubAuthUrl(): string {
-    return toApiUrl('/auth/github');
+  getGithubAuthUrl(returnPath?: string): string {
+    const base = toApiUrl('/auth/github');
+    if (!returnPath) {
+      return base;
+    }
+    return `${base}?return=${encodeURIComponent(returnPath)}`;
   },
 
   /**
