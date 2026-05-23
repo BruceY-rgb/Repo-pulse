@@ -35,9 +35,10 @@ type ConversationMessageType =
 interface MessageAction {
   key: string;
   label: string;
-  method: 'POST';
-  endpoint: string;
+  method: 'POST' | 'GET';
+  endpoint?: string;
   requiresConfirmation: boolean;
+  requiresPermission: boolean;
 }
 
 @Injectable()
@@ -216,6 +217,12 @@ export class WorkbenchService {
 
     const eventMessages = events.map((event) => {
       const pendingApproval = event.approvals[0];
+      const baseActions = this.buildBaseActions(event.externalUrl || undefined);
+      const approvalActions =
+        repositoryCanOperate && pendingApproval?.status === ApprovalStatus.PENDING
+          ? this.buildApprovalActions(pendingApproval.id)
+          : [];
+      const agentAction = repositoryCanOperate ? [this.buildAgentAction()] : [];
       return {
         id: event.id,
         repositoryId,
@@ -228,34 +235,36 @@ export class WorkbenchService {
         authorAvatar: event.authorAvatar || undefined,
         createdAt: (event.occurredAt ?? event.createdAt).toISOString(),
         externalUrl: event.externalUrl || undefined,
-        actions:
-          repositoryCanOperate && pendingApproval?.status === ApprovalStatus.PENDING
-            ? this.buildApprovalActions(pendingApproval.id)
-            : undefined,
+        actions: [...baseActions, ...approvalActions, ...agentAction],
       };
     });
 
-    const approvalMessages = approvals.map((approval) => ({
-      id: `approval-${approval.id}`,
-      repositoryId,
-      repositoryAccessLevel,
-      repositoryCanOperate,
-      type: 'approval' as const,
-      title: approval.event.title,
-      body:
-        approval.editedContent ||
-        approval.originalContent ||
-        approval.comment ||
-        `审批状态：${approval.status}`,
-      author: approval.reviewer?.name || approval.event.author || 'system',
-      authorAvatar: approval.reviewer?.avatar || approval.event.authorAvatar || undefined,
-      createdAt: (approval.reviewedAt ?? approval.createdAt).toISOString(),
-      externalUrl: approval.event.externalUrl || undefined,
-      actions:
+    const approvalMessages = approvals.map((approval) => {
+      const baseActions = this.buildBaseActions(approval.event.externalUrl || undefined);
+      const approvalActions =
         repositoryCanOperate && approval.status === ApprovalStatus.PENDING
           ? this.buildApprovalActions(approval.id)
-          : undefined,
-    }));
+          : [];
+      const agentAction = repositoryCanOperate ? [this.buildAgentAction()] : [];
+      return {
+        id: `approval-${approval.id}`,
+        repositoryId,
+        repositoryAccessLevel,
+        repositoryCanOperate,
+        type: 'approval' as const,
+        title: approval.event.title,
+        body:
+          approval.editedContent ||
+          approval.originalContent ||
+          approval.comment ||
+          `审批状态：${approval.status}`,
+        author: approval.reviewer?.name || approval.event.author || 'system',
+        authorAvatar: approval.reviewer?.avatar || approval.event.authorAvatar || undefined,
+        createdAt: (approval.reviewedAt ?? approval.createdAt).toISOString(),
+        externalUrl: approval.event.externalUrl || undefined,
+        actions: [...baseActions, ...approvalActions, ...agentAction],
+      };
+    });
 
     return [...eventMessages, ...approvalMessages].sort(
       (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
@@ -444,6 +453,28 @@ export class WorkbenchService {
     }
   }
 
+  private buildBaseActions(externalUrl?: string): MessageAction[] {
+    const actions: MessageAction[] = [];
+    if (externalUrl) {
+      actions.push({
+        key: 'open_github',
+        label: '打开 GitHub',
+        method: 'GET',
+        requiresConfirmation: false,
+        requiresPermission: false,
+      });
+    }
+    actions.push({
+      key: 'ai_analyze',
+      label: 'AI 分析',
+      method: 'POST',
+      endpoint: `/ai/trigger/__EVENT_ID__`,
+      requiresConfirmation: false,
+      requiresPermission: false,
+    });
+    return actions;
+  }
+
   private buildApprovalActions(approvalId: string): MessageAction[] {
     return [
       {
@@ -452,6 +483,7 @@ export class WorkbenchService {
         method: 'POST',
         endpoint: `/approvals/${approvalId}/approve`,
         requiresConfirmation: true,
+        requiresPermission: true,
       },
       {
         key: 'reject',
@@ -459,8 +491,19 @@ export class WorkbenchService {
         method: 'POST',
         endpoint: `/approvals/${approvalId}/reject`,
         requiresConfirmation: true,
+        requiresPermission: true,
       },
     ];
+  }
+
+  private buildAgentAction(): MessageAction {
+    return {
+      key: 'agent_handle',
+      label: '使用 Agent 处理',
+      method: 'POST',
+      requiresConfirmation: true,
+      requiresPermission: true,
+    };
   }
 
   private parseWatchFeedTypes(typesParam?: string): EventType[] {
