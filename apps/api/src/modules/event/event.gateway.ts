@@ -22,6 +22,7 @@ import {
   RepositorySyncedPayload,
 } from '@repo-pulse/shared';
 import { Server, Socket } from 'socket.io';
+import { MetricsService } from '../observability/metrics.service';
 
 const REPLAY_BATCH_LIMIT = 200;
 
@@ -34,6 +35,11 @@ interface JwtPayload {
 interface UserSocket extends Socket {
   userId?: string;
   email?: string;
+  /**
+   * 手动维护房间订阅计数，因为 Socket.io 在 disconnect handler 触发时
+   * client.rooms 可能已被清空，无法用于准确减计数。
+   */
+  subCount?: number;
 }
 
 @Injectable()
@@ -54,7 +60,10 @@ export class EventGateway
   private readonly jwtSecret: string;
   private readonly prisma = new PrismaClient();
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly metricsService: MetricsService,
+  ) {
     this.jwtSecret =
       this.configService.get<string>('JWT_SECRET') || 'default-secret';
   }
@@ -77,6 +86,7 @@ export class EventGateway
       const decoded = jwt.verify(token, this.jwtSecret) as JwtPayload;
       client.userId = decoded.sub;
       client.email = decoded.email;
+      this.metricsService.incrementConnections();
 
       this.logger.log(`Client ${client.id} connected as user ${decoded.sub}`);
     } catch (error) {
@@ -87,6 +97,16 @@ export class EventGateway
   }
 
   handleDisconnect(client: UserSocket) {
+    if (client.userId) {
+      // userId 存在说明 handleConnection 阶段已成功认证并 increment 过
+      this.metricsService.decrementConnections();
+      // 用手动维护的 subCount 而非 client.rooms.size
+      // （后者在 disconnect 时可能已被 Socket.io 清空）
+      const count = client.subCount ?? 0;
+      if (count > 0) {
+        this.metricsService.decrementSubscriptions(count);
+      }
+    }
     this.logger.log(`Client ${client.id} disconnected`);
   }
 
@@ -104,7 +124,12 @@ export class EventGateway
     }
 
     // 2. 加入房间，从此刻起接收实时事件
+    const alreadyIn = client.rooms.has(roomName);
     client.join(roomName);
+    if (!alreadyIn) {
+      client.subCount = (client.subCount ?? 0) + 1;
+      this.metricsService.incrementSubscriptions();
+    }
     this.logger.log(
       `Client ${client.id} joined room ${roomName} (user: ${client.userId}${
         typeof data.sinceSeq === 'number' ? `, sinceSeq=${data.sinceSeq}` : ''
@@ -176,7 +201,12 @@ export class EventGateway
     @MessageBody() data: { repositoryId: string },
   ) {
     const roomName = `repo:${data.repositoryId}`;
+    const wasIn = client.rooms.has(roomName);
     client.leave(roomName);
+    if (wasIn) {
+      client.subCount = Math.max(0, (client.subCount ?? 0) - 1);
+      this.metricsService.decrementSubscriptions();
+    }
     this.logger.log(
       `Client ${client.id} left room ${roomName} (user: ${client.userId})`,
     );
@@ -186,6 +216,8 @@ export class EventGateway
   broadcastEventCreated(payload: EventCreatedPayload) {
     const roomName = `repo:${payload.repositoryId}`;
     this.server.to(roomName).emit(REALTIME_EVENTS.EVENT_CREATED, payload);
+    const latency = Date.now() - new Date(payload.createdAt).getTime();
+    this.metricsService.observeEmitLatency(REALTIME_EVENTS.EVENT_CREATED, latency);
     this.logger.log(
       `Broadcast ${REALTIME_EVENTS.EVENT_CREATED} to room ${roomName} eventId=${payload.eventId}`,
     );
@@ -196,6 +228,11 @@ export class EventGateway
     this.server
       .to(roomName)
       .emit(REALTIME_EVENTS.ANALYSIS_COMPLETED, payload);
+    const latency = Date.now() - new Date(payload.completedAt).getTime();
+    this.metricsService.observeEmitLatency(
+      REALTIME_EVENTS.ANALYSIS_COMPLETED,
+      latency,
+    );
     this.logger.log(
       `Broadcast ${REALTIME_EVENTS.ANALYSIS_COMPLETED} to room ${roomName} eventId=${payload.eventId}`,
     );
@@ -206,6 +243,10 @@ export class EventGateway
     this.server
       .to(roomName)
       .emit(REALTIME_EVENTS.REPOSITORY_SYNC_PROGRESS, payload);
+    this.metricsService.observeEmitLatency(
+      REALTIME_EVENTS.REPOSITORY_SYNC_PROGRESS,
+      0,
+    );
     this.logger.log(
       `Broadcast ${REALTIME_EVENTS.REPOSITORY_SYNC_PROGRESS} to room ${roomName} jobId=${payload.jobId} stage=${payload.stage} progress=${payload.progress}`,
     );
@@ -216,6 +257,11 @@ export class EventGateway
     this.server
       .to(roomName)
       .emit(REALTIME_EVENTS.REPOSITORY_SYNCED, payload);
+    const latency = Date.now() - new Date(payload.syncedAt).getTime();
+    this.metricsService.observeEmitLatency(
+      REALTIME_EVENTS.REPOSITORY_SYNCED,
+      latency,
+    );
     this.logger.log(
       `Broadcast ${REALTIME_EVENTS.REPOSITORY_SYNCED} to room ${roomName} jobId=${payload.jobId} durationMs=${payload.durationMs}`,
     );
@@ -226,6 +272,10 @@ export class EventGateway
     this.server
       .to(roomName)
       .emit(REALTIME_EVENTS.REPOSITORY_SYNC_FAILED, payload);
+    this.metricsService.observeEmitLatency(
+      REALTIME_EVENTS.REPOSITORY_SYNC_FAILED,
+      0,
+    );
     this.logger.warn(
       `Broadcast ${REALTIME_EVENTS.REPOSITORY_SYNC_FAILED} to room ${roomName} jobId=${payload.jobId} reason=${payload.reason}`,
     );

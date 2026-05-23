@@ -90,6 +90,9 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
       });
 
       socket.on('disconnect', (reason) => {
+        // 清掉本地订阅缓存，确保重连时会重新 emit join:repository
+        // （否则 syncRoomSubscriptions 看到"已订阅"会跳过，后端永远收不到 join）
+        subscribedRoomsRef.current = new Set();
         if (reason !== 'io client disconnect') {
           console.warn('[socket] disconnect', reason);
         }
