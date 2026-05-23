@@ -349,3 +349,73 @@ pnpm --filter api test -- notification.service.spec.ts
 | 403 | 已认证但无权限 |
 | 404 | 资源不存在 |
 | 500 | 服务端内部错误，需要查 NestJS 日志 |
+
+---
+
+## 单元测试覆盖率记录
+
+| 时间 | 覆盖率 | 说明 |
+| :--- | :---: | :--- |
+| 初始状态 | ~69% | 合并前基线 |
+| 2026-05 补全单元测试 | ~81% | 新增 `notification.service`、`event.service`、`webhook.channel`、`report.service`、`approval.service`、`repository.service` 等模块的覆盖 |
+
+覆盖率报告在 CI `build` Job 中生成，上传至 Codecov（`flags: unit`）。本地查看：
+
+```bash
+pnpm --filter api test:cov
+# 报告输出到 apps/api/coverage/lcov.info
+```
+
+**覆盖率未上传 Codecov 的常见原因**：CI 的 `Run unit tests with coverage` 步骤失败时，其后的上传步骤不会执行。优先保证单元测试全部通过，覆盖率才能正常上报。
+
+---
+
+## feat/authority 合并后 E2E 测试的变更记录
+
+`feat/authority` 分支合并（2026-05）后，`userRepository` 表新增了两个字段，并调整了仓库接口的响应结构，导致多个 E2E 测试需要同步更新。
+
+### Schema 变更
+
+`UserRepository` 模型新增字段：
+
+```prisma
+accessMode   RepositoryAccessMode  @default(EDITABLE)
+accessLevel  RepositoryAccessLevel @default(READ)
+```
+
+**本地开发注意**：合并该分支后必须执行以下命令，否则 Prisma Client 不含新字段，ts-jest 编译会报 `TS2353`：
+
+```bash
+pnpm db:generate
+pnpm --filter=@repo-pulse/database build
+```
+
+### 仓库接口响应结构变更
+
+`GET /repositories` 和 `GET /repositories/:id` 不再返回嵌套的 `currentUserAccess` 对象，改为在顶层返回扁平字段：
+
+| 旧字段 | 新字段 | 说明 |
+| :--- | :--- | :--- |
+| `currentUserAccess.canWrite` | `canOperate` | 是否有写操作权限 |
+| `currentUserAccess.accessMode` | `accessLevel` | 访问级别（API 映射值） |
+| —（无） | `isEditable` | 等价于 `canOperate`，可读性别名 |
+| —（无） | `isMonitored` | 该仓库是否在用户监控范围内 |
+
+### 已修复的 E2E 测试文件
+
+| 文件 | 修复内容 |
+| :--- | :--- |
+| `repositories.e2e-spec.ts` | `userRepository.createMany` 补充 `accessLevel`；断言从 `currentUserAccess` 改为 `isEditable`/`canOperate` |
+| `repository-sync.e2e-spec.ts` | `userRepository.create` 补充 `accessLevel: WRITE` |
+| `ai-approval-pipeline.e2e-spec.ts` | `userRepository.create` 补充 `accessMode: EDITABLE, accessLevel: WRITE`（`createFromAIAnalysis` 需要查到有权限的用户才会创建审批）|
+
+### 已知问题：通知 monitoringScope 行为不一致
+
+`event-notification-pipeline.e2e-spec.ts` 当前在 CI 仍有 1 个用例失败，根因是两个模块对"用户未配置 `monitoringScope`"的处理语义相反：
+
+| 模块 | 无 `monitoringScope` 时的行为 |
+| :--- | :--- |
+| `event.service.ts` | 跳过，**不发通知**（opt-in 模型）|
+| `report.service.ts` | 回落到全部可访问仓库（opt-out 模型）|
+
+该问题是产品设计层面的决策，需要确认通知是"有权限就默认通知"还是"必须主动配置监控范围才通知"，再对应修改代码或测试数据。**暂不修复，等待产品决策。**
