@@ -18,6 +18,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReportModule } from './modules/report/report.module';
 import { ImModule } from './modules/im/im.module';
 import { MetricsModule } from './modules/observability/metrics.module';
+import { AppConfigModule } from './modules/app-config/app-config.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { HttpExceptionFilter } from './common/filters';
@@ -56,6 +57,9 @@ import { envValidationSchema } from './config/env.validation';
         };
       },
     }),
+
+    // Global app config (DB → env → default)
+    AppConfigModule,
 
     // Feature modules
     AuthModule,

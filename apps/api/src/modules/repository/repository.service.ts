@@ -7,6 +7,9 @@ import { GithubBranchInfo, GithubService } from './services/github.service';
 import { GitlabBranchInfo, GitlabService } from './services/gitlab.service';
 import { CreateRepositoryDto, UpdateRepositoryDto } from './dto/repository.dto';
 import { EventService } from '../event/event.service';
+import { AppConfigService } from '../app-config/app-config.service';
+
+const API_URL_FALLBACK = 'http://localhost:3001';
 
 export interface WebhookProvisionResult {
   webhookStatus: WebhookStatus;
@@ -60,6 +63,7 @@ export class RepositoryService {
     private readonly githubService: GithubService,
     private readonly gitlabService: GitlabService,
     private readonly eventService: EventService,
+    private readonly appConfigService: AppConfigService,
   ) {
     this.prisma = new PrismaClient();
   }
@@ -170,7 +174,7 @@ export class RepositoryService {
     webhookSecret: string;
     userOAuthToken?: string;
   }): Promise<WebhookProvisionResult> {
-    const apiUrl = this.configService.get<string>('API_URL', 'http://localhost:3001');
+    const apiUrl = (await this.appConfigService.get('API_URL', API_URL_FALLBACK)) ?? API_URL_FALLBACK;
 
     if (params.platform === Platform.GITHUB) {
       const webhookUrl = `${apiUrl}/webhooks/github`;
@@ -590,7 +594,7 @@ export class RepositoryService {
       repositoryId,
     );
 
-    const apiUrl = this.configService.get<string>('API_URL', 'http://localhost:3001');
+    const apiUrl = (await this.appConfigService.get('API_URL', API_URL_FALLBACK)) ?? API_URL_FALLBACK;
     const webhookEndpoint = repository.platform === Platform.GITHUB ? 'github' : 'gitlab';
     const webhookUrl = `${apiUrl}/webhooks/${webhookEndpoint}`;
 
@@ -715,6 +719,70 @@ export class RepositoryService {
 
     await this.githubService.pingWebhook(owner, repo, repository.webhookId, accessToken);
     return { success: true };
+  }
+
+  /**
+   * 批量重建用户作为 ADMIN 的所有 active 仓库 webhook
+   * 用于 API_URL 变更后批量同步到 GitHub（复用 retryWebhook 内部的自愈机制）
+   */
+  async batchRetryWebhooks(userId: string): Promise<{
+    total: number;
+    succeeded: number;
+    failed: number;
+    failures: Array<{ repositoryId: string; fullName: string; status: WebhookStatus; error?: string }>;
+  }> {
+    const repos = await this.prisma.repository.findMany({
+      where: {
+        isActive: true,
+        users: { some: { userId, role: 'ADMIN' } },
+      },
+      select: { id: true, fullName: true },
+    });
+
+    const results = await Promise.allSettled(
+      repos.map(async (repo) => ({
+        repo,
+        result: await this.retryWebhook(userId, repo.id),
+      })),
+    );
+
+    let succeeded = 0;
+    const failures: Array<{ repositoryId: string; fullName: string; status: WebhookStatus; error?: string }> = [];
+
+    for (const settled of results) {
+      if (settled.status === 'fulfilled') {
+        const { repo, result } = settled.value;
+        if (result.webhookStatus === WebhookStatus.ACTIVE) {
+          succeeded += 1;
+        } else {
+          failures.push({
+            repositoryId: repo.id,
+            fullName: repo.fullName,
+            status: result.webhookStatus,
+            error: result.webhookError,
+          });
+        }
+      } else {
+        const reason = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+        failures.push({
+          repositoryId: 'unknown',
+          fullName: 'unknown',
+          status: WebhookStatus.FAILED,
+          error: reason,
+        });
+      }
+    }
+
+    this.logger.log(
+      `batch_retry_webhooks_completed userId=${userId} total=${repos.length} succeeded=${succeeded} failed=${failures.length}`,
+    );
+
+    return {
+      total: repos.length,
+      succeeded,
+      failed: failures.length,
+      failures,
+    };
   }
 
   /**

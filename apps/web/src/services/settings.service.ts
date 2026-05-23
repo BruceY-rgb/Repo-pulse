@@ -18,6 +18,25 @@ export interface FetchModelsResult {
   models: ModelInfo[];
 }
 
+export type AppConfigSource = 'db' | 'env' | 'default';
+
+export interface ApiUrlConfig {
+  value: string;
+  source: AppConfigSource;
+}
+
+export interface BatchRetryWebhooksResult {
+  total: number;
+  succeeded: number;
+  failed: number;
+  failures: Array<{
+    repositoryId: string;
+    fullName: string;
+    status: string;
+    error?: string;
+  }>;
+}
+
 /**
  * 设置服务 - AI 配置
  */
@@ -67,6 +86,35 @@ export const settingsService = {
       apiKey,
       baseUrl,
     });
+    return data.data;
+  },
+
+  /**
+   * 读取 webhook API_URL 当前值 + 来源
+   */
+  async getApiUrlConfig(): Promise<ApiUrlConfig> {
+    const { data } = await apiClient.get<ApiResponse<ApiUrlConfig>>('/settings/app-config/api-url');
+    return data.data;
+  },
+
+  /**
+   * 更新 webhook API_URL（需要 ADMIN role）
+   */
+  async updateApiUrlConfig(value: string): Promise<ApiUrlConfig> {
+    const { data } = await apiClient.post<ApiResponse<ApiUrlConfig>>(
+      '/settings/app-config/api-url',
+      { value },
+    );
+    return data.data;
+  },
+
+  /**
+   * 批量重建用户作为 ADMIN 的所有 active 仓库 webhook
+   */
+  async batchRetryWebhooks(): Promise<BatchRetryWebhooksResult> {
+    const { data } = await apiClient.post<ApiResponse<BatchRetryWebhooksResult>>(
+      '/repositories/batch-retry-webhooks',
+    );
     return data.data;
   },
 };

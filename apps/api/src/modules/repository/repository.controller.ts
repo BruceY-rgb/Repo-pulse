@@ -131,6 +131,13 @@ export class RepositoryController {
     return { status: 'queued' as const, jobId: job.id };
   }
 
+  @Post('batch-retry-webhooks')
+  @ApiOperation({ summary: 'Re-register webhook for every active repo where caller is ADMIN' })
+  async batchRetryWebhooks(@Req() req: Request) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.batchRetryWebhooks(userId);
+  }
+
   @Get(':id/webhook')
   @ApiOperation({ summary: 'Get repository webhook status (live-checked against GitHub)' })
   async getWebhookStatus(@Req() req: Request, @Param('id') id: string) {

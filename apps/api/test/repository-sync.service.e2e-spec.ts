@@ -45,6 +45,7 @@ describe('RepositoryService.sync', () => {
       githubServiceMock as unknown as GithubService,
       {} as GitlabService,
       eventServiceMock as unknown as EventService,
+      {} as never,
     );
 
     prismaMock = {

@@ -28,6 +28,7 @@ describe('RepositoryService.getBranches', () => {
       githubServiceMock as unknown as GithubService,
       gitlabServiceMock as unknown as GitlabService,
       {} as EventService,
+      {} as never,
     );
 
     prismaMock = {

@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { prisma } from '@repo-pulse/database';
 import type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
+import { AppConfigService } from '../app-config/app-config.service';
+
+const API_URL_FALLBACK = 'http://localhost:3001';
 
 // Re-export for backward compatibility
 export type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
@@ -14,6 +17,27 @@ export interface FetchModelsResult {
 @Injectable()
 export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
+
+  constructor(private readonly appConfigService: AppConfigService) {}
+
+  /**
+   * 读取当前 webhook API_URL，附带来源标识
+   */
+  async getApiUrlConfig(): Promise<{ value: string; source: 'db' | 'env' | 'default' }> {
+    const resolved = await this.appConfigService.resolve('API_URL', API_URL_FALLBACK);
+    return resolved ?? { value: API_URL_FALLBACK, source: 'default' };
+  }
+
+  /**
+   * 更新 webhook API_URL 持久化到 DB
+   */
+  async updateApiUrlConfig(
+    userId: string,
+    value: string,
+  ): Promise<{ value: string; source: 'db' }> {
+    await this.appConfigService.set('API_URL', value, userId);
+    return { value, source: 'db' };
+  }
 
   async getAIConfig(userId: string): Promise<AIConfig> {
     const user = await prisma.user.findUnique({
