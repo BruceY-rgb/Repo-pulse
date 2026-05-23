@@ -7,6 +7,8 @@ import {
   RiskLevel,
   AnalysisStatus,
   ApprovalStatus,
+  RepositoryAccessLevel,
+  RepositoryAccessMode,
 } from '@repo-pulse/database';
 import { AppModule } from '../src/app.module';
 import { ApprovalService } from '../src/modules/approval/approval.service';
@@ -45,7 +47,13 @@ describe('AI analysis → Approval pipeline (e2e)', () => {
     testRepoId = repo.id;
 
     await prisma.userRepository.create({
-      data: { userId: testUserId, repositoryId: testRepoId, role: 'ADMIN' },
+      data: {
+        userId: testUserId,
+        repositoryId: testRepoId,
+        role: 'ADMIN',
+        accessMode: RepositoryAccessMode.EDITABLE,
+        accessLevel: RepositoryAccessLevel.WRITE,
+      },
     });
 
     const moduleFixture: TestingModule = await Test.createTestingModule({

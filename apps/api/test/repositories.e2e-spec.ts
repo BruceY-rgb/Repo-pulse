@@ -7,6 +7,7 @@ import {
   PrismaClient,
   Platform,
   RepositoryAccessMode,
+  RepositoryAccessLevel,
 } from '@repo-pulse/database';
 import { AppModule } from '../src/app.module';
 
@@ -64,12 +65,14 @@ describe('RepositoryModule (e2e)', () => {
           repositoryId: editableRepoId,
           role: 'ADMIN',
           accessMode: RepositoryAccessMode.EDITABLE,
+          accessLevel: RepositoryAccessLevel.WRITE,
         },
         {
           userId: testUserId,
           repositoryId: monitorRepoId,
           role: 'VIEWER',
           accessMode: RepositoryAccessMode.MONITOR,
+          accessLevel: RepositoryAccessLevel.READ,
         },
       ],
     });
@@ -148,16 +151,10 @@ describe('RepositoryModule (e2e)', () => {
       const editableRepo = list.find((repo: { id: string }) => repo.id === editableRepoId);
       const monitorRepo = list.find((repo: { id: string }) => repo.id === monitorRepoId);
 
-      expect(editableRepo.currentUserAccess).toEqual({
-        accessMode: 'EDITABLE',
-        role: 'ADMIN',
-        canWrite: true,
-      });
-      expect(monitorRepo.currentUserAccess).toEqual({
-        accessMode: 'MONITOR',
-        role: 'VIEWER',
-        canWrite: false,
-      });
+      expect(editableRepo.isEditable).toBe(true);
+      expect(editableRepo.canOperate).toBe(true);
+      expect(monitorRepo.isEditable).toBe(false);
+      expect(monitorRepo.canOperate).toBe(false);
       expect(editableRepo.webhookSecret).toBeNull();
     });
   });
@@ -172,7 +169,7 @@ describe('RepositoryModule (e2e)', () => {
       const repo = res.body.data ?? res.body;
       expect(repo.id).toBe(editableRepoId);
       expect(repo.fullName).toBe('contract-org/contract-test-repo');
-      expect(repo.currentUserAccess.canWrite).toBe(true);
+      expect(repo.canOperate).toBe(true);
     });
 
     it('returns 404 for a missing repository', () => {
@@ -250,6 +247,7 @@ describe('RepositoryModule (e2e)', () => {
           repositoryId: deleteRepo.id,
           role: 'ADMIN',
           accessMode: RepositoryAccessMode.EDITABLE,
+          accessLevel: RepositoryAccessLevel.WRITE,
         },
       });
 
