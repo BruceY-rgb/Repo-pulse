@@ -1,7 +1,8 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { WorkbenchService } from './workbench.service';
+import { ReadConversationDto } from './dto/read-conversation.dto';
 
 @Controller('workbench')
 @UseGuards(AuthGuard('jwt'))
@@ -19,6 +20,15 @@ export class WorkbenchController {
     @Param('id') repositoryId: string,
   ): Promise<any> {
     return this.workbenchService.getConversationMessages(user.sub, repositoryId);
+  }
+
+  @Post('chat/repositories/:id/read')
+  async markChatRepositoryRead(
+    @CurrentUser() user: { sub: string },
+    @Param('id') repositoryId: string,
+    @Body() body: ReadConversationDto,
+  ): Promise<any> {
+    return this.workbenchService.markConversationAsRead(user.sub, repositoryId, body);
   }
 
   @Get('watch-feed')

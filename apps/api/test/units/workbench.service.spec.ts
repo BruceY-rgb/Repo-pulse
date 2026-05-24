@@ -3,10 +3,15 @@ import { WorkbenchService } from '../../src/modules/workbench/workbench.service'
 const mockPrismaUserRepoFindMany = jest.fn();
 const mockPrismaRepoFindUnique = jest.fn();
 const mockPrismaEventFindMany = jest.fn();
+const mockPrismaEventFindFirst = jest.fn();
 const mockPrismaApprovalFindMany = jest.fn();
+const mockPrismaApprovalFindFirst = jest.fn();
 const mockPrismaNotificationFindMany = jest.fn();
 const mockPrismaAIAnalysisFindMany = jest.fn();
 const mockPrismaUserFindUnique = jest.fn();
+const mockPrismaConversationStateFindMany = jest.fn();
+const mockPrismaConversationStateFindUnique = jest.fn();
+const mockPrismaConversationStateUpsert = jest.fn();
 
 const mockGetUserMonitoredRepositoryIds = jest.fn();
 const mockAssertUserCanAccessRepository = jest.fn();
@@ -50,6 +55,7 @@ jest.mock('@repo-pulse/database', () => ({
     NONE: 'NONE',
   },
   RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
+  RiskLevel: { LOW: 'LOW', MEDIUM: 'MEDIUM', HIGH: 'HIGH', CRITICAL: 'CRITICAL' },
   Platform: { GITHUB: 'GITHUB', GITLAB: 'GITLAB' },
   NotificationChannel: { IN_APP: 'IN_APP', EMAIL: 'EMAIL' },
   prisma: {
@@ -61,9 +67,11 @@ jest.mock('@repo-pulse/database', () => ({
     },
     event: {
       findMany: (...a: any[]) => mockPrismaEventFindMany(...a),
+      findFirst: (...a: any[]) => mockPrismaEventFindFirst(...a),
     },
     approval: {
       findMany: (...a: any[]) => mockPrismaApprovalFindMany(...a),
+      findFirst: (...a: any[]) => mockPrismaApprovalFindFirst(...a),
     },
     notification: {
       findMany: (...a: any[]) => mockPrismaNotificationFindMany(...a),
@@ -73,6 +81,11 @@ jest.mock('@repo-pulse/database', () => ({
     },
     user: {
       findUnique: (...a: any[]) => mockPrismaUserFindUnique(...a),
+    },
+    userRepositoryConversationState: {
+      findMany: (...a: any[]) => mockPrismaConversationStateFindMany(...a),
+      findUnique: (...a: any[]) => mockPrismaConversationStateFindUnique(...a),
+      upsert: (...a: any[]) => mockPrismaConversationStateUpsert(...a),
     },
   },
 }));
@@ -175,10 +188,22 @@ describe('WorkbenchService', () => {
     });
     mockPrismaUserFindUnique.mockResolvedValue({ preferences: {} });
     mockPrismaEventFindMany.mockResolvedValue([]);
+    mockPrismaEventFindFirst.mockResolvedValue(null);
     mockPrismaNotificationFindMany.mockResolvedValue([]);
     mockPrismaAIAnalysisFindMany.mockResolvedValue([]);
     mockPrismaRepoFindUnique.mockResolvedValue(makeRepo('r1'));
     mockPrismaApprovalFindMany.mockResolvedValue([]);
+    mockPrismaApprovalFindFirst.mockResolvedValue(null);
+    mockPrismaConversationStateFindMany.mockResolvedValue([]);
+    mockPrismaConversationStateFindUnique.mockResolvedValue(null);
+    mockPrismaConversationStateUpsert.mockResolvedValue({
+      userId: 'u1',
+      repositoryId: 'r1',
+      lastReadAt: new Date('2025-06-01'),
+      lastViewedAt: new Date('2025-06-01'),
+      createdAt: new Date('2025-06-01'),
+      updatedAt: new Date('2025-06-01'),
+    });
     service = new WorkbenchService();
   });
 
@@ -285,13 +310,28 @@ describe('WorkbenchService', () => {
       expect(result.editableRepositories[0].latestMessagePreview).toBe('Latest commit message');
     });
 
-    it('includes unread notification counts', async () => {
+    it('includes unread message counts', async () => {
       mockPrismaUserRepoFindMany.mockResolvedValue([
         makeUserRepo('r1', 'WRITE', 'EDITABLE'),
       ]);
-      mockPrismaNotificationFindMany.mockResolvedValue([
-        { event: { repositoryId: 'r1' } },
-        { event: { repositoryId: 'r1' } },
+      mockPrismaConversationStateFindMany.mockResolvedValue([
+        {
+          repositoryId: 'r1',
+          lastReadAt: new Date('2025-06-10'),
+          lastViewedAt: new Date('2025-06-10'),
+        },
+      ]);
+      mockPrismaEventFindMany.mockResolvedValue([
+        makeEvent('r1', 'PUSH', {
+          id: 'evt-r1-1',
+          occurredAt: new Date('2025-06-11'),
+          createdAt: new Date('2025-06-11'),
+        }),
+        makeEvent('r1', 'ISSUE_OPENED', {
+          id: 'evt-r1-2',
+          occurredAt: new Date('2025-06-12'),
+          createdAt: new Date('2025-06-12'),
+        }),
       ]);
 
       const result = await service.getChatRepositories('u1');
@@ -303,8 +343,10 @@ describe('WorkbenchService', () => {
       mockPrismaUserRepoFindMany.mockResolvedValue([
         makeUserRepo('r1', 'WRITE', 'EDITABLE'),
       ]);
-      mockPrismaAIAnalysisFindMany.mockResolvedValue([
-        { event: { repositoryId: 'r1' } },
+      mockPrismaEventFindMany.mockResolvedValue([
+        makeEvent('r1', 'PUSH', {
+          analyses: [{ status: 'COMPLETED', riskLevel: 'HIGH' }],
+        }),
       ]);
 
       const result = await service.getChatRepositories('u1');
@@ -332,11 +374,11 @@ describe('WorkbenchService', () => {
         makeEvent('r1', 'ISSUE_OPENED'),
       ]);
 
-      const messages = await service.getConversationMessages('u1', 'r1');
+      const result = await service.getConversationMessages('u1', 'r1');
 
-      expect(messages).toHaveLength(1);
-      expect(messages[0].repositoryCanOperate).toBe(true);
-      expect(messages[0].actions).toBeDefined();
+      expect(result.messages).toHaveLength(1);
+      expect(result.messages[0].repositoryCanOperate).toBe(true);
+      expect(result.messages[0].actions).toBeDefined();
     });
 
     it('sets repositoryCanOperate=false for READ access level', async () => {
@@ -350,10 +392,10 @@ describe('WorkbenchService', () => {
         makeEvent('r1', 'ISSUE_OPENED'),
       ]);
 
-      const messages = await service.getConversationMessages('u1', 'r1');
+      const result = await service.getConversationMessages('u1', 'r1');
 
-      expect(messages).toHaveLength(1);
-      expect(messages[0].repositoryCanOperate).toBe(false);
+      expect(result.messages).toHaveLength(1);
+      expect(result.messages[0].repositoryCanOperate).toBe(false);
     });
 
     it('includes base actions (open_github, ai_analyze) for all messages', async () => {
@@ -363,9 +405,9 @@ describe('WorkbenchService', () => {
         }),
       ]);
 
-      const messages = await service.getConversationMessages('u1', 'r1');
+      const result = await service.getConversationMessages('u1', 'r1');
 
-      const actions = messages[0].actions;
+      const actions = result.messages[0].actions;
       const githubAction = actions?.find((a) => a.key === 'open_github');
       const aiAction = actions?.find((a) => a.key === 'ai_analyze');
 
@@ -380,8 +422,8 @@ describe('WorkbenchService', () => {
         makeEvent('r1', 'ISSUE_OPENED'),
       ]);
 
-      const messages = await service.getConversationMessages('u1', 'r1');
-      const agentAction = messages[0].actions?.find((a) => a.key === 'agent_handle');
+      const result = await service.getConversationMessages('u1', 'r1');
+      const agentAction = result.messages[0].actions?.find((a) => a.key === 'agent_handle');
       expect(agentAction).toBeDefined();
       expect(agentAction?.requiresPermission).toBe(true);
     });
@@ -397,8 +439,8 @@ describe('WorkbenchService', () => {
         makeEvent('r1', 'ISSUE_OPENED'),
       ]);
 
-      const messages = await service.getConversationMessages('u1', 'r1');
-      const agentAction = messages[0].actions?.find((a) => a.key === 'agent_handle');
+      const result = await service.getConversationMessages('u1', 'r1');
+      const agentAction = result.messages[0].actions?.find((a) => a.key === 'agent_handle');
       expect(agentAction).toBeUndefined();
     });
 
@@ -412,9 +454,9 @@ describe('WorkbenchService', () => {
         makeEvent('r1', 'PR_OPENED', { approvals: [pendingApproval] }),
       ]);
 
-      const messages = await service.getConversationMessages('u1', 'r1');
-      const approveAction = messages[0].actions?.find((a) => a.key === 'approve');
-      const rejectAction = messages[0].actions?.find((a) => a.key === 'reject');
+      const result = await service.getConversationMessages('u1', 'r1');
+      const approveAction = result.messages[0].actions?.find((a) => a.key === 'approve');
+      const rejectAction = result.messages[0].actions?.find((a) => a.key === 'reject');
 
       expect(approveAction).toBeDefined();
       expect(approveAction?.requiresPermission).toBe(true);
@@ -438,8 +480,8 @@ describe('WorkbenchService', () => {
         makeEvent('r1', 'PR_OPENED', { approvals: [pendingApproval] }),
       ]);
 
-      const messages = await service.getConversationMessages('u1', 'r1');
-      const approveAction = messages[0].actions?.find((a) => a.key === 'approve');
+      const result = await service.getConversationMessages('u1', 'r1');
+      const approveAction = result.messages[0].actions?.find((a) => a.key === 'approve');
       expect(approveAction).toBeUndefined();
     });
 
@@ -449,12 +491,12 @@ describe('WorkbenchService', () => {
         makeApproval('evt-r1', 'PENDING', 'r1'),
       ]);
 
-      const messages = await service.getConversationMessages('u1', 'r1');
+      const result = await service.getConversationMessages('u1', 'r1');
 
-      expect(messages).toHaveLength(1);
-      expect(messages[0].type).toBe('approval');
-      expect(messages[0].repositoryCanOperate).toBe(true);
-      const approveAction = messages[0].actions?.find((a) => a.key === 'approve');
+      expect(result.messages).toHaveLength(1);
+      expect(result.messages[0].type).toBe('approval');
+      expect(result.messages[0].repositoryCanOperate).toBe(true);
+      const approveAction = result.messages[0].actions?.find((a) => a.key === 'approve');
       expect(approveAction).toBeDefined();
     });
 
@@ -472,10 +514,10 @@ describe('WorkbenchService', () => {
         }),
       ]);
 
-      const messages = await service.getConversationMessages('u1', 'r1');
+      const result = await service.getConversationMessages('u1', 'r1');
 
-      expect(new Date(messages[0].createdAt).getTime()).toBeGreaterThan(
-        new Date(messages[1].createdAt).getTime(),
+      expect(new Date(result.messages[0].createdAt).getTime()).toBeGreaterThan(
+        new Date(result.messages[1].createdAt).getTime(),
       );
     });
   });

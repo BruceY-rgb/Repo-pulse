@@ -140,6 +140,7 @@ model User {
   updatedAt          DateTime @updatedAt
 
   repositories  UserRepository[]
+  conversationStates UserRepositoryConversationState[]
   approvals     Approval[]
   notifications Notification[]
   workspaces    Workspace[]
@@ -162,6 +163,7 @@ model Repository {
   updatedAt     DateTime @updatedAt
 
   users         UserRepository[]
+  conversationStates UserRepositoryConversationState[]
   events        Event[]
 
   @@unique([platform, externalId])
@@ -180,6 +182,22 @@ model UserRepository {
   repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
 
   @@id([userId, repositoryId])
+}
+
+model UserRepositoryConversationState {
+  userId       String
+  repositoryId String
+  lastReadAt   DateTime?
+  lastViewedAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@id([userId, repositoryId])
+  @@index([userId, lastReadAt])
+  @@index([repositoryId, updatedAt])
 }
 
 model Event {
