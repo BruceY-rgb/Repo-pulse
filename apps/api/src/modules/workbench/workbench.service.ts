@@ -2,8 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   ApprovalStatus,
   EventType,
-  NotificationChannel,
   RepositoryAccessLevel,
+  RiskLevel,
   prisma,
 } from '@repo-pulse/database';
 import {
@@ -12,6 +12,7 @@ import {
   getUserMonitoredRepositoryIds,
   isEditableRepositoryAccessLevel,
 } from '../../common/utils/repository-access';
+import { ReadConversationDto } from './dto/read-conversation.dto';
 
 type RepositoryAccessLevelApi =
   | 'owner'
@@ -32,12 +33,32 @@ type ConversationMessageType =
   | 'agent'
   | 'notification';
 
+type RiskCounts = Record<RiskLevel, number>;
+
 interface MessageAction {
   key: string;
   label: string;
   method: 'POST';
   endpoint: string;
   requiresConfirmation: boolean;
+}
+
+interface ConversationSummary {
+  latestMessageAt: string | null;
+  latestMessageType: ConversationMessageType | null;
+  latestMessagePreview: string | null;
+  unreadCount: number;
+  unreadRiskLevel: RiskLevel | null;
+  unreadRiskCounts: RiskCounts;
+  hasPendingApproval: boolean;
+  pendingApprovalCount: number;
+  hasPendingAgentAction: boolean;
+  pendingAgentActionCount: number;
+}
+
+interface ConversationStateSnapshot {
+  lastReadAt: Date | null;
+  lastViewedAt: Date | null;
 }
 
 @Injectable()
@@ -68,88 +89,121 @@ export class WorkbenchService {
       .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
     const repositoryIds = chatRepositories.map((item) => item.repository.id);
-    const latestEvents = repositoryIds.length > 0
-      ? await prisma.event.findMany({
-          where: { repositoryId: { in: repositoryIds } },
-          orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
-          select: {
-            id: true,
-            repositoryId: true,
-            title: true,
-            body: true,
-            occurredAt: true,
-            createdAt: true,
-          },
-        })
-      : [];
+    const [conversationStateMap, events, approvals] = await Promise.all([
+      this.getConversationStateMap(userId, repositoryIds),
+      repositoryIds.length > 0
+        ? prisma.event.findMany({
+            where: { repositoryId: { in: repositoryIds } },
+            include: {
+              analyses: {
+                where: { status: 'COMPLETED' },
+                orderBy: { createdAt: 'desc' },
+                take: 1,
+              },
+            },
+            orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+          })
+        : Promise.resolve([]),
+      repositoryIds.length > 0
+        ? prisma.approval.findMany({
+            where: {
+              event: {
+                repositoryId: { in: repositoryIds },
+              },
+            },
+            include: {
+              event: {
+                include: {
+                  analyses: {
+                    where: { status: 'COMPLETED' },
+                    orderBy: { createdAt: 'desc' },
+                    take: 1,
+                  },
+                },
+              },
+            },
+            orderBy: [{ reviewedAt: 'desc' }, { createdAt: 'desc' }],
+          })
+        : Promise.resolve([]),
+    ]);
 
-    const latestEventMap = new Map<string, (typeof latestEvents)[number]>();
-    for (const event of latestEvents) {
-      if (!latestEventMap.has(event.repositoryId)) {
-        latestEventMap.set(event.repositoryId, event);
+    const summaryMap = new Map<string, ConversationSummary>();
+    for (const repositoryId of repositoryIds) {
+      summaryMap.set(repositoryId, this.createEmptyConversationSummary());
+    }
+
+    for (const event of events) {
+      const summary = summaryMap.get(event.repositoryId);
+      if (!summary) continue;
+
+      const eventTime = this.resolveEventMessageTime(event);
+      const riskLevel = this.resolveEventRiskLevel(event.analyses);
+      this.updateConversationLatest(summary, {
+        messageAt: eventTime,
+        type: this.mapEventTypeToConversationType(event.type),
+        preview: event.body || event.analyses[0]?.summary || event.title || null,
+      });
+
+      const lastReadAt = conversationStateMap.get(event.repositoryId)?.lastReadAt ?? null;
+      if (this.isUnreadMessage(eventTime, lastReadAt)) {
+        this.incrementUnread(summary, riskLevel);
       }
     }
 
-    const unreadCountMap = new Map<string, number>();
-    if (repositoryIds.length > 0) {
-      const unreadNotifications = await prisma.notification.findMany({
-        where: {
-          userId,
-          channel: NotificationChannel.IN_APP,
-          readAt: null,
-          event: {
-            repositoryId: { in: repositoryIds },
-          },
-        },
-        select: {
-          event: {
-            select: {
-              repositoryId: true,
-            },
-          },
-        },
-      });
-      for (const item of unreadNotifications) {
-        const repositoryId = item.event?.repositoryId;
-        if (!repositoryId) continue;
-        unreadCountMap.set(repositoryId, (unreadCountMap.get(repositoryId) ?? 0) + 1);
-      }
-    }
+    for (const approval of approvals) {
+      const repositoryId = approval.event.repositoryId;
+      const summary = summaryMap.get(repositoryId);
+      if (!summary) continue;
 
-    const highRiskCountMap = new Map<string, number>();
-    if (repositoryIds.length > 0) {
-      const highRiskAnalyses = await prisma.aIAnalysis.findMany({
-        where: {
-          riskLevel: { in: ['HIGH', 'CRITICAL'] },
-          event: {
-            repositoryId: { in: repositoryIds },
-          },
-        },
-        select: {
-          event: {
-            select: {
-              repositoryId: true,
-            },
-          },
-        },
+      const approvalTime = this.resolveApprovalMessageTime(approval);
+      const riskLevel = this.resolveApprovalRiskLevel(
+        approval.event.analyses,
+        approval.status,
+      );
+      this.updateConversationLatest(summary, {
+        messageAt: approvalTime,
+        type: 'approval',
+        preview:
+          approval.editedContent ||
+          approval.originalContent ||
+          approval.comment ||
+          approval.event.title ||
+          null,
       });
-      for (const item of highRiskAnalyses) {
-        const repositoryId = item.event.repositoryId;
-        highRiskCountMap.set(repositoryId, (highRiskCountMap.get(repositoryId) ?? 0) + 1);
+
+      if (approval.status === ApprovalStatus.PENDING) {
+        summary.hasPendingApproval = true;
+        summary.pendingApprovalCount += 1;
+      }
+
+      const lastReadAt = conversationStateMap.get(repositoryId)?.lastReadAt ?? null;
+      if (this.isUnreadMessage(approvalTime, lastReadAt)) {
+        this.incrementUnread(summary, riskLevel);
       }
     }
 
     const items = chatRepositories.map(({ repository, repositoryView, kind }) => {
-      const latestEvent = latestEventMap.get(repository.id);
+      const conversationState = conversationStateMap.get(repository.id);
+      const summary = summaryMap.get(repository.id) ?? this.createEmptyConversationSummary();
       return {
         repository: repositoryView,
         kind,
-        latestMessageAt: latestEvent
-          ? (latestEvent.occurredAt ?? latestEvent.createdAt).toISOString()
-          : null,
-        latestMessagePreview: latestEvent?.body || latestEvent?.title || null,
-        unreadCount: unreadCountMap.get(repository.id) ?? 0,
-        highRiskCount: highRiskCountMap.get(repository.id) ?? 0,
+        lastReadAt: conversationState?.lastReadAt?.toISOString() ?? null,
+        latestMessageAt: summary.latestMessageAt,
+        latestMessageType: summary.latestMessageType,
+        latestMessagePreview: summary.latestMessagePreview,
+        unreadCount: summary.unreadCount,
+        unreadRiskLevel: summary.unreadRiskLevel,
+        unreadRiskCounts: summary.unreadRiskCounts,
+        highRiskCount: summary.unreadRiskCounts.HIGH + summary.unreadRiskCounts.CRITICAL,
+        hasPendingApproval: summary.hasPendingApproval,
+        pendingApprovalCount: summary.pendingApprovalCount,
+        hasPendingAgentAction: summary.hasPendingAgentAction,
+        pendingAgentActionCount: summary.pendingAgentActionCount,
+        requiresAttention:
+          summary.unreadCount > 0 ||
+          summary.hasPendingApproval ||
+          summary.hasPendingAgentAction,
       };
     });
 
@@ -177,7 +231,15 @@ export class WorkbenchService {
     const repositoryCanOperate = isEditableRepositoryAccessLevel(membership.accessLevel);
     const repositoryAccessLevel = this.mapAccessLevelToApi(membership.accessLevel);
 
-    const [events, approvals] = await Promise.all([
+    const [conversationState, events, approvals] = await Promise.all([
+      prisma.userRepositoryConversationState.findUnique({
+        where: {
+          userId_repositoryId: {
+            userId,
+            repositoryId,
+          },
+        },
+      }),
       prisma.event.findMany({
         where: { repositoryId },
         include: {
@@ -201,7 +263,15 @@ export class WorkbenchService {
           },
         },
         include: {
-          event: true,
+          event: {
+            include: {
+              analyses: {
+                where: { status: 'COMPLETED' },
+                orderBy: { createdAt: 'desc' },
+                take: 1,
+              },
+            },
+          },
           reviewer: {
             select: {
               name: true,
@@ -214,8 +284,11 @@ export class WorkbenchService {
       }),
     ]);
 
+    const lastReadAt = conversationState?.lastReadAt ?? null;
+
     const eventMessages = events.map((event) => {
       const pendingApproval = event.approvals[0];
+      const messageTime = this.resolveEventMessageTime(event);
       return {
         id: event.id,
         repositoryId,
@@ -226,8 +299,13 @@ export class WorkbenchService {
         body: event.body || event.analyses[0]?.summary || '',
         author: event.author,
         authorAvatar: event.authorAvatar || undefined,
-        createdAt: (event.occurredAt ?? event.createdAt).toISOString(),
+        createdAt: messageTime.toISOString(),
         externalUrl: event.externalUrl || undefined,
+        riskLevel: this.resolveEventRiskLevel(event.analyses),
+        isUnread: this.isUnreadMessage(messageTime, lastReadAt),
+        hasPendingApprovalAction:
+          repositoryCanOperate && pendingApproval?.status === ApprovalStatus.PENDING,
+        hasPendingAgentAction: false,
         actions:
           repositoryCanOperate && pendingApproval?.status === ApprovalStatus.PENDING
             ? this.buildApprovalActions(pendingApproval.id)
@@ -235,31 +313,161 @@ export class WorkbenchService {
       };
     });
 
-    const approvalMessages = approvals.map((approval) => ({
-      id: `approval-${approval.id}`,
-      repositoryId,
-      repositoryAccessLevel,
-      repositoryCanOperate,
-      type: 'approval' as const,
-      title: approval.event.title,
-      body:
-        approval.editedContent ||
-        approval.originalContent ||
-        approval.comment ||
-        `审批状态：${approval.status}`,
-      author: approval.reviewer?.name || approval.event.author || 'system',
-      authorAvatar: approval.reviewer?.avatar || approval.event.authorAvatar || undefined,
-      createdAt: (approval.reviewedAt ?? approval.createdAt).toISOString(),
-      externalUrl: approval.event.externalUrl || undefined,
-      actions:
-        repositoryCanOperate && approval.status === ApprovalStatus.PENDING
-          ? this.buildApprovalActions(approval.id)
-          : undefined,
-    }));
+    const approvalMessages = approvals.map((approval) => {
+      const messageTime = this.resolveApprovalMessageTime(approval);
+      return {
+        id: `approval-${approval.id}`,
+        repositoryId,
+        repositoryAccessLevel,
+        repositoryCanOperate,
+        type: 'approval' as const,
+        title: approval.event.title,
+        body:
+          approval.editedContent ||
+          approval.originalContent ||
+          approval.comment ||
+          `审批状态：${approval.status}`,
+        author: approval.reviewer?.name || approval.event.author || 'system',
+        authorAvatar: approval.reviewer?.avatar || approval.event.authorAvatar || undefined,
+        createdAt: messageTime.toISOString(),
+        externalUrl: approval.event.externalUrl || undefined,
+        approvalId: approval.id,
+        approvalStatus: approval.status,
+        riskLevel: this.resolveApprovalRiskLevel(approval.event.analyses, approval.status),
+        isUnread: this.isUnreadMessage(messageTime, lastReadAt),
+        hasPendingApprovalAction:
+          repositoryCanOperate && approval.status === ApprovalStatus.PENDING,
+        hasPendingAgentAction: false,
+        actions:
+          repositoryCanOperate && approval.status === ApprovalStatus.PENDING
+            ? this.buildApprovalActions(approval.id)
+            : undefined,
+      };
+    });
 
-    return [...eventMessages, ...approvalMessages].sort(
+    const messages = [...eventMessages, ...approvalMessages].sort(
       (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
     );
+
+    const unreadSummary = messages.reduce(
+      (accumulator, message) => {
+        if (!message.isUnread) {
+          return accumulator;
+        }
+
+        this.incrementRiskCounts(accumulator.unreadRiskCounts, message.riskLevel);
+        return {
+          unreadCount: accumulator.unreadCount + 1,
+          unreadRiskLevel: this.pickHigherRiskLevel(
+            accumulator.unreadRiskLevel,
+            message.riskLevel,
+          ),
+          unreadRiskCounts: accumulator.unreadRiskCounts,
+        };
+      },
+      {
+        unreadCount: 0,
+        unreadRiskLevel: null as RiskLevel | null,
+        unreadRiskCounts: this.createEmptyRiskCounts(),
+      },
+    );
+
+    return {
+      conversation: {
+        repositoryId,
+        lastReadAt: lastReadAt?.toISOString() ?? null,
+        unreadCount: unreadSummary.unreadCount,
+        unreadRiskLevel: unreadSummary.unreadRiskLevel,
+        unreadRiskCounts: unreadSummary.unreadRiskCounts,
+        hasPendingApproval: approvalMessages.some(
+          (message: { approvalStatus?: ApprovalStatus }) =>
+            message.approvalStatus === ApprovalStatus.PENDING,
+        ),
+        pendingApprovalCount: approvalMessages.filter(
+          (message: { approvalStatus?: ApprovalStatus }) =>
+            message.approvalStatus === ApprovalStatus.PENDING,
+        ).length,
+        hasPendingAgentAction: false,
+        pendingAgentActionCount: 0,
+      },
+      messages,
+    };
+  }
+
+  async markConversationAsRead(
+    userId: string,
+    repositoryId: string,
+    payload: ReadConversationDto,
+  ) {
+    await assertUserCanAccessRepository(userId, repositoryId);
+
+    const [existingState, latestEvent, latestApproval] = await Promise.all([
+      prisma.userRepositoryConversationState.findUnique({
+        where: {
+          userId_repositoryId: {
+            userId,
+            repositoryId,
+          },
+        },
+      }),
+      prisma.event.findFirst({
+        where: { repositoryId },
+        orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+        select: {
+          occurredAt: true,
+          createdAt: true,
+        },
+      }),
+      prisma.approval.findFirst({
+        where: {
+          event: {
+            repositoryId,
+          },
+        },
+        orderBy: [{ reviewedAt: 'desc' }, { createdAt: 'desc' }],
+        select: {
+          reviewedAt: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    const requestedReadAt = payload.upToMessageAt ?? payload.readAt;
+    const fallbackLatestMessageAt = this.pickLaterDate(
+      latestEvent ? this.resolveEventMessageTime(latestEvent) : null,
+      latestApproval ? this.resolveApprovalMessageTime(latestApproval) : null,
+    );
+    const candidateReadAt = requestedReadAt
+      ? new Date(requestedReadAt)
+      : fallbackLatestMessageAt ?? new Date();
+    const nextLastReadAt = this.pickLaterDate(existingState?.lastReadAt ?? null, candidateReadAt);
+    const lastViewedAt = new Date();
+
+    const state = await prisma.userRepositoryConversationState.upsert({
+      where: {
+        userId_repositoryId: {
+          userId,
+          repositoryId,
+        },
+      },
+      create: {
+        userId,
+        repositoryId,
+        lastReadAt: nextLastReadAt,
+        lastViewedAt,
+      },
+      update: {
+        lastReadAt: nextLastReadAt,
+        lastViewedAt,
+      },
+    });
+
+    return {
+      success: true,
+      repositoryId,
+      lastReadAt: state.lastReadAt?.toISOString() ?? null,
+      lastViewedAt: state.lastViewedAt?.toISOString() ?? null,
+    };
   }
 
   async getWatchFeed(
@@ -351,6 +559,37 @@ export class WorkbenchService {
     };
   }
 
+  private async getConversationStateMap(
+    userId: string,
+    repositoryIds: string[],
+  ): Promise<Map<string, ConversationStateSnapshot>> {
+    if (repositoryIds.length === 0) {
+      return new Map<string, ConversationStateSnapshot>();
+    }
+
+    const states = await prisma.userRepositoryConversationState.findMany({
+      where: {
+        userId,
+        repositoryId: { in: repositoryIds },
+      },
+      select: {
+        repositoryId: true,
+        lastReadAt: true,
+        lastViewedAt: true,
+      },
+    });
+
+    return new Map(
+      states.map((state: { repositoryId: string; lastReadAt: Date | null; lastViewedAt: Date | null }) => [
+        state.repositoryId,
+        {
+          lastReadAt: state.lastReadAt,
+          lastViewedAt: state.lastViewedAt,
+        },
+      ]),
+    );
+  }
+
   private toRepositoryView(
     repository: {
       id: string;
@@ -372,6 +611,117 @@ export class WorkbenchService {
       isMonitored,
       isEditable,
     };
+  }
+
+  private createEmptyRiskCounts(): RiskCounts {
+    return {
+      LOW: 0,
+      MEDIUM: 0,
+      HIGH: 0,
+      CRITICAL: 0,
+    };
+  }
+
+  private createEmptyConversationSummary(): ConversationSummary {
+    return {
+      latestMessageAt: null,
+      latestMessageType: null,
+      latestMessagePreview: null,
+      unreadCount: 0,
+      unreadRiskLevel: null,
+      unreadRiskCounts: this.createEmptyRiskCounts(),
+      hasPendingApproval: false,
+      pendingApprovalCount: 0,
+      hasPendingAgentAction: false,
+      pendingAgentActionCount: 0,
+    };
+  }
+
+  private updateConversationLatest(
+    summary: ConversationSummary,
+    input: {
+      messageAt: Date;
+      type: ConversationMessageType;
+      preview: string | null;
+    },
+  ) {
+    const currentLatest = summary.latestMessageAt ? new Date(summary.latestMessageAt) : null;
+    if (!currentLatest || input.messageAt.getTime() > currentLatest.getTime()) {
+      summary.latestMessageAt = input.messageAt.toISOString();
+      summary.latestMessageType = input.type;
+      summary.latestMessagePreview = input.preview;
+    }
+  }
+
+  private incrementUnread(summary: ConversationSummary, riskLevel: RiskLevel | null) {
+    summary.unreadCount += 1;
+    this.incrementRiskCounts(summary.unreadRiskCounts, riskLevel);
+    summary.unreadRiskLevel = this.pickHigherRiskLevel(summary.unreadRiskLevel, riskLevel);
+  }
+
+  private incrementRiskCounts(riskCounts: RiskCounts, riskLevel: RiskLevel | null) {
+    const normalizedRiskLevel = riskLevel ?? RiskLevel.LOW;
+    riskCounts[normalizedRiskLevel] += 1;
+  }
+
+  private pickHigherRiskLevel(
+    left: RiskLevel | null,
+    right: RiskLevel | null,
+  ): RiskLevel | null {
+    const rank = {
+      [RiskLevel.LOW]: 1,
+      [RiskLevel.MEDIUM]: 2,
+      [RiskLevel.HIGH]: 3,
+      [RiskLevel.CRITICAL]: 4,
+    };
+
+    if (!left) return right;
+    if (!right) return left;
+    return rank[right] > rank[left] ? right : left;
+  }
+
+  private resolveEventMessageTime(event: { occurredAt: Date | null; createdAt: Date }): Date {
+    return event.occurredAt ?? event.createdAt;
+  }
+
+  private resolveApprovalMessageTime(approval: {
+    reviewedAt: Date | null;
+    createdAt: Date;
+  }): Date {
+    return approval.reviewedAt ?? approval.createdAt;
+  }
+
+  private resolveEventRiskLevel(
+    analyses?: Array<{
+      riskLevel: RiskLevel;
+    }>,
+  ): RiskLevel | null {
+    return analyses?.[0]?.riskLevel ?? null;
+  }
+
+  private resolveApprovalRiskLevel(
+    analyses: Array<{ riskLevel: RiskLevel }> | undefined,
+    status: ApprovalStatus,
+  ): RiskLevel {
+    if (analyses?.[0]?.riskLevel) {
+      return analyses[0].riskLevel;
+    }
+
+    return status === ApprovalStatus.PENDING ? RiskLevel.HIGH : RiskLevel.MEDIUM;
+  }
+
+  private isUnreadMessage(messageAt: Date, lastReadAt: Date | null): boolean {
+    if (!lastReadAt) {
+      return true;
+    }
+
+    return messageAt.getTime() > lastReadAt.getTime();
+  }
+
+  private pickLaterDate(left: Date | null, right: Date | null): Date | null {
+    if (!left) return right;
+    if (!right) return left;
+    return right.getTime() > left.getTime() ? right : left;
   }
 
   private sortChatRepositories<T extends { latestMessageAt: string | null }>(items: T[]): T[] {
