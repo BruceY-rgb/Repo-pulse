@@ -3,6 +3,7 @@ import {
   ApprovalStatus,
   EventType,
   NotificationChannel,
+  Platform,
   RepositoryAccessLevel,
   prisma,
 } from '@repo-pulse/database';
@@ -277,29 +278,28 @@ export class WorkbenchService {
     cursor?: string,
     limit = 20,
   ) {
-    const [memberships, monitoredRepositoryIds] = await Promise.all([
-      prisma.userRepository.findMany({
-        where: { userId },
-        include: {
-          repository: true,
-        },
-      }),
-      getUserMonitoredRepositoryIds(userId),
-    ]);
-
+    const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
     const monitoredSet = new Set(monitoredRepositoryIds);
-    const excludedRepositoryIds = new Set(
-      memberships
-        .filter((membership) => {
-          const isEditable = isEditableRepositoryAccessLevel(membership.accessLevel);
-          return isEditable || monitoredSet.has(membership.repositoryId);
-        })
-        .map((membership) => membership.repositoryId),
-    );
+    const editableAccessLevels = [
+      RepositoryAccessLevel.OWNER,
+      RepositoryAccessLevel.ADMIN,
+      RepositoryAccessLevel.MAINTAIN,
+      RepositoryAccessLevel.WRITE,
+    ];
+    const memberships = await prisma.userRepository.findMany({
+      where: {
+        userId,
+        isStarred: true,
+        accessLevel: { notIn: editableAccessLevels },
+        repository: { platform: Platform.GITHUB },
+        ...(monitoredRepositoryIds.length > 0
+          ? { repositoryId: { notIn: monitoredRepositoryIds } }
+          : {}),
+      },
+      select: { repositoryId: true },
+    });
 
-    const candidateRepositoryIds = memberships
-      .filter((membership) => !excludedRepositoryIds.has(membership.repositoryId))
-      .map((membership) => membership.repositoryId);
+    const candidateRepositoryIds = memberships.map((membership) => membership.repositoryId);
 
     if (candidateRepositoryIds.length === 0) {
       return { items: [], nextCursor: null };

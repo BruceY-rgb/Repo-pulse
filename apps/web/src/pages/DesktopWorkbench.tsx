@@ -71,7 +71,6 @@ import { useApiQuery } from '@/lib/query-hooks';
 import {
   useRepositoryBranchesQuery,
   useRepositoryListQuery,
-  useStarredRepositoryCandidatesQuery,
   repositoryQueryKeys,
 } from '@/hooks/queries/use-repository-queries';
 import { useMonitoringScopePreferences } from '@/hooks/use-monitoring-scope-preferences';
@@ -2399,7 +2398,7 @@ function WatchFeed({
       <div className="mx-auto max-w-3xl divide-y divide-border border-x border-border">
         <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-5 py-4 backdrop-blur">
           <h2 className="text-xl font-semibold text-foreground">关注动态</h2>
-          <p className="text-sm text-muted-foreground">发现尚不在监控范围的仓库活动，过滤噪音聚焦感兴趣的事件</p>
+          <p className="text-sm text-muted-foreground">展示已 Star 但尚未加入监控的仓库动态，过滤噪音聚焦感兴趣的事件</p>
           <div className="mt-3 flex flex-wrap gap-1.5">
             {watchFeedEventTypes.map(({ key, label }) => (
               <Badge
@@ -2419,7 +2418,7 @@ function WatchFeed({
           </div>
         ) : items.length === 0 ? (
           <div className="px-5 py-16 text-center text-sm text-muted-foreground">
-            暂无关注动态。连接 GitHub 后，star 仓库的活动会在这里展示。
+            暂无 Star 仓库动态。登录或同步 GitHub 后，会展示可加入监控的仓库事件。
           </div>
         ) : items.map((item) => (
           <article key={item.id} className="px-5 py-5 transition-colors hover:bg-secondary/20">
@@ -2648,7 +2647,6 @@ export function DesktopWorkbench() {
   };
 
   const repositoriesQuery = useRepositoryListQuery();
-  const starredQuery = useStarredRepositoryCandidatesQuery(true);
   const notificationsQuery = useNotificationsQuery();
   const unreadNotificationCountQuery = useUnreadNotificationCountQuery();
   const repositories = useMemo(() => repositoriesQuery.data ?? [], [repositoriesQuery.data]);

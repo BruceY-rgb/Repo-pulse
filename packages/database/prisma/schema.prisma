@@ -173,6 +173,7 @@ model UserRepository {
   role         Role     @default(MEMBER)
   accessMode   RepositoryAccessMode @default(EDITABLE)
   accessLevel  RepositoryAccessLevel @default(READ)
+  isStarred    Boolean  @default(false)
   createdAt    DateTime @default(now())
 
   user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)

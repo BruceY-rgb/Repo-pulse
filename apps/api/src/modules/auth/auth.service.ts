@@ -233,7 +233,7 @@ export class AuthService {
       });
       return response.data;
     } catch (error) {
-      this.logger.error('desktop_github_env_profile_fetch_failed', error);
+      this.logger.error('desktop_github_env_profile_fetch_failed', this.formatErrorForLog(error));
       throw new UnauthorizedException('Unable to read GitHub profile from GITHUB_TOKEN');
     }
   }
@@ -247,9 +247,32 @@ export class AuthService {
       const verifiedEmail = response.data.find((item) => item.verified);
       return primaryEmail?.email || verifiedEmail?.email || null;
     } catch (error) {
-      this.logger.warn('desktop_github_env_email_fetch_failed', error);
+      this.logger.warn('desktop_github_env_email_fetch_failed', this.formatErrorForLog(error));
       return null;
     }
+  }
+
+  private formatErrorForLog(error: unknown): string {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const method = error.config?.method?.toUpperCase();
+      const url = error.config?.url;
+      const data = error.response?.data as { message?: unknown } | undefined;
+      const providerMessage = typeof data?.message === 'string' ? data.message : undefined;
+      return [
+        `AxiosError: ${error.message}`,
+        status ? `status=${status}` : undefined,
+        method ? `method=${method}` : undefined,
+        url ? `url=${url}` : undefined,
+        providerMessage ? `providerMessage=${providerMessage}` : undefined,
+      ].filter(Boolean).join(' ');
+    }
+
+    if (error instanceof Error) {
+      return `${error.name}: ${error.message}`;
+    }
+
+    return String(error);
   }
 
   private getGithubTokenHeaders(githubToken: string) {

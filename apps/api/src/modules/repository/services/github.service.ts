@@ -159,6 +159,29 @@ export class GithubService {
     });
   }
 
+  private formatErrorForLog(error: unknown): string {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const method = error.config?.method?.toUpperCase();
+      const url = error.config?.url;
+      const data = error.response?.data as { message?: unknown } | undefined;
+      const githubMessage = typeof data?.message === 'string' ? data.message : undefined;
+      return [
+        `AxiosError: ${error.message}`,
+        status ? `status=${status}` : undefined,
+        method ? `method=${method}` : undefined,
+        url ? `url=${url}` : undefined,
+        githubMessage ? `githubMessage=${githubMessage}` : undefined,
+      ].filter(Boolean).join(' ');
+    }
+
+    if (error instanceof Error) {
+      return `${error.name}: ${error.message}`;
+    }
+
+    return String(error);
+  }
+
   /**
    * 获取仓库基本信息
    * @param userToken 可选的用户 OAuth Token，用于访问私有仓库
@@ -169,7 +192,7 @@ export class GithubService {
       const response = await client.get<GithubRepoResponse>(`/repos/${owner}/${repo}`);
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch repository ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch repository ${owner}/${repo}`, this.formatErrorForLog(error));
       throw new Error(`无法获取仓库 ${owner}/${repo}，请检查仓库名称和权限`);
     }
   }
@@ -216,7 +239,7 @@ export class GithubService {
       this.logger.log(`Webhook created for ${owner}/${repo}, id: ${response.data.id}`);
       return response.data.id;
     } catch (error) {
-      this.logger.error(`Failed to create webhook for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to create webhook for ${owner}/${repo}`, this.formatErrorForLog(error));
       // 不抛出异常，让调用方决定如何处理
       return null;
     }
@@ -228,7 +251,7 @@ export class GithubService {
       await client.delete(`/repos/${owner}/${repo}/hooks/${webhookId}`);
       this.logger.log(`Webhook ${webhookId} deleted for ${owner}/${repo}`);
     } catch (error) {
-      this.logger.error(`Failed to delete webhook for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to delete webhook for ${owner}/${repo}`, this.formatErrorForLog(error));
     }
   }
 
@@ -248,7 +271,7 @@ export class GithubService {
       const response = await client.get(`/repos/${owner}/${repo}/commits`, { params });
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch commits for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch commits for ${owner}/${repo}`, this.formatErrorForLog(error));
       return [];
     }
   }
@@ -264,7 +287,7 @@ export class GithubService {
       const response = await client.get<GithubCommitResponse>(`/repos/${owner}/${repo}/commits/${sha}`);
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch commit ${sha} for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch commit ${sha} for ${owner}/${repo}`, this.formatErrorForLog(error));
       return null;
     }
   }
@@ -287,7 +310,7 @@ export class GithubService {
           lastCommitSha: branch.commit?.sha,
         }));
     } catch (error) {
-      this.logger.error(`Failed to fetch branches for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch branches for ${owner}/${repo}`, this.formatErrorForLog(error));
       return [];
     }
   }
@@ -305,7 +328,7 @@ export class GithubService {
       });
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch PRs for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch PRs for ${owner}/${repo}`, this.formatErrorForLog(error));
       return [];
     }
   }
@@ -323,7 +346,7 @@ export class GithubService {
       );
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch PR #${pullNumber} for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch PR #${pullNumber} for ${owner}/${repo}`, this.formatErrorForLog(error));
       return null;
     }
   }
@@ -341,7 +364,7 @@ export class GithubService {
       });
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch issues for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch issues for ${owner}/${repo}`, this.formatErrorForLog(error));
       return [];
     }
   }
@@ -359,7 +382,7 @@ export class GithubService {
       );
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch issue #${issueNumber} for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch issue #${issueNumber} for ${owner}/${repo}`, this.formatErrorForLog(error));
       return null;
     }
   }
@@ -377,7 +400,7 @@ export class GithubService {
       });
       return response.data.items;
     } catch (error) {
-      this.logger.error(`Failed to search repositories: ${query}`, error);
+      this.logger.error(`Failed to search repositories: ${query}`, this.formatErrorForLog(error));
       return [];
     }
   }
@@ -413,7 +436,7 @@ export class GithubService {
         }
         this.logger.warn(`Attempt ${attempt}/${maxRetries} failed: getUserRepositories`);
         if (attempt === maxRetries) {
-          this.logger.error('Failed to fetch user repositories after max retries', error);
+          this.logger.error('Failed to fetch user repositories after max retries', this.formatErrorForLog(error));
           return [];
         }
         await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
@@ -425,6 +448,7 @@ export class GithubService {
   async getStarredRepos(
     userToken: string,
     refreshToken?: string,
+    options?: { throwOnError?: boolean },
   ): Promise<GithubRepoResponse[]> {
     const maxRetries = 3;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -449,7 +473,10 @@ export class GithubService {
         }
         this.logger.warn(`Attempt ${attempt}/${maxRetries} failed: getStarredRepos`);
         if (attempt === maxRetries) {
-          this.logger.error('Failed to fetch starred repositories after max retries', error);
+          this.logger.error('Failed to fetch starred repositories after max retries', this.formatErrorForLog(error));
+          if (options?.throwOnError) {
+            throw error;
+          }
           return [];
         }
         await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));

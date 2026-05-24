@@ -4,6 +4,10 @@ import { GithubService } from '../../src/modules/repository/services/github.serv
 jest.mock('axios');
 const mockAxios = axios as jest.Mocked<typeof axios>;
 
+function getHeaders(call: Parameters<typeof mockAxios.create>[0]) {
+  return call?.headers as Record<string, unknown> | undefined;
+}
+
 describe('GithubService', () => {
   let service: GithubService;
   let mockClient: { get: jest.Mock; post: jest.Mock; delete: jest.Mock };
@@ -38,7 +42,7 @@ describe('GithubService', () => {
       await service.getRepository('org', 'repo', 'user-token');
       // axios.create called twice: once for defaultClient, once for userClient
       const calls = mockAxios.create.mock.calls;
-      const userClientCall = calls.find((call) => call[0]?.headers?.Authorization === 'Bearer user-token');
+      const userClientCall = calls.find((call) => getHeaders(call[0])?.Authorization === 'Bearer user-token');
       expect(userClientCall).toBeDefined();
     });
   });
@@ -296,6 +300,13 @@ describe('GithubService', () => {
       expect(result).toEqual([]);
       expect(mockClient.get).toHaveBeenCalledTimes(3);
     });
+
+    it('throws after max retries when throwOnError is enabled', async () => {
+      const error = { response: { status: 500 } };
+      mockClient.get.mockRejectedValue(error);
+      await expect(service.getStarredRepos('token', undefined, { throwOnError: true }))
+        .rejects.toBe(error);
+    });
   });
 
   // ── refreshGithubToken ────────────────────────────────────────────────────
@@ -311,7 +322,7 @@ describe('GithubService', () => {
     service = new GithubService(configWithToken as any);
     const createCalls = mockAxios.create.mock.calls;
     const defaultClientCall = createCalls.find((call) =>
-      call[0]?.headers?.Authorization === 'Bearer server-token',
+      getHeaders(call[0])?.Authorization === 'Bearer server-token',
     );
     expect(defaultClientCall).toBeDefined();
   });

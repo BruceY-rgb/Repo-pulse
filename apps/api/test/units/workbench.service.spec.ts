@@ -50,6 +50,7 @@ jest.mock('@repo-pulse/database', () => ({
     NONE: 'NONE',
   },
   RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
+  Platform: { GITHUB: 'GITHUB', GITLAB: 'GITLAB' },
   NotificationChannel: { IN_APP: 'IN_APP', EMAIL: 'EMAIL' },
   prisma: {
     userRepository: {
@@ -83,6 +84,7 @@ function makeUserRepo(repositoryId: string, accessLevel: string, accessMode: str
     accessLevel,
     accessMode,
     role: 'member',
+    isStarred: false,
     createdAt: new Date('2025-01-01'),
     repository: makeRepo(repositoryId, overrides),
     ...overrides,
@@ -483,21 +485,28 @@ describe('WorkbenchService', () => {
   // ═══════════════════════════════════════════════════════════════════════════
   describe('getWatchFeed', () => {
     beforeEach(() => {
-      // Setup: user has some repos monitored/editable, excludes them from feed
+      // Prisma returns only starred, non-editable, unmonitored memberships for the feed.
       mockPrismaUserRepoFindMany.mockResolvedValue([
-        makeUserRepo('r1', 'WRITE', 'EDITABLE'), // should be excluded (editable)
-        makeUserRepo('r2', 'READ', 'MONITOR'),    // could be included if not monitored
+        makeUserRepo('r2', 'READ', 'MONITOR', { isStarred: true }),
       ]);
       mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r3']); // monitored via preferences
     });
 
-    it('excludes editable repositories from feed', async () => {
+    it('queries only starred, non-editable, unmonitored repositories', async () => {
       mockPrismaEventFindMany.mockResolvedValue([]);
 
       const result = await service.getWatchFeed('u1');
 
-      // r1 should be excluded because it's editable
-      // r2 may be included since it's not editable and not monitored via prefs
+      const membershipQuery = mockPrismaUserRepoFindMany.mock.calls[0]?.[0];
+      expect(membershipQuery.where).toMatchObject({
+        userId: 'u1',
+        isStarred: true,
+        repository: { platform: 'GITHUB' },
+        repositoryId: { notIn: ['r3'] },
+      });
+      expect(membershipQuery.where.accessLevel.notIn).toEqual(
+        expect.arrayContaining(['OWNER', 'ADMIN', 'MAINTAIN', 'WRITE']),
+      );
       expect(result.items).toEqual([]);
     });
 
@@ -562,15 +571,53 @@ describe('WorkbenchService', () => {
     });
 
     it('returns empty when no candidate repos', async () => {
-      mockPrismaUserRepoFindMany.mockResolvedValue([
-        makeUserRepo('r1', 'WRITE', 'EDITABLE'),
-      ]);
+      mockPrismaUserRepoFindMany.mockResolvedValue([]);
       mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r1']);
 
       const result = await service.getWatchFeed('u1');
 
       expect(result.items).toEqual([]);
       expect(result.nextCursor).toBeNull();
+      expect(mockPrismaEventFindMany).not.toHaveBeenCalled();
+    });
+
+    it('excludes monitored starred repositories from feed candidates', async () => {
+      mockPrismaUserRepoFindMany.mockResolvedValue([]);
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r2']);
+
+      await service.getWatchFeed('u1');
+
+      const membershipQuery = mockPrismaUserRepoFindMany.mock.calls[0]?.[0];
+      expect(membershipQuery.where.repositoryId).toEqual({ notIn: ['r2'] });
+    });
+
+    it('excludes editable starred repositories from feed candidates', async () => {
+      mockPrismaUserRepoFindMany.mockResolvedValue([]);
+
+      await service.getWatchFeed('u1');
+
+      const membershipQuery = mockPrismaUserRepoFindMany.mock.calls[0]?.[0];
+      expect(membershipQuery.where.accessLevel.notIn).toEqual(
+        expect.arrayContaining(['OWNER', 'ADMIN', 'MAINTAIN', 'WRITE']),
+      );
+    });
+
+    it('excludes non-starred read-only repositories from feed candidates', async () => {
+      mockPrismaUserRepoFindMany.mockResolvedValue([]);
+
+      await service.getWatchFeed('u1');
+
+      const membershipQuery = mockPrismaUserRepoFindMany.mock.calls[0]?.[0];
+      expect(membershipQuery.where.isStarred).toBe(true);
+    });
+
+    it('limits watch feed candidates to GitHub starred repositories', async () => {
+      mockPrismaUserRepoFindMany.mockResolvedValue([]);
+
+      await service.getWatchFeed('u1');
+
+      const membershipQuery = mockPrismaUserRepoFindMany.mock.calls[0]?.[0];
+      expect(membershipQuery.where.repository).toEqual({ platform: 'GITHUB' });
     });
 
     it('includes aiInsight from completed analyses', async () => {
