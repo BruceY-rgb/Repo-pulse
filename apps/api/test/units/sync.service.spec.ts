@@ -7,6 +7,7 @@ const mockRepoUpdate = jest.fn();
 const mockUserRepoFindUnique = jest.fn();
 const mockUserRepoCreate = jest.fn();
 const mockUserRepoUpdate = jest.fn();
+const mockUserRepoUpdateMany = jest.fn();
 const mockEventFindFirst = jest.fn();
 const mockEventCreate = jest.fn();
 
@@ -34,6 +35,7 @@ jest.mock('@repo-pulse/database', () => ({
       findUnique: (...a: any[]) => mockUserRepoFindUnique(...a),
       create: (...a: any[]) => mockUserRepoCreate(...a),
       update: (...a: any[]) => mockUserRepoUpdate(...a),
+      updateMany: (...a: any[]) => mockUserRepoUpdateMany(...a),
     },
     event: {
       findFirst: (...a: any[]) => mockEventFindFirst(...a),
@@ -73,6 +75,7 @@ describe('SyncService', () => {
     mockRepositoryService = {
       create: jest.fn().mockResolvedValue({ id: 'new-r1' }),
     };
+    mockUserRepoUpdateMany.mockResolvedValue({ count: 0 });
     service = new SyncService(mockGithubService as any, mockRepositoryService as any);
   });
 
@@ -152,7 +155,111 @@ describe('SyncService', () => {
 
       const result = await service.syncUserRepositories('u1');
       expect(result.starred).toBe(1);
-      expect(mockRepositoryService.create).toHaveBeenCalled();
+      expect(mockRepositoryService.create).toHaveBeenCalledWith(
+        'u1',
+        expect.objectContaining({ platform: 'GITHUB', owner: 'org', repo: 'starred-repo' }),
+        expect.objectContaining({ isStarred: true, accessMode: 'MONITOR', accessLevel: 'READ' }),
+      );
+    });
+
+    it('marks linked existing starred repo as starred', async () => {
+      mockUserFindUnique.mockResolvedValue({ githubAccessToken: 'token', githubRefreshToken: null });
+      mockGithubService.getUserRepositories.mockResolvedValue([]);
+      mockGithubService.getStarredRepos.mockResolvedValue([
+        { id: 999, full_name: 'org/starred-repo' },
+      ]);
+      mockRepoFindFirst.mockResolvedValue({ id: 'r-starred' });
+      mockUserRepoFindUnique.mockResolvedValue(null);
+
+      await service.syncUserRepositories('u1');
+
+      expect(mockUserRepoCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId: 'u1',
+            repositoryId: 'r-starred',
+            isStarred: true,
+            accessMode: 'MONITOR',
+            accessLevel: 'READ',
+          }),
+        }),
+      );
+    });
+
+    it('marks existing editable starred repo without downgrading permissions', async () => {
+      mockUserFindUnique.mockResolvedValue({ githubAccessToken: 'token', githubRefreshToken: null });
+      mockGithubService.getUserRepositories.mockResolvedValue([]);
+      mockGithubService.getStarredRepos.mockResolvedValue([
+        { id: 999, full_name: 'org/starred-repo' },
+      ]);
+      mockRepoFindFirst.mockResolvedValue({ id: 'r-starred' });
+      mockUserRepoFindUnique.mockResolvedValue({
+        userId: 'u1',
+        repositoryId: 'r-starred',
+        accessMode: 'EDITABLE',
+        accessLevel: 'WRITE',
+        role: 'MEMBER',
+      });
+
+      await service.syncUserRepositories('u1');
+
+      expect(mockUserRepoUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { isStarred: true },
+        }),
+      );
+    });
+
+    it('clears isStarred for repos no longer returned by GitHub starred API', async () => {
+      mockUserFindUnique.mockResolvedValue({ githubAccessToken: 'token', githubRefreshToken: null });
+      mockGithubService.getUserRepositories.mockResolvedValue([]);
+      mockGithubService.getStarredRepos.mockResolvedValue([
+        { id: 999, full_name: 'org/still-starred' },
+      ]);
+      mockRepoFindFirst.mockResolvedValue({ id: 'r-still-starred' });
+      mockUserRepoFindUnique.mockResolvedValue({ accessMode: 'MONITOR' });
+
+      await service.syncUserRepositories('u1');
+
+      expect(mockUserRepoUpdateMany).toHaveBeenCalledWith({
+        where: {
+          userId: 'u1',
+          isStarred: true,
+          repository: {
+            platform: 'GITHUB',
+            externalId: { notIn: ['999'] },
+          },
+        },
+        data: { isStarred: false },
+      });
+    });
+
+    it('does not clear isStarred when starred fetch fails', async () => {
+      mockUserFindUnique.mockResolvedValue({ githubAccessToken: 'token', githubRefreshToken: null });
+      mockGithubService.getUserRepositories.mockResolvedValue([]);
+      mockGithubService.getStarredRepos.mockRejectedValue(new Error('GitHub unavailable'));
+
+      await service.syncUserRepositories('u1');
+
+      expect(mockUserRepoUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('schedules history sync so starred repository events can populate Watch Feed', async () => {
+      mockUserFindUnique.mockResolvedValue({ githubAccessToken: 'token', githubRefreshToken: null });
+      mockGithubService.getUserRepositories.mockResolvedValue([]);
+      mockGithubService.getStarredRepos.mockResolvedValue([
+        { id: 999, full_name: 'org/starred-repo' },
+      ]);
+      mockRepoFindFirst.mockResolvedValue({ id: 'r-starred' });
+      mockUserRepoFindUnique.mockResolvedValue({ accessMode: 'MONITOR' });
+      const historySpy = jest
+        .spyOn(service, 'syncAllUserRepositoriesHistory')
+        .mockResolvedValue(undefined);
+
+      await service.syncUserRepositories('u1');
+      jest.runOnlyPendingTimers();
+
+      expect(historySpy).toHaveBeenCalledWith('u1', ['r-starred']);
     });
 
     it('handles errors per individual repo without stopping sync', async () => {
@@ -313,6 +420,18 @@ describe('SyncService', () => {
       expect(mockRepoFindMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { users: { some: { userId: 'u1' } } } }),
       );
+    });
+
+    it('syncs priority repos before the rest of the user repos', async () => {
+      mockRepoFindMany
+        .mockResolvedValueOnce([{ id: 'r1' }, { id: 'r2' }])
+        .mockResolvedValue({ fullName: 'o/r', defaultBranch: 'main', users: [{ user: { githubAccessToken: null } }] });
+
+      const historySpy = jest.spyOn(service, 'syncRepositoryHistory');
+
+      await service.syncAllUserRepositoriesHistory('u1', ['r2']);
+
+      expect(historySpy.mock.calls.map((call) => call[0])).toEqual(['r2', 'r1']);
     });
   });
 });

@@ -158,11 +158,22 @@ export class SyncService {
         }
       }
 
-      const starredRepos = await this.githubService.getStarredRepos(
-        user.githubAccessToken,
-        user.githubRefreshToken || undefined,
-      );
+      let starredRepos: Awaited<ReturnType<GithubService['getStarredRepos']>>;
+      let shouldReconcileStarredState = false;
+      try {
+        starredRepos = await this.githubService.getStarredRepos(
+          user.githubAccessToken,
+          user.githubRefreshToken || undefined,
+          { throwOnError: true },
+        );
+        shouldReconcileStarredState = true;
+      } catch (error) {
+        this.logger.error(`Failed to fetch starred repositories for user ${userId}`, error);
+        starredRepos = [];
+      }
       this.logger.log(`GitHub API returned ${starredRepos.length} starred repositories`);
+      const starredExternalIds = starredRepos.map((repo) => String(repo.id));
+      const starredRepositoryIds: string[] = [];
 
       for (const repo of starredRepos) {
         try {
@@ -185,10 +196,12 @@ export class SyncService {
                 accessLevel: RepositoryAccessLevel.READ,
                 role: 'VIEWER',
                 githubLogin: user.githubLogin ?? undefined,
+                isStarred: true,
               },
             );
             starred++;
             this.logger.log(`Created starred repository: ${repo.full_name}`);
+            starredRepositoryIds.push(existing.id);
           } else {
             const userRepo = await prisma.userRepository.findUnique({
               where: {
@@ -207,10 +220,25 @@ export class SyncService {
                   role: 'VIEWER',
                   accessMode: RepositoryAccessMode.MONITOR,
                   accessLevel: RepositoryAccessLevel.READ,
+                  isStarred: true,
                 },
               });
               this.logger.log(`Linked existing starred repository ${repo.full_name} to user`);
-            } else if (userRepo.accessMode !== RepositoryAccessMode.EDITABLE) {
+              starredRepositoryIds.push(existing.id);
+            } else if (userRepo.accessMode === RepositoryAccessMode.EDITABLE) {
+              await prisma.userRepository.update({
+                where: {
+                  userId_repositoryId: {
+                    userId,
+                    repositoryId: existing.id,
+                  },
+                },
+                data: {
+                  isStarred: true,
+                },
+              });
+              starredRepositoryIds.push(existing.id);
+            } else {
               await prisma.userRepository.update({
                 where: {
                   userId_repositoryId: {
@@ -222,8 +250,10 @@ export class SyncService {
                   role: 'VIEWER',
                   accessMode: RepositoryAccessMode.MONITOR,
                   accessLevel: RepositoryAccessLevel.READ,
+                  isStarred: true,
                 },
               });
+              starredRepositoryIds.push(existing.id);
             }
           }
         } catch (error) {
@@ -231,10 +261,24 @@ export class SyncService {
         }
       }
 
+      if (shouldReconcileStarredState) {
+        await prisma.userRepository.updateMany({
+          where: {
+            userId,
+            isStarred: true,
+            repository: {
+              platform: Platform.GITHUB,
+              externalId: { notIn: starredExternalIds },
+            },
+          },
+          data: { isStarred: false },
+        });
+      }
+
       this.logger.log(`Sync completed: ${synced} new repos, ${starred} new starred repos`);
 
       setTimeout(() => {
-        this.syncAllUserRepositoriesHistory(userId).catch((err) => {
+        this.syncAllUserRepositoriesHistory(userId, starredRepositoryIds).catch((err) => {
           this.logger.error(`Failed to sync repository history for user ${userId}`, err);
         });
       }, 500);
@@ -433,7 +477,10 @@ export class SyncService {
     }
   }
 
-  async syncAllUserRepositoriesHistory(userId: string): Promise<void> {
+  async syncAllUserRepositoriesHistory(
+    userId: string,
+    priorityRepositoryIds: string[] = [],
+  ): Promise<void> {
     const repositories = await prisma.repository.findMany({
       where: {
         users: { some: { userId } },
@@ -441,11 +488,18 @@ export class SyncService {
       select: { id: true },
     });
 
-    for (const repo of repositories) {
+    const repositoryIds = Array.from(
+      new Set([
+        ...priorityRepositoryIds,
+        ...repositories.map((repository) => repository.id),
+      ]),
+    );
+
+    for (const repositoryId of repositoryIds) {
       try {
-        await this.syncRepositoryHistory(repo.id);
+        await this.syncRepositoryHistory(repositoryId);
       } catch (error) {
-        this.logger.error(`Failed to sync history for repository ${repo.id}`, error);
+        this.logger.error(`Failed to sync history for repository ${repositoryId}`, error);
       }
     }
   }

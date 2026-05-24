@@ -63,9 +63,97 @@ export interface Repository {
   lastSyncAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** 用户对该仓库的访问级别 */
+  accessLevel?: RepositoryAccessLevel;
+  /** 用户是否可操作该仓库（可编辑/写入） */
+  canOperate?: boolean;
+  /** 该仓库是否为可编辑仓库 */
+  isEditable?: boolean;
+  /** 该仓库是否为只读监控仓库 */
+  isMonitored?: boolean;
   _count?: {
     events: number;
   };
+}
+
+export type RepositoryAccessLevel =
+  | 'owner'
+  | 'admin'
+  | 'maintain'
+  | 'write'
+  | 'triage'
+  | 'read'
+  | 'none';
+
+export type RepositoryChatKind = 'editable' | 'monitored-readonly';
+
+/** 消息操作按钮（由后端返回） */
+export interface MessageAction {
+  key: string;
+  label: string;
+  method: 'POST' | 'GET';
+  endpoint?: string;
+  requiresConfirmation: boolean;
+  /** 是否需要操作权限（canOperate=true 时才渲染） */
+  requiresPermission: boolean;
+}
+
+/** 侧边栏仓库聊天项 */
+export interface ChatRepositoryItem {
+  repository: Repository;
+  kind: RepositoryChatKind;
+  latestMessageAt: string | null;
+  latestMessagePreview: string | null;
+  unreadCount: number;
+  highRiskCount: number;
+}
+
+/** 工作台仓库列表响应 */
+export interface ChatRepositoriesResponse {
+  editableRepositories: ChatRepositoryItem[];
+  monitoredRepositories: ChatRepositoryItem[];
+}
+
+/** 会话消息（来自 Workbench API） */
+export interface WorkbenchConversationMessage {
+  id: string;
+  repositoryId: string;
+  repositoryAccessLevel: RepositoryAccessLevel;
+  repositoryCanOperate: boolean;
+  type: 'issue' | 'pull_request' | 'push' | 'release' | 'security' | 'approval' | 'agent' | 'notification';
+  title: string;
+  body: string;
+  author: string;
+  authorAvatar?: string;
+  createdAt: string;
+  externalUrl?: string;
+  actions?: MessageAction[];
+}
+
+/** Watch Feed 事件类型 */
+export type WatchFeedEventType = 'issue' | 'pull_request' | 'push' | 'release' | 'security';
+
+/** Watch Feed 单项 */
+export interface WatchFeedItem {
+  id: string;
+  repositoryId: string;
+  repositoryFullName: string;
+  repositoryAvatar?: string;
+  type: WatchFeedEventType;
+  title: string;
+  summary: string;
+  author: string;
+  authorAvatar?: string;
+  occurredAt: string;
+  externalUrl?: string;
+  aiInsight?: string;
+  canAddToMonitoring: boolean;
+}
+
+/** Watch Feed 分页响应 */
+export interface WatchFeedResponse {
+  items: WatchFeedItem[];
+  nextCursor: string | null;
 }
 
 export interface CreateRepositoryDto {

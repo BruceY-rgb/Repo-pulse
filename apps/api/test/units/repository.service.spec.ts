@@ -99,6 +99,7 @@ describe('RepositoryService', () => {
     mockAssertUserCanAccessRepository.mockResolvedValue(defaultMembership);
     mockAssertUserCanEditRepository.mockResolvedValue(defaultMembership);
     mockGetUserMonitoredRepositoryIds.mockResolvedValue([]);
+    mockRepoFindMany.mockResolvedValue([]);
 
     mockConfigService = { get: jest.fn().mockReturnValue('http://localhost:3001') };
     mockGithubService = {
@@ -433,6 +434,29 @@ describe('RepositoryService', () => {
       const result = await service.searchUserRepositories('u1', 'token');
       expect(result[0].fullName).toBe('me/my-repo');
     });
+
+    it('marks user repos monitored by matching local repository externalId', async () => {
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['local-r2']);
+      mockRepoFindMany.mockResolvedValue([{ externalId: '2' }]);
+      mockGithubService.getUserRepositories.mockResolvedValue([{
+        id: 2, name: 'my-repo', full_name: 'me/my-repo', description: null,
+        html_url: 'url', stargazers_count: 0, language: null,
+        owner: { login: 'me', avatar_url: 'av' },
+      }]);
+
+      const result = await service.searchUserRepositories('u1', 'token');
+
+      expect(result[0].isMonitored).toBe(true);
+      expect(mockRepoFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: { in: ['local-r2'] },
+            platform: 'GITHUB',
+          },
+          select: { externalId: true },
+        }),
+      );
+    });
   });
 
   // ── searchStarredRepositories ─────────────────────────────────────────────
@@ -440,6 +464,20 @@ describe('RepositoryService', () => {
     it('returns empty array when no token provided', async () => {
       const result = await service.searchStarredRepositories('u1', '');
       expect(result).toEqual([]);
+    });
+
+    it('marks starred repos monitored by matching local repository externalId', async () => {
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['local-r3']);
+      mockRepoFindMany.mockResolvedValue([{ externalId: '3' }]);
+      mockGithubService.getStarredRepos.mockResolvedValue([{
+        id: 3, name: 'starred', full_name: 'org/starred', description: null,
+        html_url: 'url', stargazers_count: 4, language: 'TypeScript',
+        owner: { login: 'org', avatar_url: 'av' },
+      }]);
+
+      const result = await service.searchStarredRepositories('u1', 'token');
+
+      expect(result[0].isMonitored).toBe(true);
     });
   });
 });

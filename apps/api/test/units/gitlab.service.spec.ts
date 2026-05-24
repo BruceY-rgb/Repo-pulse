@@ -4,6 +4,10 @@ import { GitlabService } from '../../src/modules/repository/services/gitlab.serv
 jest.mock('axios');
 const mockAxios = axios as jest.Mocked<typeof axios>;
 
+function getHeaders(call: Parameters<typeof mockAxios.create>[0]) {
+  return call?.headers as Record<string, unknown> | undefined;
+}
+
 describe('GitlabService', () => {
   let service: GitlabService;
   let mockClient: { get: jest.Mock; post: jest.Mock; delete: jest.Mock };
@@ -20,14 +24,14 @@ describe('GitlabService', () => {
   // ── constructor ────────────────────────────────────────────────────────────
   it('creates axios client without PRIVATE-TOKEN when no token configured', () => {
     const call = mockAxios.create.mock.calls[0][0];
-    expect(call?.headers?.['PRIVATE-TOKEN']).toBeUndefined();
+    expect(getHeaders(call)?.['PRIVATE-TOKEN']).toBeUndefined();
   });
 
   it('sets PRIVATE-TOKEN header when GITLAB_TOKEN configured', () => {
     const configWithToken = { get: jest.fn().mockReturnValue('gl-token') };
     service = new GitlabService(configWithToken as any);
     const createCalls = mockAxios.create.mock.calls;
-    const tokenCall = createCalls.find((c) => c[0]?.headers?.['PRIVATE-TOKEN'] === 'gl-token');
+    const tokenCall = createCalls.find((c) => getHeaders(c[0])?.['PRIVATE-TOKEN'] === 'gl-token');
     expect(tokenCall).toBeDefined();
   });
 
