@@ -99,7 +99,9 @@ import type {
   SearchResult,
   ChatRepositoryItem,
   WorkbenchConversationMessage,
+  WorkbenchConversationState,
   MessageAction,
+  RiskLevel,
   WatchFeedItem,
 } from '@/types/api';
 
@@ -126,6 +128,14 @@ interface ConversationMessage {
   repositoryCanOperate?: boolean;
   /** 后端返回的操作按钮列表 */
   actions?: MessageAction[];
+  /** 后端返回的风险等级 */
+  riskLevel?: RiskLevel;
+  /** 是否未读（来自后端） */
+  isUnread?: boolean;
+  /** 是否有待审批动作（来自后端） */
+  hasPendingApprovalAction?: boolean;
+  /** 是否有待 Agent 动作（来自后端） */
+  hasPendingAgentAction?: boolean;
 }
 
 interface ContextMenuState {
@@ -586,6 +596,82 @@ function toNotificationMessage(notification: Notification): ConversationMessage 
   };
 }
 
+function riskLevelToRisk(riskLevel?: RiskLevel): ConversationMessage['risk'] {
+  switch (riskLevel) {
+    case 'CRITICAL':
+    case 'HIGH':
+      return 'high';
+    case 'MEDIUM':
+      return 'medium';
+    case 'LOW':
+    default:
+      return 'low';
+  }
+}
+
+function workbenchMessageToConversationMessage(
+  msg: WorkbenchConversationMessage,
+  conversationState?: WorkbenchConversationState,
+): ConversationMessage {
+  const createdAtMs = new Date(msg.createdAt).getTime();
+  const risk = riskLevelToRisk(msg.riskLevel);
+
+  let kind: ConversationMessage['kind'] = 'event';
+  if (msg.type === 'approval') kind = 'approval';
+  else if (msg.type === 'notification') kind = 'notification';
+
+  let eventTypeLabel: string | undefined;
+  switch (msg.type) {
+    case 'issue':
+      eventTypeLabel = 'Issue';
+      break;
+    case 'pull_request':
+      eventTypeLabel = 'Pull Request';
+      break;
+    case 'push':
+      eventTypeLabel = 'Push';
+      break;
+    case 'release':
+      eventTypeLabel = 'Release';
+      break;
+    case 'security':
+      eventTypeLabel = 'Security';
+      break;
+    case 'approval':
+      eventTypeLabel = '审批';
+      break;
+    case 'notification':
+      eventTypeLabel = '通知';
+      break;
+    case 'agent':
+      eventTypeLabel = 'Agent';
+      break;
+  }
+
+  return {
+    id: msg.id,
+    kind,
+    title: msg.title,
+    body: msg.body,
+    author: msg.author,
+    time: formatRelativeTime(msg.createdAt),
+    createdAtMs,
+    risk,
+    eventTypeLabel,
+    externalUrl: msg.externalUrl,
+    authorAvatar: msg.authorAvatar,
+    approvalId: msg.approvalId,
+    approvalStatus: msg.approvalStatus as Approval['status'],
+    sourceRepositoryId: msg.repositoryId,
+    repositoryCanOperate: msg.repositoryCanOperate,
+    actions: msg.actions,
+    riskLevel: msg.riskLevel,
+    isUnread: msg.isUnread,
+    hasPendingApprovalAction: msg.hasPendingApprovalAction,
+    hasPendingAgentAction: msg.hasPendingAgentAction,
+  };
+}
+
 function getLatestRepoMessage(repo: Repository, messages: ConversationMessage[]) {
   const message = messages
     .filter((item) => item.sourceRepositoryId === repo.id)
@@ -1030,26 +1116,10 @@ function RepositorySidebar({
     [filteredEditable, filteredMonitored],
   );
 
-  // Read last-read timestamps from localStorage for unread computation
-  const lastReadMap = useMemo<Record<string, number>>(() => {
-    try {
-      const stored = localStorage.getItem('repo-pulse-last-read');
-      return stored ? JSON.parse(stored) : {};
-    } catch {
-      return {};
-    }
-  }, []);
-
   function getEffectiveUnread(item: ChatRepositoryItem): number {
-    const backendCount = item.unreadCount || item.highRiskCount || 0;
-    if (backendCount === 0) return 0;
-    // If user marked as read after the latest message, suppress unread
-    const lastReadAt = lastReadMap[item.repository.id];
-    if (lastReadAt && item.latestMessageAt) {
-      const messageAt = new Date(item.latestMessageAt).getTime();
-      if (lastReadAt >= messageAt) return 0;
-    }
-    return backendCount;
+    // 直接使用后端返回的 unreadCount，不再依赖 localStorage
+    // 后端已基于 lastReadAt 与消息时间比较计算真实未读数
+    return item.unreadCount || 0;
   }
 
   useEffect(() => {
@@ -1144,6 +1214,8 @@ function RepositorySidebar({
     const avatarUrl = getRepositoryAvatarUrl(repo);
     const latestMessage = item.latestMessagePreview || '等待新的仓库事件';
     const isSyncing = syncingRepoIds.has(repo.id);
+    const hasAttention = item.requiresAttention || (item.unreadRiskLevel === 'HIGH' || item.unreadRiskLevel === 'CRITICAL');
+    const hasPendingApproval = item.hasPendingApproval || item.pendingApprovalCount > 0;
 
     return (
       <Link
@@ -1166,6 +1238,7 @@ function RepositorySidebar({
         className={cn(
           'relative flex w-full min-w-0 overflow-hidden gap-3 rounded-xl border border-transparent px-3 py-3 text-left transition-colors hover:bg-secondary/70',
           selected && 'border-primary/30 bg-primary/10',
+          hasAttention && !selected && 'border-warning/20 bg-warning/5',
         )}
       >
         {unread > 0 ? (
@@ -1198,6 +1271,22 @@ function RepositorySidebar({
             {latestMessage}
           </p>
           <div className="mt-2 flex min-w-0 items-center gap-2 overflow-hidden text-[11px] text-muted-foreground">
+            {hasPendingApproval ? (
+              <Badge
+                variant="outline"
+                className="shrink-0 rounded-full border-warning/40 bg-warning/10 px-1.5 py-0 text-[10px] text-warning-foreground"
+              >
+                待审批 {item.pendingApprovalCount}
+              </Badge>
+            ) : null}
+            {item.unreadRiskLevel === 'HIGH' || item.unreadRiskLevel === 'CRITICAL' ? (
+              <Badge
+                variant="outline"
+                className="shrink-0 rounded-full border-destructive/40 bg-destructive/10 px-1.5 py-0 text-[10px] text-destructive-foreground"
+              >
+                高风险
+              </Badge>
+            ) : null}
             <Badge
               variant="outline"
               className={cn(
@@ -2631,13 +2720,19 @@ export function DesktopWorkbench() {
     toast.success(`${repo.fullName} 已取消置顶`);
   };
 
-  const handleMarkRepoRead = (repo: Repository) => {
-    const now = Date.now();
-    const stored = localStorage.getItem('repo-pulse-last-read');
-    const lastReadMap: Record<string, number> = stored ? JSON.parse(stored) : {};
-    lastReadMap[repo.id] = now;
-    localStorage.setItem('repo-pulse-last-read', JSON.stringify(lastReadMap));
-    toast.success(`${repo.fullName} 已标记为已读`);
+  const handleMarkRepoRead = async (repo: Repository) => {
+    try {
+      await workbenchService.markConversationRead(repo.id);
+      // 刷新仓库列表和当前会话，获取最新的 lastReadAt 和未读数
+      await Promise.all([
+        chatReposQuery.refetch(),
+        conversationMessagesQuery.refetch(),
+      ]);
+      toast.success(`${repo.fullName} 已标记为已读`);
+    } catch (error) {
+      console.error(error);
+      toast.error('标记已读失败');
+    }
   };
 
   const handleFilterRepoByType = (repo: Repository, type: string) => {
@@ -2737,19 +2832,22 @@ export function DesktopWorkbench() {
     staleTime: 30 * 1000,
   });
 
-  const pendingApprovalCountQuery = useApiQuery({
-    queryKey: ['workbench', 'pending-approvals', repositoryIds.join(',')],
-    queryFn: () => approvalService.getPendingCount(repositoryIds),
-    enabled: repositoryIds.length > 0,
-    staleTime: 30 * 1000,
-  });
-
   const approvalsQuery = useApiQuery({
     queryKey: ['workbench', 'approvals', repositoryIds.join(',')],
     queryFn: () => approvalService.getApprovals({ limit: 80, offset: 0 }),
     enabled: repositoryIds.length > 0,
     staleTime: 30 * 1000,
   });
+
+  // 当前选中仓库的 Workbench 统一会话消息（替代前端自行拼接 events + approvals + notifications）
+  const conversationMessagesQuery = useApiQuery({
+    queryKey: ['workbench', 'conversation-messages', selectedRepository?.id ?? ''],
+    queryFn: () => workbenchService.getConversationMessages(selectedRepository!.id),
+    enabled: Boolean(selectedRepository?.id),
+    staleTime: 15 * 1000,
+  });
+
+  const conversationState = conversationMessagesQuery.data?.conversation ?? null;
 
   const allMessages = useMemo(() => {
     const eventMessages = (eventsQuery.data?.items ?? []).map(toConversationMessage);
@@ -2782,9 +2880,25 @@ export function DesktopWorkbench() {
               : 'inbox';
   const shouldShowRepositorySidebar = activeView === 'inbox' || activeView === 'repository';
 
-  const selectedMessages = getRepoMessages(selectedRepository?.id, allMessages);
+  // 仓库会话消息：使用后端统一接口，替代前端自行拼接
+  const selectedMessages = useMemo(() => {
+    if (!selectedRepository) return [];
+    // 优先使用 Workbench 统一会话接口
+    if (conversationMessagesQuery.data) {
+      return conversationMessagesQuery.data.messages.map((msg) =>
+        workbenchMessageToConversationMessage(msg, conversationMessagesQuery.data.conversation),
+      );
+    }
+    // 降级：使用前端拼接的消息
+    return getRepoMessages(selectedRepository.id, allMessages);
+  }, [conversationMessagesQuery.data, selectedRepository, allMessages]);
+
   const unreadCount = unreadNotificationCountQuery.data?.count ?? allMessages.length;
-  const pendingApprovalCount = pendingApprovalCountQuery.data?.count ?? 0;
+  // 待审批计数：优先使用仓库列表聚合接口的数据
+  const pendingApprovalCount = useMemo(() => {
+    const allChatRepos = [...editableRepos, ...monitoredRepos];
+    return allChatRepos.reduce((sum, item) => sum + (item.pendingApprovalCount || 0), 0);
+  }, [editableRepos, monitoredRepos]);
   const monitoredRepositoryIds = monitoringScope.repositoryIds ?? [];
   const selectedRepositoryBranches = selectedRepository
     ? monitoringScope.repositoryBranchScopes?.[selectedRepository.id] ?? []
@@ -2804,7 +2918,8 @@ export function DesktopWorkbench() {
   const refreshApprovalMessages = async () => {
     await Promise.all([
       approvalsQuery.refetch(),
-      pendingApprovalCountQuery.refetch(),
+      chatReposQuery.refetch(),
+      conversationMessagesQuery.refetch(),
       queryClient.invalidateQueries({ queryKey: notificationQueryKeys.all }),
     ]);
     window.dispatchEvent(new Event('approval-updated'));

@@ -98,20 +98,53 @@ export interface MessageAction {
   requiresPermission: boolean;
 }
 
+/** 风险等级 */
+export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+/** 风险分布计数 */
+export interface RiskCounts {
+  LOW: number;
+  MEDIUM: number;
+  HIGH: number;
+  CRITICAL: number;
+}
+
 /** 侧边栏仓库聊天项 */
 export interface ChatRepositoryItem {
   repository: Repository;
   kind: RepositoryChatKind;
+  lastReadAt: string | null;
   latestMessageAt: string | null;
+  latestMessageType: string | null;
   latestMessagePreview: string | null;
   unreadCount: number;
+  unreadRiskLevel: RiskLevel | null;
+  unreadRiskCounts: RiskCounts;
   highRiskCount: number;
+  hasPendingApproval: boolean;
+  pendingApprovalCount: number;
+  hasPendingAgentAction: boolean;
+  pendingAgentActionCount: number;
+  requiresAttention: boolean;
 }
 
 /** 工作台仓库列表响应 */
 export interface ChatRepositoriesResponse {
   editableRepositories: ChatRepositoryItem[];
   monitoredRepositories: ChatRepositoryItem[];
+}
+
+/** 会话状态（来自 Workbench API） */
+export interface WorkbenchConversationState {
+  repositoryId: string;
+  lastReadAt: string | null;
+  unreadCount: number;
+  unreadRiskLevel: RiskLevel | null;
+  unreadRiskCounts: RiskCounts;
+  hasPendingApproval: boolean;
+  pendingApprovalCount: number;
+  hasPendingAgentAction: boolean;
+  pendingAgentActionCount: number;
 }
 
 /** 会话消息（来自 Workbench API） */
@@ -128,6 +161,30 @@ export interface WorkbenchConversationMessage {
   createdAt: string;
   externalUrl?: string;
   actions?: MessageAction[];
+  /** 风险等级（由后端统一计算） */
+  riskLevel?: RiskLevel;
+  /** 是否未读 */
+  isUnread?: boolean;
+  /** 是否有待审批动作 */
+  hasPendingApprovalAction?: boolean;
+  /** 是否有待 Agent 动作 */
+  hasPendingAgentAction?: boolean;
+  /** 关联审批 ID */
+  approvalId?: string;
+  /** 审批状态 */
+  approvalStatus?: string;
+}
+
+/** 会话消息响应 */
+export interface ConversationMessagesResponse {
+  conversation: WorkbenchConversationState;
+  messages: WorkbenchConversationMessage[];
+}
+
+/** 标记已读请求体 */
+export interface MarkConversationReadDto {
+  readAt?: string;
+  upToMessageAt?: string;
 }
 
 /** Watch Feed 事件类型 */
