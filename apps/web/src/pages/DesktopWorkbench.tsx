@@ -1648,6 +1648,10 @@ function WorkbenchHeader({
   onSearch: () => void;
   onOpenBranchMonitor: () => void;
 }) {
+  const [searchParams] = useSearchParams();
+  const repositoryIdParam = searchParams.get('repositoryId');
+  const hasRepositoryContext = activeView === 'repository' || ((activeView === 'dashboard' || activeView === 'reports') && repositoryIdParam);
+
   const titleByView: Record<WorkbenchView, string> = {
     inbox: '今日工作台',
     repository: repository?.fullName ?? '仓库会话',
@@ -1659,16 +1663,21 @@ function WorkbenchHeader({
     settings: '设置',
   };
   const repositoryAvatarUrl = repository ? getRepositoryAvatarUrl(repository) : undefined;
-  const dashboardHref = activeView === 'repository' && repository
+
+  const dashboardHref = (activeView === 'repository' && repository) || ((activeView === 'dashboard' || activeView === 'reports') && repositoryIdParam && repository)
     ? `/workbench/dashboard?repositoryId=${encodeURIComponent(repository.id)}`
     : '/workbench/dashboard';
 
-  const isReadOnly = activeView === 'repository' && repositoryCanOperate === false;
+  const reportsHref = (activeView === 'repository' && repository) || ((activeView === 'dashboard' || activeView === 'reports') && repositoryIdParam && repository)
+    ? `/workbench/reports?repositoryId=${encodeURIComponent(repository.id)}`
+    : '/workbench/reports';
+
+  const isReadOnly = hasRepositoryContext && repositoryCanOperate === false;
 
   return (
     <header className="desktop-drag flex h-24 shrink-0 items-end justify-between gap-4 border-b border-border bg-background/95 px-6 pb-4 backdrop-blur">
       <div className="flex min-w-0 items-center gap-3">
-        {activeView === 'repository' && repository ? (
+        {hasRepositoryContext && repository ? (
           <Avatar className="desktop-no-drag h-12 w-12 rounded-xl border border-border">
             <AvatarImage src={repositoryAvatarUrl} alt={repository.fullName} className="object-cover" />
             <AvatarFallback className="rounded-xl bg-secondary text-sm font-semibold">
@@ -1680,12 +1689,14 @@ function WorkbenchHeader({
           <p className="truncate text-sm text-muted-foreground">
             {isReadOnly
               ? '只读监控 · 仅查看权限'
-              : activeView === 'repository'
+              : hasRepositoryContext
                 ? '可编辑仓库 / 独立 Agent 会话'
                 : 'Repo-Pulse Desktop Workbench'}
           </p>
           <h1 className="truncate text-2xl font-semibold tracking-tight text-foreground">
-            {titleByView[activeView]}
+            {hasRepositoryContext && repository && activeView !== 'repository'
+              ? `${repository.fullName} · ${titleByView[activeView]}`
+              : titleByView[activeView]}
             {isReadOnly ? (
               <Badge variant="outline" className="ml-3 align-middle rounded-full border-muted-foreground/30 text-xs text-muted-foreground">
                 只读监控
@@ -1711,7 +1722,7 @@ function WorkbenchHeader({
               </Link>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{activeView === 'repository' ? '查看当前仓库看板' : '仓库看板'}</TooltipContent>
+          <TooltipContent>{hasRepositoryContext ? '查看当前仓库看板' : '仓库看板'}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1724,7 +1735,7 @@ function WorkbenchHeader({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button size="icon" variant="outline" asChild aria-label="生成报告">
-              <Link to="/workbench/reports">
+              <Link to={reportsHref}>
                 <FileText className="h-4 w-4" />
               </Link>
             </Button>
@@ -2802,7 +2813,7 @@ export function DesktopWorkbench() {
   };
 
   const repositoryIds = useMemo(() => repositories.map((repository) => repository.id), [repositories]);
-  const selectedRepository = repositories.find((repository) => repository.id === params.repositoryId) ?? repositories[0];
+  const selectedRepository = repositories.find((repository) => repository.id === (params.repositoryId || searchParams.get('repositoryId'))) ?? repositories[0];
   const agentRepository = repositories.find((repository) => repository.id === searchParams.get('repo')) ?? selectedRepository;
 
   // Determine if currently selected repository is editable
@@ -2879,7 +2890,11 @@ export function DesktopWorkbench() {
             : params.view === 'settings'
               ? 'settings'
               : 'inbox';
-  const shouldShowRepositorySidebar = activeView === 'inbox' || activeView === 'repository';
+  const shouldShowRepositorySidebar =
+    activeView === 'inbox' ||
+    activeView === 'repository' ||
+    activeView === 'dashboard' ||
+    activeView === 'reports';
 
   // 仓库会话消息：使用后端统一接口，替代前端自行拼接
   const selectedMessages = useMemo(() => {
@@ -3117,7 +3132,11 @@ export function DesktopWorkbench() {
           <RepositorySidebar
             editableRepos={editableRepos}
             monitoredRepos={monitoredRepos}
-            selectedRepositoryId={activeView === 'repository' ? selectedRepository?.id : undefined}
+            selectedRepositoryId={
+              (activeView === 'repository' || ((activeView === 'dashboard' || activeView === 'reports') && searchParams.get('repositoryId')))
+                ? selectedRepository?.id
+                : undefined
+            }
             syncingRepoIds={syncingRepoIds}
             pinnedRepoIds={pinnedRepoIds}
             collapsed={isRepositorySidebarCollapsed}
@@ -3193,7 +3212,7 @@ export function DesktopWorkbench() {
             {activeView === 'reports' ? (
               <ScrollArea className="h-full">
                 <div className="p-6">
-                  <Reports />
+                  <Reports scopedRepositoryId={searchParams.get('repositoryId') ?? undefined} />
                 </div>
               </ScrollArea>
             ) : null}
