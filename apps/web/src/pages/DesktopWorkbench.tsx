@@ -1075,7 +1075,8 @@ function RepositorySidebar({
   const filterBySearch = (items: ChatRepositoryItem[]) =>
     items.filter((item) => {
       if (!normalizedRepositorySearch) {
-        return true;
+        // 没有搜索词时，隐藏尚无可渲染消息的仓库
+        return !!item.latestMessagePreview;
       }
       return [
         item.repository.name,
@@ -1236,7 +1237,7 @@ function RepositorySidebar({
           });
         }}
         className={cn(
-          'relative flex w-full min-w-0 overflow-hidden gap-3 rounded-xl border border-transparent px-3 py-3 text-left transition-colors hover:bg-secondary/70',
+          'relative flex w-full min-w-0 gap-3 rounded-xl border border-transparent px-3 py-3 text-left transition-colors hover:bg-secondary/70',
           selected && 'border-primary/30 bg-primary/10',
           hasAttention && !selected && 'border-warning/20 bg-warning/5',
         )}
@@ -1252,10 +1253,10 @@ function RepositorySidebar({
             {getRepoInitial(repo)}
           </AvatarFallback>
         </Avatar>
-        <div className={cn('min-w-0 flex-1 overflow-hidden', unread > 0 && 'pr-14')}>
+        <div className={cn('min-w-0 flex-1', unread > 0 && 'pr-14')}>
           <div className="flex min-w-0 items-center gap-1.5">
             <p
-              className="min-w-0 break-words text-sm font-semibold leading-5 text-foreground"
+              className="min-w-0 truncate text-sm font-semibold leading-5 text-foreground"
               title={repo.fullName}
             >
               {repo.fullName}
@@ -1270,7 +1271,7 @@ function RepositorySidebar({
           <p className="mt-1 block max-w-full truncate text-xs text-muted-foreground" title={latestMessage}>
             {latestMessage}
           </p>
-          <div className="mt-2 flex min-w-0 items-center gap-2 overflow-hidden text-[11px] text-muted-foreground">
+          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
             {hasPendingApproval ? (
               <Badge
                 variant="outline"
@@ -1290,7 +1291,7 @@ function RepositorySidebar({
             <Badge
               variant="outline"
               className={cn(
-                'rounded-full px-1.5 py-0 text-[10px]',
+                'shrink-0 rounded-full px-1.5 py-0 text-[10px]',
                 kind === 'editable'
                   ? 'border-success/40 text-success-foreground'
                   : 'border-muted-foreground/30 text-muted-foreground',
@@ -1491,11 +1492,11 @@ function RepositorySidebar({
     <aside
       style={{ width: sidebarWidth }}
       className={cn(
-        'relative hidden h-screen shrink-0 overflow-visible border-r border-border bg-background/60 lg:block',
+        'relative hidden h-screen shrink-0 flex-col overflow-visible border-r border-border bg-background/60 lg:flex',
         !isResizing && 'transition-[width] duration-200',
       )}
     >
-      <div className="desktop-drag border-b border-border px-4 pb-4 pt-9">
+      <div className="desktop-drag shrink-0 border-b border-border px-4 pb-4 pt-9">
         <div className="desktop-no-drag flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-foreground">仓库会话</h2>
@@ -1534,8 +1535,8 @@ function RepositorySidebar({
         </div>
       </div>
 
-      <ScrollArea className="h-[calc(100vh-98px)] overflow-hidden">
-        <div className="w-full max-w-full space-y-1 overflow-hidden p-3">
+      <ScrollArea className="min-h-0 flex-1 overflow-hidden">
+        <div className="w-full min-w-0 space-y-1 overflow-hidden p-3">
           {filteredEditable.length > 0 && (
             <>
               <p className="px-2 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">

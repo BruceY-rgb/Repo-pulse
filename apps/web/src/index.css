@@ -205,4 +205,12 @@
   outline-offset: 2px;
 }
 
+/* ─── Radix ScrollArea viewport 内层修正 ─────────────────────────────── */
+/* Radix v1.2.x 在 Viewport 内部包裹了一层 display:table; min-width:100%
+   的 div，导致子元素宽度按内容撑开而非受限于容器宽度，
+   文本 truncate / flex 约束全部失效。强制改回 block 布局修复此问题。 */
+[data-radix-scroll-area-viewport] > div {
+  display: block !important;
+}
+
 /* ─── Tab 选中状态 ───────────────────────────────────────────────────── */
