@@ -130,7 +130,7 @@ describe('FilterService — 补充分支覆盖', () => {
   describe('testRule – 事件字段不存在', () => {
     it('字段不存在于事件时返回 matched=false', () => {
       const result = service.testRule({
-        conditions: [{ field: 'nonExistentField', operator: 'eq', value: 'anything' }],
+        conditions: [{ field: 'nonExistentField' as any, operator: 'eq', value: 'anything' }],
         event: baseEvent,
       });
       expect(result.matched).toBe(false);

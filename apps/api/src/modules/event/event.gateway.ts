@@ -114,6 +114,19 @@ export class EventGateway
     this.logger.log(`Broadcast event:new to room ${roomName}`);
   }
 
+  broadcastNewEvents(repositoryId: string, events: unknown[]) {
+    const roomName = `repo:${repositoryId}`;
+    this.server.to(roomName).emit('events:new', {
+      type: 'events:new',
+      repositoryId,
+      data: events,
+      timestamp: new Date().toISOString(),
+    });
+    this.logger.log(
+      `Broadcast events:new (${events.length} events) to room ${roomName}`,
+    );
+  }
+
   broadcastAnalysisCompleted(eventId: string) {
     this.server.emit('analysis:completed', {
       type: 'analysis:completed',
