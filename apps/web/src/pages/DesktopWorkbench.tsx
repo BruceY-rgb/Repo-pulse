@@ -1103,19 +1103,9 @@ function RepositorySidebar({
       return rightAt - leftAt;
     });
 
-  const filteredEditable = useMemo(
-    () => sortWithPinned(filterBySearch(editableRepos)),
-    [editableRepos, normalizedRepositorySearch, pinnedRepoIds],
-  );
-  const filteredMonitored = useMemo(
-    () => sortWithPinned(filterBySearch(monitoredRepos)),
-    [monitoredRepos, normalizedRepositorySearch, pinnedRepoIds],
-  );
-
-  const allFilteredRepos = useMemo(
-    () => [...filteredEditable, ...filteredMonitored],
-    [filteredEditable, filteredMonitored],
-  );
+  const filteredEditable = sortWithPinned(filterBySearch(editableRepos));
+  const filteredMonitored = sortWithPinned(filterBySearch(monitoredRepos));
+  const allFilteredRepos = [...filteredEditable, ...filteredMonitored];
 
   function getEffectiveUnread(item: ChatRepositoryItem): number {
     // 直接使用后端返回的 unreadCount，不再依赖 localStorage

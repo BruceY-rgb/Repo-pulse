@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useState, useEffect } from 'react';
 import {
   User,
@@ -474,12 +473,12 @@ export function Settings() {
                     <label className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-[var(--github-border)] bg-[var(--github-surface)] text-sm text-white cursor-pointer hover:border-[var(--github-accent)] transition-colors">
                       {t('settings.profile.uploadAvatar') || 'Upload from computer'}
                       <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
-                        var file = e.target.files?.[0];
+                        const file = e.target.files?.[0];
                         if (!file) return;
-                        var fd = new FormData();
+                        const fd = new FormData();
                         fd.append('file', file);
                         try {
-                          var res = await apiClient.post('/users/me/avatar', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+                          const res = await apiClient.post('/users/me/avatar', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
                           setUserProfile({ ...userProfile, avatar: res.data.data.avatar });
                           toast.success(t('settings.profile.avatarUploaded') || 'Avatar uploaded');
                         } catch { toast.error('Upload failed'); }
@@ -487,7 +486,7 @@ export function Settings() {
                     </label>
                     <Button variant="outline" size="sm" className="border-[var(--github-border)]" onClick={async () => {
                       try {
-                        var res = await apiClient.get('/users/me/github-avatar');
+                        const res = await apiClient.get('/users/me/github-avatar');
                         setUserProfile({ ...userProfile, avatar: res.data.data.avatar });
                         toast.success(t('settings.profile.avatarRestored') || 'GitHub avatar restored');
                       } catch { toast.error('Failed to restore'); }
