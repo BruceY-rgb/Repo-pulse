@@ -126,4 +126,12 @@ export class RepositoryController {
     const userId = (req.user as { sub: string }).sub;
     return this.repositoryService.syncForUser(userId, id);
   }
+
+  @Post(':id/webhook')
+  @ApiOperation({ summary: '重新注册 Webhook' })
+  async registerWebhook(@Req() req: Request, @Param('id') id: string): Promise<any> {
+    const userId = (req.user as { sub: string }).sub;
+    const repository = await this.repositoryService.registerWebhook(userId, id);
+    return repository;
+  }
 }

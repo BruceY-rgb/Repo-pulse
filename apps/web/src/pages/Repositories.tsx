@@ -116,10 +116,6 @@ export function Repositories() {
     return () => window.clearTimeout(timer);
   }, [searchInput]);
 
-  useEffect(() => {
-    setKeyword(searchParams.get('keyword') ?? '');
-  }, [searchParams]);
-
   const repositories = useMemo(
     () => repositoriesQuery.data ?? [],
     [repositoriesQuery.data],

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
   GitPullRequest,
   CheckCircle,
@@ -17,6 +17,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { approvalService, type Approval, type ApprovalStatus } from '@/services/approval.service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { EventContextChips } from '@/components/shared/EventContextChips';
+import { useApprovals } from '@/hooks/use-approvals';
 
 function getStatusBadge(status: ApprovalStatus) {
   switch (status) {
@@ -35,20 +36,10 @@ function getStatusBadge(status: ApprovalStatus) {
 
 function ListPanel({ status, selectedId, onSelect, onDelete }: { status: ApprovalStatus; selectedId?: string; onSelect: (a: Approval) => void; onDelete?: (id: string) => void }) {
   const { t } = useLanguage();
-  const [items, setItems] = useState<Approval[]>([]);
-  const [loading, setLoading] = useState(true);
+  const approvalsQuery = useApprovals({ status });
+  const items = approvalsQuery.data?.approvals ?? [];
 
-  const load = useCallback(function () {
-    setLoading(true);
-    approvalService.getApprovals({ status })
-      .then(function (r) { setItems(r?.approvals ?? []); })
-      .catch(function () { setItems([]); })
-      .finally(function () { setLoading(false); });
-  }, [status]);
-
-  useEffect(function () { load(); }, [load]);
-
-  if (loading) return <div className="flex items-center justify-center py-16"><Spinner className="h-8 w-8 text-[var(--github-accent)]" /></div>;
+  if (approvalsQuery.isLoading) return <div className="flex items-center justify-center py-16"><Spinner className="h-8 w-8 text-[var(--github-accent)]" /></div>;
   if (items.length === 0) return <div className="text-center py-16"><GitPullRequest className="w-16 h-16 mx-auto mb-4 text-[var(--github-text-secondary)]" /><h3 className="text-lg font-medium text-white mb-2">{t('approvals.empty.' + status.toLowerCase())}</h3></div>;
 
   return (

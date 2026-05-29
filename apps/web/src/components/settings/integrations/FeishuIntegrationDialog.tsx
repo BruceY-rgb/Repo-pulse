@@ -510,7 +510,7 @@ export function FeishuIntegrationDialog({
     setSubscriptions([{ ...baseSubscription, enabled }]);
   };
 
-  const useAllRepositories = () => {
+  const selectAllRepositories = () => {
     const baseSubscription = getBaseSubscription();
     setSubscriptions([{ ...baseSubscription, repositoryIds: [], branches: [], repositoryBranchScopes: {} }]);
   };
@@ -583,7 +583,10 @@ export function FeishuIntegrationDialog({
 
   const currentSubscription = subscriptions[0];
   const selectedEvents = normalizeSelectedEvents(currentSubscription?.events);
-  const selectedRepositoryIds = currentSubscription?.repositoryIds ?? [];
+  const selectedRepositoryIds = useMemo(
+    () => currentSubscription?.repositoryIds ?? [],
+    [currentSubscription?.repositoryIds],
+  );
   const allRepositoriesSelected = selectedRepositoryIds.length === 0;
   const availableRepositoryIds = useMemo(() => repositories.map((repository) => repository.id), [repositories]);
   const availableRepositoryIdSet = useMemo(() => new Set(availableRepositoryIds), [availableRepositoryIds]);
@@ -785,11 +788,11 @@ export function FeishuIntegrationDialog({
                     role="button"
                     tabIndex={0}
                     className="flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left hover:bg-white/5"
-                    onClick={useAllRepositories}
+                    onClick={selectAllRepositories}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
-                        useAllRepositories();
+                        selectAllRepositories();
                       }
                     }}
                   >

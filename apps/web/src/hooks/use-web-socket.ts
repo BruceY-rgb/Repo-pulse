@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
+import type { QueryClient } from '@tanstack/react-query';
 import type { Socket } from 'socket.io-client';
 import { io } from 'socket.io-client';
 import { useQueryClient } from '@tanstack/react-query';
@@ -8,6 +9,61 @@ import { repositoryQueryKeys } from '@/hooks/queries/use-repository-queries';
 import { analysisQueryKeys } from '@/hooks/use-analysis';
 import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
 import { getSocketUrl } from '@/lib/desktop';
+
+export const REALTIME_INVALIDATION_BUDGET_MS = 50;
+
+type RealtimeEventName = 'event:new' | 'events:new' | 'analysis:completed';
+type RealtimeQueryClient = Pick<QueryClient, 'invalidateQueries'>;
+
+function emitRealtimeMetric(eventName: RealtimeEventName, startedAt: number): number {
+  const scheduleMs = performance.now() - startedAt;
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('repo-pulse:realtime-render', {
+        detail: {
+          eventName,
+          scheduleMs,
+          budgetMs: REALTIME_INVALIDATION_BUDGET_MS,
+          measuredAt: Date.now(),
+        },
+      }),
+    );
+  }
+
+  return scheduleMs;
+}
+
+export function invalidateRepositoryRealtimeQueries(
+  queryClient: RealtimeQueryClient,
+  eventName: 'event:new' | 'events:new',
+): number {
+  const startedAt = performance.now();
+
+  queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
+  queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
+  queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
+  queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
+  queryClient.invalidateQueries({ queryKey: notificationQueryKeys.preferences() });
+
+  return emitRealtimeMetric(eventName, startedAt);
+}
+
+export function invalidateAnalysisRealtimeQueries(
+  queryClient: RealtimeQueryClient,
+): number {
+  const startedAt = performance.now();
+
+  queryClient.invalidateQueries({ queryKey: analysisQueryKeys.all });
+  queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
+  queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
+  queryClient.invalidateQueries({ queryKey: notificationQueryKeys.preferences() });
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('approval-updated'));
+  }
+
+  return emitRealtimeMetric('analysis:completed', startedAt);
+}
 
 export function useRepositoryRealtimeSubscription(repositoryIds?: string | string[]) {
   const queryClient = useQueryClient();
@@ -79,19 +135,15 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
       });
 
       socket.on('event:new', () => {
-        queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
-        queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
-        queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
-        queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
-        queryClient.invalidateQueries({ queryKey: notificationQueryKeys.preferences() });
+        invalidateRepositoryRealtimeQueries(queryClient, 'event:new');
+      });
+
+      socket.on('events:new', () => {
+        invalidateRepositoryRealtimeQueries(queryClient, 'events:new');
       });
 
       socket.on('analysis:completed', () => {
-        queryClient.invalidateQueries({ queryKey: analysisQueryKeys.all });
-        queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
-        queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
-        queryClient.invalidateQueries({ queryKey: notificationQueryKeys.preferences() });
-        window.dispatchEvent(new Event('approval-updated'));
+        invalidateAnalysisRealtimeQueries(queryClient);
       });
 
       socketRef.current = socket;

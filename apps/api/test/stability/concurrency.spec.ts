@@ -174,7 +174,7 @@ describe('稳定性测试 — 并发安全与去重 (Concurrency)', () => {
         Array.from({ length: 5 }, (_, i) =>
           service.create({
             repositoryId: 'repo-1',
-            type: EventType.PULL_REQUEST,
+            type: EventType.PR_OPENED,
             action: 'opened',
             title: `PR #${i + 100}`,
             body: `PR body ${i}`,

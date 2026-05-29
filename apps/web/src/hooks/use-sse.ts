@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useReducer } from 'react';
 import { toApiUrl } from '@/lib/desktop';
 
 interface UseSSEOptions<T> {
@@ -16,57 +16,94 @@ interface SSEReturn<T> {
   isComplete: boolean;
 }
 
+type SSEAction<T> =
+  | { type: 'start' }
+  | { type: 'open' }
+  | { type: 'message'; data: T; isComplete: boolean }
+  | { type: 'error'; error: Error };
+
+function sseReducer<T>(state: SSEReturn<T>, action: SSEAction<T>): SSEReturn<T> {
+  switch (action.type) {
+    case 'start':
+      return {
+        data: null,
+        isLoading: true,
+        error: null,
+        isComplete: false,
+      };
+    case 'open':
+      return {
+        ...state,
+        isLoading: false,
+      };
+    case 'message':
+      return {
+        ...state,
+        data: action.data,
+        isComplete: action.isComplete,
+      };
+    case 'error':
+      return {
+        ...state,
+        error: action.error,
+        isLoading: false,
+      };
+    default:
+      return state;
+  }
+}
+
 /**
  * SSE Hook - 用于接收服务器发送的事件流
  */
 export function useSSE<T = string>(options: UseSSEOptions<T>): SSEReturn<T> {
   const { url, enabled = true, onMessage, onError, onComplete } = options;
-  const [data, setData] = useState<T | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  const [isComplete, setIsComplete] = useState(false);
+  const [state, dispatch] = useReducer(sseReducer<T>, {
+    data: null,
+    isLoading: false,
+    error: null,
+    isComplete: false,
+  });
   const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
 
-    setIsLoading(true);
-    setError(null);
-    setIsComplete(false);
-    setData(null);
+    dispatch({ type: 'start' });
 
     const eventSource = new EventSource(toApiUrl(url));
     eventSourceRef.current = eventSource;
 
     eventSource.onopen = () => {
       console.log('[SSE] Connected to:', url);
-      setIsLoading(false);
+      dispatch({ type: 'open' });
     };
 
     eventSource.onmessage = (event) => {
       try {
         const parsed = JSON.parse(event.data) as T;
-        setData(parsed);
         onMessage?.(parsed);
 
-        // 检查是否是完成信号
-        if (typeof parsed === 'object' && parsed !== null && 'type' in parsed) {
-          if ((parsed as { type: string }).type === 'done') {
-            setIsComplete(true);
-            onComplete?.();
-          }
+        const isCompleteMessage =
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          'type' in parsed &&
+          (parsed as { type: string }).type === 'done';
+
+        if (isCompleteMessage) {
+          onComplete?.();
         }
-      } catch (e) {
+        dispatch({ type: 'message', data: parsed, isComplete: isCompleteMessage });
+      } catch {
         // 如果不是 JSON，直接作为字符串处理
-        setData(event.data as T);
+        dispatch({ type: 'message', data: event.data as T, isComplete: false });
       }
     };
 
     eventSource.onerror = (e) => {
       console.error('[SSE] Error:', e);
       const err = new Error('SSE connection failed');
-      setError(err);
-      setIsLoading(false);
+      dispatch({ type: 'error', error: err });
       onError?.(err);
       eventSource.close();
     };
@@ -77,7 +114,7 @@ export function useSSE<T = string>(options: UseSSEOptions<T>): SSEReturn<T> {
     };
   }, [url, enabled, onMessage, onError, onComplete]);
 
-  return { data, isLoading, error, isComplete };
+  return state;
 }
 
 /**

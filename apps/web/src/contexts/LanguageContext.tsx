@@ -1527,7 +1527,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguage] = useState<Language>('zh');
 
   const t = (key: string, params?: Record<string, string>): string => {
-    var text = translations[language][key] || key;
+    let text = translations[language][key] || key;
     if (params) {
       Object.keys(params).forEach(function (k) {
         text = text.replace('{' + k + '}', params[k]);

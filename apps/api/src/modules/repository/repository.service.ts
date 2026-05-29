@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   EventType,
@@ -608,6 +613,75 @@ export class RepositoryService {
       failedSources,
       lastSyncAt: completedAt.toISOString(),
     };
+  }
+
+  /**
+   * 重新注册 Webhook
+   */
+  async registerWebhook(userId: string, id: string) {
+    await assertUserCanEditRepository(userId, id);
+
+    const repository = await this.prisma.repository.findUnique({
+      where: { id },
+      include: {
+        users: {
+          where: { userId },
+          include: {
+            user: {
+              select: {
+                githubAccessToken: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!repository) {
+      throw new NotFoundException('Repository not found');
+    }
+
+    if (repository.platform !== Platform.GITHUB) {
+      throw new BadRequestException(
+        'Webhook re-registration currently supports GitHub repositories only',
+      );
+    }
+
+    const userOAuthToken = repository.users[0]?.user.githubAccessToken;
+    if (!userOAuthToken) {
+      throw new BadRequestException('GitHub account is not connected');
+    }
+
+    const [owner, repo] = this.parseRepositoryPath(repository.fullName);
+
+    // 生成新的 webhook secret
+    const webhookSecret = this.generateWebhookSecret();
+
+    const apiUrl = this.configService.get<string>('API_URL', 'http://localhost:3001');
+    const webhookUrl = `${apiUrl}/webhooks/github`;
+
+    // 创建 Webhook
+    const webhookId = await this.githubService.createWebhook(
+      owner,
+      repo,
+      webhookUrl,
+      webhookSecret,
+      userOAuthToken,
+    );
+
+    // 更新仓库记录
+    await this.prisma.repository.update({
+      where: { id },
+      data: {
+        webhookId: webhookId ? String(webhookId) : null,
+        webhookSecret,
+      },
+    });
+
+    this.logger.log(
+      `Webhook re-registered for ${repository.fullName} by user ${userId}`,
+    );
+    return { success: true, webhookId };
   }
 
   async getUserRepositories(userId: string) {
