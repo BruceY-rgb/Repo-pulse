@@ -30,11 +30,11 @@
 
 | 测试类型 | 套件数 | 用例数 | 通过 | 失败 | 执行时长 |
 |---------|-------|-------|------|------|---------|
-| 单元测试（含稳定性） | **41** | **771** | **771** | **0** | ~35s |
-| E2E 功能测试 | 10 | — | 需真实 DB+Redis 执行 | — | — |
+| 单元测试（含稳定性） | **43** | **813** | **813** | **0** | ~15s |
+| E2E 功能测试 | 11 | — | 需真实 DB+Redis 执行 | — | — |
 | 性能测试 | 1 | 5端点 | 需真实运行实例 | — | — |
 
-> **单元测试与稳定性测试全部通过，771/771，零失败。**
+> **单元测试与稳定性测试全部通过，813/813，零失败。**
 
 ---
 
@@ -44,18 +44,18 @@
 
 | 指标 | 数值 | 配置阈值（≥） | 状态 |
 |------|------|-------------|------|
-| 行覆盖率 | **78.01%** | 65% | ✅ PASS |
-| 语句覆盖率 | **77.81%** | 65% | ✅ PASS |
-| 函数覆盖率 | **74.91%** | 60% | ✅ PASS |
-| 分支覆盖率 | **56.94%** | 50% | ✅ PASS |
+| 行覆盖率 | **78.78%** | 65% | ✅ PASS |
+| 语句覆盖率 | **78.70%** | 65% | ✅ PASS |
+| 函数覆盖率 | **77.42%** | 60% | ✅ PASS |
+| 分支覆盖率 | **60.01%** | 50% | ✅ PASS |
 
 **覆盖率变化历程：**
 
-| 时间节点 | 行覆盖率 | 事件 |
-|---------|---------|------|
-| Phase 3 完成 | ~81% | 基线 |
-| feat/authority 合并 | ~66% | 权限模块引入大量新代码，测试滞后 |
-| 本次补充后 | **78%** | 新增 4 个测试文件，提升 12 个百分点 |
+| 时间节点 | 行覆盖率 | 分支覆盖率 | 事件 |
+|---------|---------|----------|------|
+| Phase 3 完成 | ~81% | ~65% | 基线 |
+| feat/authority 合并 | ~66% | ~50% | 权限模块引入大量新代码，测试滞后 |
+| 本次补充后 | **78.78%** | **60.01%** | 新增测试文件，恢复覆盖率 |
 
 **覆盖率阈值配置**（`apps/api/package.json`，`coverageThreshold`）：
 
@@ -74,7 +74,7 @@ CI 强制执行，低于阈值构建直接失败。
 
 ---
 
-### 3.2 测试套件明细（41个套件，771个用例）
+### 3.2 测试套件明细（43个套件，813个用例）
 
 #### 认证模块（Auth）— 4个文件
 
@@ -237,7 +237,7 @@ EventProcessor 是 BullMQ 消费者，处理从队列取出的 Webhook 原始 pa
 
 ---
 
-#### 仓库管理模块（Repository）— 4个文件
+#### 仓库管理模块（Repository）— 6个文件
 
 **`repository.service.spec.ts`**
 
@@ -260,6 +260,23 @@ EventProcessor 是 BullMQ 消费者，处理从队列取出的 Webhook 原始 pa
 | 分支白名单 | 仅配置分支的事件通过 |
 | 通配符匹配 | `feature/*` 匹配所有 feature 分支 |
 | 不匹配分支 | 事件被过滤掉 |
+
+**`repository.service.extra.spec.ts`**（36个用例，本次新增）
+
+| 测试用例组 | 验证内容 |
+|-----------|---------|
+| normalizeGithubPullRequest | PR 三种状态（open/merged/closed）及 stale 跳过逻辑 |
+| normalizeGithubIssue | issue open/closed、pull_request 字段跳过、stale 跳过 |
+| normalizeGitlabCommit | GitLab commit id 缺失返回 null，正常路径字段映射 |
+| normalizeGitlabMergeRequest | MR open/merged/closed 及 stale 跳过 |
+| normalizeGitlabIssue | GitLab issue open/closed 及 stale 跳过 |
+| resolveGithubAccessLevel | OWNER/ADMIN/MAINTAIN/WRITE/TRIAGE/READ/NONE 七个权限级别全覆盖 |
+| sync PR/Issue 事件 | PR_OPENED、ISSUE_CLOSED 事件入库、successfulSources=0 不更新 lastSyncAt |
+| parseRepositoryPath | 正常/无斜线/嵌套路径三种边界 |
+
+**`repository-is-monitored.spec.ts`**
+
+验证 `isMonitored` 字段正确使用 `externalId` 匹配（而非 Prisma 内部 UUID），确保 GitHub 数字 ID 与数据库 externalId 字段的映射逻辑正确。
 
 **`github.service.spec.ts` / `gitlab.service.spec.ts`**
 
@@ -456,7 +473,7 @@ EventProcessor 是 BullMQ 消费者，处理从队列取出的 Webhook 原始 pa
 - AI 配置读写（apiKey、modelName、provider）
 - 用户信息查询、角色管理
 
-**`workbench.service.spec.ts`**（27个用例）
+**`workbench.service.spec.ts`**（27个用例，本次修复 4 个失败测试）
 
 | 测试用例组 | 验证内容 |
 |-----------|---------|
@@ -500,8 +517,8 @@ EventProcessor 是 BullMQ 消费者，处理从队列取出的 Webhook 原始 pa
 
 | 评分项 | 满分 | 得分 | 说明 |
 |-------|------|------|------|
-| 测试覆盖范围 | 8 | 8 | 41 个套件，771 个用例，覆盖全部 15 个主要模块 |
-| 覆盖率水平 | 7 | 6 | 行 78%（优），分支 57%（中），有阈值保障 |
+| 测试覆盖范围 | 8 | 8 | 43 个套件，813 个用例，覆盖全部 15 个主要模块 |
+| 覆盖率水平 | 7 | 6 | 行 78.78%（优），分支 60.01%（中），有阈值保障 |
 | 覆盖率阈值强制 | 3 | 3 | Jest coverageThreshold 配置，CI 强制 |
 | 测试质量 | 2 | 2 | 边界条件、错误路径、Mock 规范性均良好 |
 | **小计** | **20** | **19** | |
@@ -518,7 +535,7 @@ EventProcessor 是 BullMQ 消费者，处理从队列取出的 Webhook 原始 pa
 - 使用 `supertest` 发送真实 HTTP 请求，验证完整请求-响应链路
 - CI 中独立 Job 运行（Docker services: postgres + redis）
 
-### 4.2 E2E 测试套件明细（10个文件）
+### 4.2 E2E 测试套件明细（11个文件）
 
 **`auth.e2e-spec.ts`**
 
@@ -612,6 +629,10 @@ POST /webhook/github/:id（带正确签名）
 | 最近活动 | GET /dashboard/recent-activity | 返回最近事件列表 |
 | 空数据安全 | 无事件时 | 返回 0 而非报错 |
 
+**`websocket-realtime.e2e-spec.ts`**（新增）
+
+端对端验证 WebSocket 实时推送完整链路：客户端连接认证 → 加入仓库 Room → Webhook 触发事件 → Socket.io 广播到对应 Room → 客户端收到事件。
+
 **`filter-rules.e2e-spec.ts`**（新增）
 
 | 用例 | 请求 | 验证点 |
@@ -630,7 +651,7 @@ POST /webhook/github/:id（带正确签名）
 
 | 评分项 | 满分 | 得分 | 说明 |
 |-------|------|------|------|
-| E2E 覆盖范围 | 10 | 9 | 10 个文件覆盖核心业务链路；缺少 Workbench E2E |
+| E2E 覆盖范围 | 10 | 9 | 11 个文件覆盖核心业务链路；缺少 Workbench E2E |
 | 测试用例质量 | 6 | 6 | 正常流+错误流+权限隔离+边界条件均覆盖 |
 | CI 自动化 | 4 | 4 | GitHub Actions 独立 Job，真实 DB+Redis |
 | **小计** | **20** | **19** | |
@@ -829,8 +850,8 @@ SLA P99 < 2000ms: PASS/FAIL
 |----|-------|------|------|------|
 | #001 | Medium | IM/飞书 | 飞书消息实际投递未实装，框架存在但 send 为占位 | Open |
 | #002 | Low | 前端 | DesktopWorkbench.tsx 超 2500 行，可维护性差 | Open |
-| #003 | Medium | 测试 | 分支覆盖率目标 70%，当前 57% | In Progress |
-| #004 | Low | 测试 | feat/authority 合并后行覆盖率从 81% 降至 66%（已恢复 78%）| In Progress |
+| #003 | Medium | 测试 | 分支覆盖率目标 70%，当前 60.01% | In Progress |
+| #004 | Low | 测试 | feat/authority 合并后行覆盖率从 81% 降至 66%（已恢复 78.78%）| Fixed |
 | #005 | Low | 后端 | resolveRepositoryIds 逻辑在多个 Service 重复 | Open |
 | #006 | Low | 后端 | 部分 Service 直接 new PrismaClient()，非 DI | Open |
 | #007 | Medium | 前端 | 部分页面仍用 useEffect 获取数据，违反 React Query 规范 | Open |
@@ -954,7 +975,7 @@ Job: ci-success（Gate Keeper）
 
 | 优先级 | 项目 | 具体措施 |
 |-------|------|---------|
-| P1 | 分支覆盖率偏低（56.94%）| 针对 NotificationService/FilterService 等条件分支密集的模块补充边界用例，目标 ≥ 65% |
+| P1 | 分支覆盖率偏低（60.01%）| 针对 NotificationService/FilterService 等条件分支密集的模块补充边界用例，目标 ≥ 65% |
 | P2 | E2E 覆盖率未上报（#011）| CI 中补充 E2E Codecov 上报（flags: e2e），获得完整覆盖率视图 |
 | P2 | 飞书消息未实装（#001）| 接入飞书 Bot SDK，实现实际发送逻辑，对应测试覆盖真实发送路径 |
 | P3 | 无长时间稳定性测试 | 补充 5 分钟持续运行场景（BullMQ 队列积压恢复、WebSocket 长连接保活）|
