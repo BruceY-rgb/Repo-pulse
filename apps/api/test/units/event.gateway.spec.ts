@@ -75,6 +75,16 @@ describe('EventGateway', () => {
       expect(client.userId).toBe('u1');
       expect(client.email).toBe('alice@example.com');
       expect(client.disconnect).not.toHaveBeenCalled();
+      expect(gateway.getRealtimeStats()).toMatchObject({
+        connectedClients: 1,
+        clients: [
+          expect.objectContaining({
+            socketId: 'socket-1',
+            userId: 'u1',
+            email: 'alice@example.com',
+          }),
+        ],
+      });
     });
 
     it('sets userId from Bearer token in Authorization header', async () => {
@@ -140,6 +150,30 @@ describe('EventGateway', () => {
     });
   });
 
+  describe('socket monitoring', () => {
+    it('tracks repository room subscriptions and removes disconnected sockets', async () => {
+      const token = jwt.sign({ sub: 'u1', email: 'alice@example.com' }, SECRET);
+      const client = makeClient({ auth: { token } });
+
+      await gateway.handleConnection(client as any);
+      gateway.handleJoinRepository(client as any, { repositoryId: 'r1' });
+
+      expect(gateway.getRealtimeStats()).toMatchObject({
+        connectedClients: 1,
+        subscriptionsByRepository: {
+          r1: 1,
+        },
+      });
+      expect(gateway.getRealtimeStats().clients[0]?.rooms).toEqual(['repo:r1']);
+
+      gateway.handleLeaveRepository(client as any, { repositoryId: 'r1' });
+      expect(gateway.getRealtimeStats().subscriptionsByRepository).toEqual({});
+
+      gateway.handleDisconnect(client as any);
+      expect(gateway.getRealtimeStats().connectedClients).toBe(0);
+    });
+  });
+
   // ── broadcastNewEvent ─────────────────────────────────────────────────────
   describe('broadcastNewEvent', () => {
     it('emits event:new to the repo room', () => {
@@ -149,6 +183,22 @@ describe('EventGateway', () => {
       expect(serverMock.emit).toHaveBeenCalledWith(
         'event:new',
         expect.objectContaining({ type: 'event:new', repositoryId: 'r1' }),
+      );
+    });
+  });
+
+  describe('broadcastNewEvents', () => {
+    it('emits events:new to the repo room', () => {
+      const serverMock = (gateway as any).server;
+      gateway.broadcastNewEvents('r1', [{ type: 'PUSH' }, { type: 'PR_OPENED' }]);
+      expect(serverMock.to).toHaveBeenCalledWith('repo:r1');
+      expect(serverMock.emit).toHaveBeenCalledWith(
+        'events:new',
+        expect.objectContaining({
+          type: 'events:new',
+          repositoryId: 'r1',
+          data: [{ type: 'PUSH' }, { type: 'PR_OPENED' }],
+        }),
       );
     });
   });
