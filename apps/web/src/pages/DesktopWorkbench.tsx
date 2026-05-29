@@ -19,6 +19,7 @@ import {
   CheckSquare,
   ChevronLeft,
   ChevronRight,
+  CircleDot,
   Command,
   Eye,
   EyeOff,
@@ -43,6 +44,7 @@ import {
   Sparkles,
   Star,
   Trash2,
+  VolumeX,
   XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -609,7 +611,7 @@ function riskLevelToRisk(riskLevel?: RiskLevel): ConversationMessage['risk'] {
 
 function workbenchMessageToConversationMessage(
   msg: WorkbenchConversationMessage,
-  _conversationState?: WorkbenchConversationState,
+  conversationState?: WorkbenchConversationState,
 ): ConversationMessage {
   const createdAtMs = new Date(msg.createdAt).getTime();
   const risk = riskLevelToRisk(msg.riskLevel);
@@ -670,7 +672,7 @@ function workbenchMessageToConversationMessage(
   };
 }
 
-function _getLatestRepoMessage(repo: Repository, messages: ConversationMessage[]) {
+function getLatestRepoMessage(repo: Repository, messages: ConversationMessage[]) {
   const message = messages
     .filter((item) => item.sourceRepositoryId === repo.id)
     .sort((left, right) => right.createdAtMs - left.createdAtMs)[0];
@@ -691,7 +693,7 @@ function getRepoMessages(repositoryId: string | undefined, messages: Conversatio
   return messages.filter((item) => item.sourceRepositoryId === repositoryId);
 }
 
-function _getRepositorySortTime(repo: Repository, messages: ConversationMessage[]) {
+function getRepositorySortTime(repo: Repository, messages: ConversationMessage[]) {
   const latestMessageTime = Math.max(
     ...messages
       .filter((item) => item.sourceRepositoryId === repo.id)
@@ -713,7 +715,7 @@ function _getRepositorySortTime(repo: Repository, messages: ConversationMessage[
   return Number.isFinite(fallbackTime) ? fallbackTime : 0;
 }
 
-function _hasRepositoryMessages(repo: Repository, messages: ConversationMessage[]) {
+function hasRepositoryMessages(repo: Repository, messages: ConversationMessage[]) {
   return messages.some((item) => item.sourceRepositoryId === repo.id);
 }
 
@@ -823,7 +825,7 @@ function getRepositoryContextMenuItems({
   ];
 }
 
-function _getWatchDescription(item: SearchResult) {
+function getWatchDescription(item: SearchResult) {
   const language = item.language ? `${item.language} · ` : '';
   return `${language}${item.stargazersCount.toLocaleString()} stars · ${item.description || '关注仓库正在发生新的生态变化'}`;
 }
@@ -2857,7 +2859,7 @@ export function DesktopWorkbench() {
     staleTime: 15 * 1000,
   });
 
-  const _conversationState = conversationMessagesQuery.data?.conversation ?? null;
+  const conversationState = conversationMessagesQuery.data?.conversation ?? null;
 
   const allMessages = useMemo(() => {
     const eventMessages = (eventsQuery.data?.items ?? []).map(toConversationMessage);
