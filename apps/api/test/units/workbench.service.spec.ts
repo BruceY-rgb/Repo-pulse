@@ -31,6 +31,7 @@ jest.mock('@repo-pulse/database', () => ({
     ISSUE_OPENED: 'ISSUE_OPENED',
     ISSUE_CLOSED: 'ISSUE_CLOSED',
   },
+  Platform: { GITHUB: 'GITHUB', GITLAB: 'GITLAB' },
   RepositoryAccessLevel: {
     OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN',
     WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE',
@@ -231,32 +232,40 @@ describe('WorkbenchService.getWatchFeed', () => {
   });
 
   it('editable 仓库不出现在 watchFeed 中', async () => {
-    mockUserRepoFindMany.mockResolvedValue([
-      {
-        repositoryId: 'repo-editable',
-        accessLevel: 'WRITE',
-        repository: { id: 'repo-editable', fullName: 'org/editable' },
-      },
-    ]);
+    // Prisma 会通过 accessLevel: { notIn: editableAccessLevels } 过滤掉 editable 仓库
+    // mock 模拟 Prisma 过滤后的结果
+    mockUserRepoFindMany.mockResolvedValue([]);
 
     const result = await svc.getWatchFeed('user-1');
     expect(result.items).toHaveLength(0);
     expect(mockEventFindMany).not.toHaveBeenCalled();
+    // 验证 Prisma 确实用了 accessLevel notIn 过滤
+    expect(mockUserRepoFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          accessLevel: expect.objectContaining({ notIn: expect.any(Array) }),
+        }),
+      }),
+    );
   });
 
   it('已纳入监控的仓库不出现在 watchFeed 中', async () => {
     mockGetUserMonitoredRepositoryIds.mockResolvedValue(['repo-monitored']);
-    mockUserRepoFindMany.mockResolvedValue([
-      {
-        repositoryId: 'repo-monitored',
-        accessLevel: 'READ',
-        repository: { id: 'repo-monitored', fullName: 'org/monitored' },
-      },
-    ]);
+    // Prisma 会通过 repositoryId: { notIn: monitoredIds } 过滤掉已监控仓库
+    // mock 模拟 Prisma 过滤后的结果
+    mockUserRepoFindMany.mockResolvedValue([]);
 
     const result = await svc.getWatchFeed('user-1');
     expect(result.items).toHaveLength(0);
     expect(mockEventFindMany).not.toHaveBeenCalled();
+    // 验证 Prisma 确实传入了 notIn 过滤参数
+    expect(mockUserRepoFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          repositoryId: { notIn: ['repo-monitored'] },
+        }),
+      }),
+    );
   });
 
   it('非 editable 且未监控的仓库出现在 watchFeed 中', async () => {

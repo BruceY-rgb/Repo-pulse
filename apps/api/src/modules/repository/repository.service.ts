@@ -98,6 +98,7 @@ export class RepositoryService {
       accessLevel?: RepositoryAccessLevel;
       role?: Role;
       githubLogin?: string;
+      isStarred?: boolean;
     },
   ) {
     const { platform, owner, repo } = dto;
@@ -180,6 +181,7 @@ export class RepositoryService {
         accessMode,
         accessLevel,
         role,
+        ...(options?.isStarred !== undefined ? { isStarred: options.isStarred } : {}),
       },
       create: {
         userId,
@@ -187,6 +189,7 @@ export class RepositoryService {
         role,
         accessMode,
         accessLevel,
+        isStarred: options?.isStarred ?? false,
       },
     });
 
@@ -789,11 +792,16 @@ export class RepositoryService {
     if (monitoredRepositoryIds.length === 0) {
       return new Set();
     }
+
     const repositories = await this.prisma.repository.findMany({
-      where: { id: { in: monitoredRepositoryIds }, platform: Platform.GITHUB },
+      where: {
+        id: { in: monitoredRepositoryIds },
+        platform: Platform.GITHUB,
+      },
       select: { externalId: true },
     });
-    return new Set(repositories.map((r) => r.externalId));
+
+    return new Set(repositories.map((repository) => repository.externalId));
   }
 
   async syncForUser(
