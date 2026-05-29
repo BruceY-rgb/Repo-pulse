@@ -646,7 +646,7 @@ export class RepositoryService {
       return [];
     }
 
-    const monitoredSet = new Set(await getUserMonitoredRepositoryIds(userId));
+    const monitoredExternalIds = await this.getMonitoredGithubExternalIds(userId);
     const repos = await this.githubService.getUserRepositories(
       userOAuthToken,
       userRefreshToken,
@@ -670,7 +670,7 @@ export class RepositoryService {
         accessLevel: this.mapAccessLevelToApi(accessLevel),
         canOperate: isEditable,
         isEditable,
-        isMonitored: monitoredSet.has(String(repo.id)),
+        isMonitored: monitoredExternalIds.has(String(repo.id)),
       };
     });
   }
@@ -685,7 +685,7 @@ export class RepositoryService {
       return [];
     }
 
-    const monitoredSet = new Set(await getUserMonitoredRepositoryIds(userId));
+    const monitoredExternalIds = await this.getMonitoredGithubExternalIds(userId);
     const repos = await this.githubService.getStarredRepos(
       userOAuthToken,
       userRefreshToken,
@@ -706,8 +706,20 @@ export class RepositoryService {
       accessLevel: this.mapAccessLevelToApi(RepositoryAccessLevel.READ),
       canOperate: false,
       isEditable: false,
-      isMonitored: monitoredSet.has(String(repo.id)),
+      isMonitored: monitoredExternalIds.has(String(repo.id)),
     }));
+  }
+
+  private async getMonitoredGithubExternalIds(userId: string): Promise<Set<string>> {
+    const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
+    if (monitoredRepositoryIds.length === 0) {
+      return new Set();
+    }
+    const repositories = await this.prisma.repository.findMany({
+      where: { id: { in: monitoredRepositoryIds }, platform: Platform.GITHUB },
+      select: { externalId: true },
+    });
+    return new Set(repositories.map((r) => r.externalId));
   }
 
   async syncForUser(
