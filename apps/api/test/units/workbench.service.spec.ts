@@ -1,688 +1,359 @@
+import { ApprovalStatus, RiskLevel } from '@repo-pulse/database';
 import { WorkbenchService } from '../../src/modules/workbench/workbench.service';
 
-const mockPrismaUserRepoFindMany = jest.fn();
-const mockPrismaRepoFindUnique = jest.fn();
-const mockPrismaEventFindMany = jest.fn();
-const mockPrismaEventFindFirst = jest.fn();
-const mockPrismaApprovalFindMany = jest.fn();
-const mockPrismaApprovalFindFirst = jest.fn();
-const mockPrismaNotificationFindMany = jest.fn();
-const mockPrismaAIAnalysisFindMany = jest.fn();
-const mockPrismaUserFindUnique = jest.fn();
-const mockPrismaConversationStateFindMany = jest.fn();
-const mockPrismaConversationStateFindUnique = jest.fn();
-const mockPrismaConversationStateUpsert = jest.fn();
-
-const mockGetUserMonitoredRepositoryIds = jest.fn();
+// ── mock prisma & utils ────────────────────────────────────────────────────
+const mockUserRepoFindMany = jest.fn();
+const mockConversationStateFindMany = jest.fn();
+const mockConversationStateUpsert = jest.fn();
+const mockConversationStateFindUnique = jest.fn();
+const mockEventFindMany = jest.fn();
+const mockEventFindFirst = jest.fn();
+const mockApprovalFindMany = jest.fn();
+const mockApprovalFindFirst = jest.fn();
 const mockAssertUserCanAccessRepository = jest.fn();
-const mockIsEditableRepositoryAccessLevel = jest.fn(
-  (level: string) => ['OWNER', 'ADMIN', 'MAINTAIN', 'WRITE'].includes(level),
-);
+const mockGetUserMonitoredRepositoryIds = jest.fn();
 
 jest.mock('../../src/common/utils/repository-access', () => ({
   assertUserCanAccessRepository: (...a: any[]) => mockAssertUserCanAccessRepository(...a),
   getUserMonitoredRepositoryIds: (...a: any[]) => mockGetUserMonitoredRepositoryIds(...a),
-  isEditableRepositoryAccessLevel: (level: string) => mockIsEditableRepositoryAccessLevel(level),
+  isEditableRepositoryAccessLevel: (level: string) =>
+    ['OWNER', 'ADMIN', 'MAINTAIN', 'WRITE'].includes(level),
 }));
 
 jest.mock('@repo-pulse/database', () => ({
-  ApprovalStatus: {
-    PENDING: 'PENDING',
-    APPROVED: 'APPROVED',
-    REJECTED: 'REJECTED',
-    CANCELLED: 'CANCELLED',
-  },
+  ApprovalStatus: { PENDING: 'PENDING', APPROVED: 'APPROVED', REJECTED: 'REJECTED' },
+  RiskLevel: { LOW: 'LOW', MEDIUM: 'MEDIUM', HIGH: 'HIGH', CRITICAL: 'CRITICAL' },
   EventType: {
     PUSH: 'PUSH',
     PR_OPENED: 'PR_OPENED',
     PR_MERGED: 'PR_MERGED',
     PR_CLOSED: 'PR_CLOSED',
-    PR_REVIEW: 'PR_REVIEW',
     ISSUE_OPENED: 'ISSUE_OPENED',
     ISSUE_CLOSED: 'ISSUE_CLOSED',
-    ISSUE_COMMENT: 'ISSUE_COMMENT',
-    BRANCH_CREATED: 'BRANCH_CREATED',
-    BRANCH_DELETED: 'BRANCH_DELETED',
-    RELEASE: 'RELEASE',
   },
   RepositoryAccessLevel: {
-    OWNER: 'OWNER',
-    ADMIN: 'ADMIN',
-    MAINTAIN: 'MAINTAIN',
-    WRITE: 'WRITE',
-    TRIAGE: 'TRIAGE',
-    READ: 'READ',
-    NONE: 'NONE',
+    OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN',
+    WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE',
   },
-  RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
-  RiskLevel: { LOW: 'LOW', MEDIUM: 'MEDIUM', HIGH: 'HIGH', CRITICAL: 'CRITICAL' },
-  Platform: { GITHUB: 'GITHUB', GITLAB: 'GITLAB' },
-  NotificationChannel: { IN_APP: 'IN_APP', EMAIL: 'EMAIL' },
   prisma: {
-    userRepository: {
-      findMany: (...a: any[]) => mockPrismaUserRepoFindMany(...a),
-    },
-    repository: {
-      findUnique: (...a: any[]) => mockPrismaRepoFindUnique(...a),
+    userRepository: { findMany: (...a: any[]) => mockUserRepoFindMany(...a) },
+    userRepositoryConversationState: {
+      findMany: (...a: any[]) => mockConversationStateFindMany(...a),
+      upsert: (...a: any[]) => mockConversationStateUpsert(...a),
+      findUnique: (...a: any[]) => mockConversationStateFindUnique(...a),
     },
     event: {
-      findMany: (...a: any[]) => mockPrismaEventFindMany(...a),
-      findFirst: (...a: any[]) => mockPrismaEventFindFirst(...a),
+      findMany: (...a: any[]) => mockEventFindMany(...a),
+      findFirst: (...a: any[]) => mockEventFindFirst(...a),
     },
     approval: {
-      findMany: (...a: any[]) => mockPrismaApprovalFindMany(...a),
-      findFirst: (...a: any[]) => mockPrismaApprovalFindFirst(...a),
-    },
-    notification: {
-      findMany: (...a: any[]) => mockPrismaNotificationFindMany(...a),
-    },
-    aIAnalysis: {
-      findMany: (...a: any[]) => mockPrismaAIAnalysisFindMany(...a),
-    },
-    user: {
-      findUnique: (...a: any[]) => mockPrismaUserFindUnique(...a),
-    },
-    userRepositoryConversationState: {
-      findMany: (...a: any[]) => mockPrismaConversationStateFindMany(...a),
-      findUnique: (...a: any[]) => mockPrismaConversationStateFindUnique(...a),
-      upsert: (...a: any[]) => mockPrismaConversationStateUpsert(...a),
+      findMany: (...a: any[]) => mockApprovalFindMany(...a),
+      findFirst: (...a: any[]) => mockApprovalFindFirst(...a),
     },
   },
 }));
 
-function makeUserRepo(repositoryId: string, accessLevel: string, accessMode: string, overrides = {}) {
-  return {
-    userId: 'u1',
-    repositoryId,
-    accessLevel,
-    accessMode,
-    role: 'member',
-    isStarred: false,
-    createdAt: new Date('2025-01-01'),
-    repository: makeRepo(repositoryId, overrides),
-    ...overrides,
-  };
+// ── helpers ────────────────────────────────────────────────────────────────
+function makeDate(offsetMs = 0): Date {
+  return new Date(1_000_000_000_000 + offsetMs);
 }
 
-function makeRepo(id: string, overrides = {}) {
-  return {
-    id,
-    name: `repo-${id}`,
-    fullName: `org/repo-${id}`,
-    url: `https://github.com/org/repo-${id}`,
-    defaultBranch: 'main',
-    platform: 'GITHUB',
-    externalId: `ext-${id}`,
-    webhookId: null,
-    webhookSecret: null,
-    isActive: true,
-    lastSyncAt: null,
-    createdAt: new Date('2025-01-01'),
-    updatedAt: new Date('2025-01-01'),
-    ...overrides,
-  };
-}
-
-function makeEvent(repositoryId: string, type: string, overrides = {}) {
-  return {
-    id: `evt-${repositoryId}`,
-    repositoryId,
-    type,
-    action: 'opened',
-    title: `Event in ${repositoryId}`,
-    body: 'Some event body',
-    author: 'testuser',
-    authorAvatar: null,
-    externalId: `ext-evt-${repositoryId}`,
-    externalUrl: `https://github.com/org/repo-${repositoryId}/issues/1`,
-    branch: null,
-    sourceBranch: null,
-    targetBranch: null,
-    branches: [],
-    metadata: {},
-    rawPayload: null,
-    occurredAt: new Date('2025-06-01'),
-    createdAt: new Date('2025-06-01'),
-    approvals: [],
-    analyses: [],
-    ...overrides,
-  };
-}
-
-function makeApproval(eventId: string, status: string, repositoryId: string, overrides = {}) {
-  return {
-    id: `appr-${eventId}`,
-    eventId,
-    status,
-    originalContent: 'Original',
-    editedContent: null,
-    comment: null,
-    reviewerId: null,
-    reviewedAt: null,
-    createdAt: new Date('2025-06-01'),
-    event: {
-      id: eventId,
-      title: `Event ${eventId}`,
-      body: 'Body',
-      author: 'author',
-      authorAvatar: null,
-      externalUrl: `https://github.com/org/repo-${repositoryId}/issues/1`,
-      repositoryId,
-    },
-    reviewer: null,
-    ...overrides,
-  };
-}
-
-describe('WorkbenchService', () => {
-  let service: WorkbenchService;
+describe('WorkbenchService — 私有辅助方法', () => {
+  let svc: WorkbenchService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockGetUserMonitoredRepositoryIds.mockResolvedValue([]);
-    mockAssertUserCanAccessRepository.mockResolvedValue({
-      repositoryId: 'r1',
-      accessLevel: 'WRITE',
-      accessMode: 'EDITABLE',
-      role: 'admin',
+    svc = new WorkbenchService();
+  });
+
+  // ── isUnreadMessage ───────────────────────────────────────────────────────
+  describe('isUnreadMessage', () => {
+    it('lastReadAt 为 null 时，所有消息均视为未读', () => {
+      expect((svc as any).isUnreadMessage(makeDate(), null)).toBe(true);
     });
-    mockPrismaUserFindUnique.mockResolvedValue({ preferences: {} });
-    mockPrismaEventFindMany.mockResolvedValue([]);
-    mockPrismaEventFindFirst.mockResolvedValue(null);
-    mockPrismaNotificationFindMany.mockResolvedValue([]);
-    mockPrismaAIAnalysisFindMany.mockResolvedValue([]);
-    mockPrismaRepoFindUnique.mockResolvedValue(makeRepo('r1'));
-    mockPrismaApprovalFindMany.mockResolvedValue([]);
-    mockPrismaApprovalFindFirst.mockResolvedValue(null);
-    mockPrismaConversationStateFindMany.mockResolvedValue([]);
-    mockPrismaConversationStateFindUnique.mockResolvedValue(null);
-    mockPrismaConversationStateUpsert.mockResolvedValue({
+
+    it('消息时间晚于 lastReadAt 时为未读', () => {
+      const lastRead = makeDate(0);
+      const message = makeDate(1000);
+      expect((svc as any).isUnreadMessage(message, lastRead)).toBe(true);
+    });
+
+    it('消息时间早于或等于 lastReadAt 时为已读', () => {
+      const lastRead = makeDate(1000);
+      const older = makeDate(0);
+      const same = makeDate(1000);
+      expect((svc as any).isUnreadMessage(older, lastRead)).toBe(false);
+      expect((svc as any).isUnreadMessage(same, lastRead)).toBe(false);
+    });
+  });
+
+  // ── pickHigherRiskLevel ───────────────────────────────────────────────────
+  describe('pickHigherRiskLevel', () => {
+    it('任意一侧为 null 时返回另一侧', () => {
+      expect((svc as any).pickHigherRiskLevel(null, RiskLevel.HIGH)).toBe(RiskLevel.HIGH);
+      expect((svc as any).pickHigherRiskLevel(RiskLevel.LOW, null)).toBe(RiskLevel.LOW);
+      expect((svc as any).pickHigherRiskLevel(null, null)).toBeNull();
+    });
+
+    it('返回更高风险等级', () => {
+      expect((svc as any).pickHigherRiskLevel(RiskLevel.LOW, RiskLevel.HIGH)).toBe(RiskLevel.HIGH);
+      expect((svc as any).pickHigherRiskLevel(RiskLevel.CRITICAL, RiskLevel.MEDIUM)).toBe(RiskLevel.CRITICAL);
+      expect((svc as any).pickHigherRiskLevel(RiskLevel.HIGH, RiskLevel.HIGH)).toBe(RiskLevel.HIGH);
+    });
+
+    it('风险等级顺序为 LOW < MEDIUM < HIGH < CRITICAL', () => {
+      const levels = [RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL];
+      for (let i = 0; i < levels.length - 1; i++) {
+        expect((svc as any).pickHigherRiskLevel(levels[i], levels[i + 1])).toBe(levels[i + 1]);
+      }
+    });
+  });
+
+  // ── pickLaterDate ─────────────────────────────────────────────────────────
+  describe('pickLaterDate', () => {
+    it('任意一侧为 null 时返回另一侧', () => {
+      const d = makeDate();
+      expect((svc as any).pickLaterDate(null, d)).toBe(d);
+      expect((svc as any).pickLaterDate(d, null)).toBe(d);
+      expect((svc as any).pickLaterDate(null, null)).toBeNull();
+    });
+
+    it('返回较晚的日期', () => {
+      const earlier = makeDate(0);
+      const later = makeDate(5000);
+      expect((svc as any).pickLaterDate(earlier, later)).toBe(later);
+      expect((svc as any).pickLaterDate(later, earlier)).toBe(later);
+    });
+  });
+
+  // ── resolveEventMessageTime ───────────────────────────────────────────────
+  describe('resolveEventMessageTime', () => {
+    it('有 occurredAt 时优先使用 occurredAt', () => {
+      const occurredAt = makeDate(0);
+      const createdAt = makeDate(9999);
+      expect((svc as any).resolveEventMessageTime({ occurredAt, createdAt })).toBe(occurredAt);
+    });
+
+    it('occurredAt 为 null 时降级到 createdAt', () => {
+      const createdAt = makeDate(1000);
+      expect((svc as any).resolveEventMessageTime({ occurredAt: null, createdAt })).toBe(createdAt);
+    });
+  });
+
+  // ── resolveApprovalRiskLevel ──────────────────────────────────────────────
+  describe('resolveApprovalRiskLevel', () => {
+    it('有 AI 分析结果时使用分析结果', () => {
+      const analyses = [{ riskLevel: RiskLevel.LOW }];
+      expect((svc as any).resolveApprovalRiskLevel(analyses, ApprovalStatus.PENDING)).toBe(RiskLevel.LOW);
+    });
+
+    it('无分析结果时 PENDING 状态返回 HIGH', () => {
+      expect((svc as any).resolveApprovalRiskLevel([], ApprovalStatus.PENDING)).toBe(RiskLevel.HIGH);
+      expect((svc as any).resolveApprovalRiskLevel(undefined, ApprovalStatus.PENDING)).toBe(RiskLevel.HIGH);
+    });
+
+    it('无分析结果时非 PENDING 状态返回 MEDIUM', () => {
+      expect((svc as any).resolveApprovalRiskLevel([], ApprovalStatus.APPROVED)).toBe(RiskLevel.MEDIUM);
+    });
+  });
+
+  // ── updateConversationLatest ──────────────────────────────────────────────
+  describe('updateConversationLatest', () => {
+    it('空摘要时直接写入', () => {
+      const summary = (svc as any).createEmptyConversationSummary();
+      const at = makeDate(1000);
+      (svc as any).updateConversationLatest(summary, { messageAt: at, type: 'push', preview: '代码提交' });
+      expect(summary.latestMessageAt).toBe(at.toISOString());
+      expect(summary.latestMessageType).toBe('push');
+      expect(summary.latestMessagePreview).toBe('代码提交');
+    });
+
+    it('新消息更晚时覆盖', () => {
+      const summary = (svc as any).createEmptyConversationSummary();
+      (svc as any).updateConversationLatest(summary, { messageAt: makeDate(1000), type: 'push', preview: '旧' });
+      (svc as any).updateConversationLatest(summary, { messageAt: makeDate(2000), type: 'pull_request', preview: '新' });
+      expect(summary.latestMessageType).toBe('pull_request');
+    });
+
+    it('新消息更早时不覆盖', () => {
+      const summary = (svc as any).createEmptyConversationSummary();
+      (svc as any).updateConversationLatest(summary, { messageAt: makeDate(2000), type: 'push', preview: '旧（但更晚）' });
+      (svc as any).updateConversationLatest(summary, { messageAt: makeDate(500), type: 'pull_request', preview: '新（但更早）' });
+      expect(summary.latestMessageType).toBe('push');
+    });
+  });
+
+  // ── incrementUnread ───────────────────────────────────────────────────────
+  describe('incrementUnread', () => {
+    it('每次调用 unreadCount +1', () => {
+      const summary = (svc as any).createEmptyConversationSummary();
+      (svc as any).incrementUnread(summary, RiskLevel.LOW);
+      (svc as any).incrementUnread(summary, RiskLevel.HIGH);
+      expect(summary.unreadCount).toBe(2);
+    });
+
+    it('累积 unreadRiskCounts', () => {
+      const summary = (svc as any).createEmptyConversationSummary();
+      (svc as any).incrementUnread(summary, RiskLevel.HIGH);
+      (svc as any).incrementUnread(summary, RiskLevel.HIGH);
+      (svc as any).incrementUnread(summary, RiskLevel.LOW);
+      expect(summary.unreadRiskCounts[RiskLevel.HIGH]).toBe(2);
+      expect(summary.unreadRiskCounts[RiskLevel.LOW]).toBe(1);
+    });
+
+    it('riskLevel 为 null 时计入 LOW 桶', () => {
+      const summary = (svc as any).createEmptyConversationSummary();
+      (svc as any).incrementUnread(summary, null);
+      expect(summary.unreadRiskCounts[RiskLevel.LOW]).toBe(1);
+    });
+
+    it('unreadRiskLevel 跟踪最高风险等级', () => {
+      const summary = (svc as any).createEmptyConversationSummary();
+      (svc as any).incrementUnread(summary, RiskLevel.MEDIUM);
+      expect(summary.unreadRiskLevel).toBe(RiskLevel.MEDIUM);
+      (svc as any).incrementUnread(summary, RiskLevel.CRITICAL);
+      expect(summary.unreadRiskLevel).toBe(RiskLevel.CRITICAL);
+      (svc as any).incrementUnread(summary, RiskLevel.LOW);
+      expect(summary.unreadRiskLevel).toBe(RiskLevel.CRITICAL);
+    });
+  });
+});
+
+// ── getWatchFeed 过滤逻辑 ─────────────────────────────────────────────────
+describe('WorkbenchService.getWatchFeed', () => {
+  let svc: WorkbenchService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    svc = new WorkbenchService();
+    mockGetUserMonitoredRepositoryIds.mockResolvedValue([]);
+    mockEventFindMany.mockResolvedValue([]);
+  });
+
+  it('editable 仓库不出现在 watchFeed 中', async () => {
+    mockUserRepoFindMany.mockResolvedValue([
+      {
+        repositoryId: 'repo-editable',
+        accessLevel: 'WRITE',
+        repository: { id: 'repo-editable', fullName: 'org/editable' },
+      },
+    ]);
+
+    const result = await svc.getWatchFeed('user-1');
+    expect(result.items).toHaveLength(0);
+    expect(mockEventFindMany).not.toHaveBeenCalled();
+  });
+
+  it('已纳入监控的仓库不出现在 watchFeed 中', async () => {
+    mockGetUserMonitoredRepositoryIds.mockResolvedValue(['repo-monitored']);
+    mockUserRepoFindMany.mockResolvedValue([
+      {
+        repositoryId: 'repo-monitored',
+        accessLevel: 'READ',
+        repository: { id: 'repo-monitored', fullName: 'org/monitored' },
+      },
+    ]);
+
+    const result = await svc.getWatchFeed('user-1');
+    expect(result.items).toHaveLength(0);
+    expect(mockEventFindMany).not.toHaveBeenCalled();
+  });
+
+  it('非 editable 且未监控的仓库出现在 watchFeed 中', async () => {
+    mockUserRepoFindMany.mockResolvedValue([
+      {
+        repositoryId: 'repo-watch',
+        accessLevel: 'READ',
+        repository: { id: 'repo-watch', fullName: 'org/watch-repo' },
+      },
+    ]);
+    mockEventFindMany.mockResolvedValue([
+      {
+        id: 'evt-1',
+        repositoryId: 'repo-watch',
+        type: 'PUSH',
+        title: 'Push event',
+        body: 'some body',
+        author: 'dev',
+        authorAvatar: null,
+        occurredAt: new Date('2025-01-01'),
+        createdAt: new Date('2025-01-01'),
+        externalUrl: null,
+        analyses: [],
+        repository: { fullName: 'org/watch-repo' },
+      },
+    ]);
+
+    const result = await svc.getWatchFeed('user-1');
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].repositoryFullName).toBe('org/watch-repo');
+  });
+
+  it('用户无任何仓库时返回空列表', async () => {
+    mockUserRepoFindMany.mockResolvedValue([]);
+    const result = await svc.getWatchFeed('user-1');
+    expect(result.items).toHaveLength(0);
+    expect(result.nextCursor).toBeNull();
+  });
+});
+
+// ── markConversationAsRead ────────────────────────────────────────────────
+describe('WorkbenchService.markConversationAsRead', () => {
+  let svc: WorkbenchService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    svc = new WorkbenchService();
+    mockAssertUserCanAccessRepository.mockResolvedValue({ accessLevel: 'READ' });
+    mockConversationStateFindUnique.mockResolvedValue(null);
+    mockEventFindFirst.mockResolvedValue(null);
+    mockApprovalFindFirst.mockResolvedValue(null);
+  });
+
+  it('payload 提供 readAt 时以 readAt 为准', async () => {
+    const readAt = '2025-06-01T10:00:00.000Z';
+    mockConversationStateUpsert.mockResolvedValue({
       userId: 'u1',
       repositoryId: 'r1',
-      lastReadAt: new Date('2025-06-01'),
-      lastViewedAt: new Date('2025-06-01'),
-      createdAt: new Date('2025-06-01'),
-      updatedAt: new Date('2025-06-01'),
+      lastReadAt: new Date(readAt),
+      lastViewedAt: new Date(),
     });
-    service = new WorkbenchService();
+
+    const result = await svc.markConversationAsRead('u1', 'r1', { readAt });
+    expect(result.success).toBe(true);
+    const upsertCall = mockConversationStateUpsert.mock.calls[0][0];
+    expect(upsertCall.create.lastReadAt).toEqual(new Date(readAt));
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // getChatRepositories
-  // ═══════════════════════════════════════════════════════════════════════════
-  describe('getChatRepositories', () => {
-    it('returns empty groups when user has no repositories', async () => {
-      mockPrismaUserRepoFindMany.mockResolvedValue([]);
-
-      const result = await service.getChatRepositories('u1');
-
-      expect(result.editableRepositories).toEqual([]);
-      expect(result.monitoredRepositories).toEqual([]);
+  it('payload 提供 upToMessageAt 时优先于 readAt', async () => {
+    const readAt = '2025-01-01T00:00:00.000Z';
+    const upToMessageAt = '2025-06-15T12:00:00.000Z';
+    mockConversationStateUpsert.mockResolvedValue({
+      userId: 'u1',
+      repositoryId: 'r1',
+      lastReadAt: new Date(upToMessageAt),
+      lastViewedAt: new Date(),
     });
 
-    it('groups WRITE-level repos as editable', async () => {
-      mockPrismaUserRepoFindMany.mockResolvedValue([
-        makeUserRepo('r1', 'WRITE', 'EDITABLE'),
-      ]);
-
-      const result = await service.getChatRepositories('u1');
-
-      expect(result.editableRepositories).toHaveLength(1);
-      expect(result.monitoredRepositories).toHaveLength(0);
-      expect(result.editableRepositories[0].repository.canOperate).toBe(true);
-      expect(result.editableRepositories[0].repository.isEditable).toBe(true);
-      expect(result.editableRepositories[0].kind).toBe('editable');
-    });
-
-    it('groups OWNER/ADMIN/MAINTAIN repos as editable', async () => {
-      mockPrismaUserRepoFindMany.mockResolvedValue([
-        makeUserRepo('r1', 'OWNER', 'EDITABLE'),
-        makeUserRepo('r2', 'ADMIN', 'EDITABLE'),
-        makeUserRepo('r3', 'MAINTAIN', 'EDITABLE'),
-      ]);
-
-      const result = await service.getChatRepositories('u1');
-
-      expect(result.editableRepositories).toHaveLength(3);
-      result.editableRepositories.forEach((item) => {
-        expect(item.repository.canOperate).toBe(true);
-        expect(item.kind).toBe('editable');
-      });
-    });
-
-    it('groups READ-level repos as monitored-readonly', async () => {
-      mockPrismaUserRepoFindMany.mockResolvedValue([
-        makeUserRepo('r1', 'READ', 'MONITOR'),
-      ]);
-      // READ-level repos need to be in user's monitoring scope to appear as monitored
-      mockPrismaUserFindUnique.mockResolvedValue({
-        preferences: { monitoringScope: { repositoryIds: ['r1'] } },
-      });
-      // Re-mock the actual getUserMonitoredRepositoryIds to return r1
-      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r1']);
-
-      const result = await service.getChatRepositories('u1');
-
-      expect(result.editableRepositories).toHaveLength(0);
-      expect(result.monitoredRepositories).toHaveLength(1);
-      expect(result.monitoredRepositories[0].repository.canOperate).toBe(false);
-      expect(result.monitoredRepositories[0].kind).toBe('monitored-readonly');
-    });
-
-    it('mixes editable and monitored repos correctly', async () => {
-      mockPrismaUserRepoFindMany.mockResolvedValue([
-        makeUserRepo('r1', 'WRITE', 'EDITABLE'),
-        makeUserRepo('r2', 'READ', 'MONITOR'),
-        makeUserRepo('r3', 'OWNER', 'EDITABLE'),
-        makeUserRepo('r4', 'TRIAGE', 'MONITOR'),
-      ]);
-      // monitored repos require being in monitoring scope
-      mockPrismaUserFindUnique.mockResolvedValue({
-        preferences: { monitoringScope: { repositoryIds: ['r2', 'r4'] } },
-      });
-      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r2', 'r4']);
-
-      const result = await service.getChatRepositories('u1');
-
-      expect(result.editableRepositories).toHaveLength(2);
-      expect(result.monitoredRepositories).toHaveLength(2);
-
-      const editableIds = result.editableRepositories.map((r) => r.repository.id);
-      expect(editableIds).toContain('r1');
-      expect(editableIds).toContain('r3');
-    });
-
-    it('includes latestMessageAt and preview from events', async () => {
-      mockPrismaUserRepoFindMany.mockResolvedValue([
-        makeUserRepo('r1', 'WRITE', 'EDITABLE'),
-      ]);
-      mockPrismaEventFindMany.mockResolvedValue([
-        makeEvent('r1', 'PUSH', {
-          body: 'Latest commit message',
-          occurredAt: new Date('2025-06-15'),
-          createdAt: new Date('2025-06-15'),
-        }),
-      ]);
-
-      const result = await service.getChatRepositories('u1');
-
-      expect(result.editableRepositories[0].latestMessageAt).toBeTruthy();
-      expect(result.editableRepositories[0].latestMessagePreview).toBe('Latest commit message');
-    });
-
-    it('includes unread message counts', async () => {
-      mockPrismaUserRepoFindMany.mockResolvedValue([
-        makeUserRepo('r1', 'WRITE', 'EDITABLE'),
-      ]);
-      mockPrismaConversationStateFindMany.mockResolvedValue([
-        {
-          repositoryId: 'r1',
-          lastReadAt: new Date('2025-06-10'),
-          lastViewedAt: new Date('2025-06-10'),
-        },
-      ]);
-      mockPrismaEventFindMany.mockResolvedValue([
-        makeEvent('r1', 'PUSH', {
-          id: 'evt-r1-1',
-          occurredAt: new Date('2025-06-11'),
-          createdAt: new Date('2025-06-11'),
-        }),
-        makeEvent('r1', 'ISSUE_OPENED', {
-          id: 'evt-r1-2',
-          occurredAt: new Date('2025-06-12'),
-          createdAt: new Date('2025-06-12'),
-        }),
-      ]);
-
-      const result = await service.getChatRepositories('u1');
-
-      expect(result.editableRepositories[0].unreadCount).toBe(2);
-    });
-
-    it('includes high risk analysis counts', async () => {
-      mockPrismaUserRepoFindMany.mockResolvedValue([
-        makeUserRepo('r1', 'WRITE', 'EDITABLE'),
-      ]);
-      mockPrismaEventFindMany.mockResolvedValue([
-        makeEvent('r1', 'PUSH', {
-          analyses: [{ status: 'COMPLETED', riskLevel: 'HIGH' }],
-        }),
-      ]);
-
-      const result = await service.getChatRepositories('u1');
-
-      expect(result.editableRepositories[0].highRiskCount).toBe(1);
-    });
+    await svc.markConversationAsRead('u1', 'r1', { readAt, upToMessageAt });
+    const upsertCall = mockConversationStateUpsert.mock.calls[0][0];
+    expect(upsertCall.create.lastReadAt).toEqual(new Date(upToMessageAt));
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // getConversationMessages
-  // ═══════════════════════════════════════════════════════════════════════════
-  describe('getConversationMessages', () => {
-    beforeEach(() => {
-      mockAssertUserCanAccessRepository.mockResolvedValue({
-        repositoryId: 'r1',
-        accessLevel: 'WRITE',
-        accessMode: 'EDITABLE',
-        role: 'admin',
-      });
-      mockPrismaRepoFindUnique.mockResolvedValue(makeRepo('r1'));
+  it('不回退已有 lastReadAt（取较晚时间）', async () => {
+    const existingReadAt = new Date('2025-12-01T00:00:00.000Z');
+    mockConversationStateFindUnique.mockResolvedValue({ lastReadAt: existingReadAt });
+    mockConversationStateUpsert.mockResolvedValue({
+      userId: 'u1',
+      repositoryId: 'r1',
+      lastReadAt: existingReadAt,
+      lastViewedAt: new Date(),
     });
 
-    it('sets repositoryCanOperate=true for WRITE access level', async () => {
-      mockPrismaEventFindMany.mockResolvedValue([
-        makeEvent('r1', 'ISSUE_OPENED'),
-      ]);
-
-      const result = await service.getConversationMessages('u1', 'r1');
-
-      expect(result.messages).toHaveLength(1);
-      expect(result.messages[0].repositoryCanOperate).toBe(true);
-      expect(result.messages[0].actions).toBeDefined();
-    });
-
-    it('sets repositoryCanOperate=false for READ access level', async () => {
-      mockAssertUserCanAccessRepository.mockResolvedValue({
-        repositoryId: 'r1',
-        accessLevel: 'READ',
-        accessMode: 'MONITOR',
-        role: 'viewer',
-      });
-      mockPrismaEventFindMany.mockResolvedValue([
-        makeEvent('r1', 'ISSUE_OPENED'),
-      ]);
-
-      const result = await service.getConversationMessages('u1', 'r1');
-
-      expect(result.messages).toHaveLength(1);
-      expect(result.messages[0].repositoryCanOperate).toBe(false);
-    });
-
-    it('includes base actions (open_github, ai_analyze) for all messages', async () => {
-      mockPrismaEventFindMany.mockResolvedValue([
-        makeEvent('r1', 'ISSUE_OPENED', {
-          externalUrl: 'https://github.com/org/repo-r1/issues/1',
-        }),
-      ]);
-
-      const result = await service.getConversationMessages('u1', 'r1');
-
-      const actions = result.messages[0].actions;
-      const githubAction = actions?.find((a) => a.key === 'open_github');
-      const aiAction = actions?.find((a) => a.key === 'ai_analyze');
-
-      expect(githubAction).toBeDefined();
-      expect(githubAction?.requiresPermission).toBe(false);
-      expect(aiAction).toBeDefined();
-      expect(aiAction?.requiresPermission).toBe(false);
-    });
-
-    it('includes agent_handle action only when repositoryCanOperate=true', async () => {
-      mockPrismaEventFindMany.mockResolvedValue([
-        makeEvent('r1', 'ISSUE_OPENED'),
-      ]);
-
-      const result = await service.getConversationMessages('u1', 'r1');
-      const agentAction = result.messages[0].actions?.find((a) => a.key === 'agent_handle');
-      expect(agentAction).toBeDefined();
-      expect(agentAction?.requiresPermission).toBe(true);
-    });
-
-    it('does NOT include agent_handle action when repositoryCanOperate=false', async () => {
-      mockAssertUserCanAccessRepository.mockResolvedValue({
-        repositoryId: 'r1',
-        accessLevel: 'READ',
-        accessMode: 'MONITOR',
-        role: 'viewer',
-      });
-      mockPrismaEventFindMany.mockResolvedValue([
-        makeEvent('r1', 'ISSUE_OPENED'),
-      ]);
-
-      const result = await service.getConversationMessages('u1', 'r1');
-      const agentAction = result.messages[0].actions?.find((a) => a.key === 'agent_handle');
-      expect(agentAction).toBeUndefined();
-    });
-
-    it('includes approval actions (approve/reject) for PENDING approvals when canOperate=true', async () => {
-      const pendingApproval = {
-        id: 'appr-1',
-        status: 'PENDING',
-        reviewerId: null,
-      };
-      mockPrismaEventFindMany.mockResolvedValue([
-        makeEvent('r1', 'PR_OPENED', { approvals: [pendingApproval] }),
-      ]);
-
-      const result = await service.getConversationMessages('u1', 'r1');
-      const approveAction = result.messages[0].actions?.find((a) => a.key === 'approve');
-      const rejectAction = result.messages[0].actions?.find((a) => a.key === 'reject');
-
-      expect(approveAction).toBeDefined();
-      expect(approveAction?.requiresPermission).toBe(true);
-      expect(rejectAction).toBeDefined();
-      expect(rejectAction?.requiresPermission).toBe(true);
-    });
-
-    it('does NOT include approval actions when canOperate=false', async () => {
-      mockAssertUserCanAccessRepository.mockResolvedValue({
-        repositoryId: 'r1',
-        accessLevel: 'READ',
-        accessMode: 'MONITOR',
-        role: 'viewer',
-      });
-      const pendingApproval = {
-        id: 'appr-1',
-        status: 'PENDING',
-        reviewerId: null,
-      };
-      mockPrismaEventFindMany.mockResolvedValue([
-        makeEvent('r1', 'PR_OPENED', { approvals: [pendingApproval] }),
-      ]);
-
-      const result = await service.getConversationMessages('u1', 'r1');
-      const approveAction = result.messages[0].actions?.find((a) => a.key === 'approve');
-      expect(approveAction).toBeUndefined();
-    });
-
-    it('returns approval messages with correct type and actions', async () => {
-      mockPrismaEventFindMany.mockResolvedValue([]);
-      mockPrismaApprovalFindMany.mockResolvedValue([
-        makeApproval('evt-r1', 'PENDING', 'r1'),
-      ]);
-
-      const result = await service.getConversationMessages('u1', 'r1');
-
-      expect(result.messages).toHaveLength(1);
-      expect(result.messages[0].type).toBe('approval');
-      expect(result.messages[0].repositoryCanOperate).toBe(true);
-      const approveAction = result.messages[0].actions?.find((a) => a.key === 'approve');
-      expect(approveAction).toBeDefined();
-    });
-
-    it('sorts messages by createdAt descending', async () => {
-      mockPrismaEventFindMany.mockResolvedValue([
-        makeEvent('r1', 'ISSUE_OPENED', {
-          id: 'evt-old',
-          occurredAt: new Date('2025-01-01'),
-          createdAt: new Date('2025-01-01'),
-        }),
-        makeEvent('r1', 'PR_OPENED', {
-          id: 'evt-new',
-          occurredAt: new Date('2025-12-01'),
-          createdAt: new Date('2025-12-01'),
-        }),
-      ]);
-
-      const result = await service.getConversationMessages('u1', 'r1');
-
-      expect(new Date(result.messages[0].createdAt).getTime()).toBeGreaterThan(
-        new Date(result.messages[1].createdAt).getTime(),
-      );
-    });
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // getWatchFeed
-  // ═══════════════════════════════════════════════════════════════════════════
-  describe('getWatchFeed', () => {
-    beforeEach(() => {
-      // Prisma returns only starred, non-editable, unmonitored memberships for the feed.
-      mockPrismaUserRepoFindMany.mockResolvedValue([
-        makeUserRepo('r2', 'READ', 'MONITOR', { isStarred: true }),
-      ]);
-      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r3']); // monitored via preferences
-    });
-
-    it('queries only starred, non-editable, unmonitored repositories', async () => {
-      mockPrismaEventFindMany.mockResolvedValue([]);
-
-      const result = await service.getWatchFeed('u1');
-
-      const membershipQuery = mockPrismaUserRepoFindMany.mock.calls[0]?.[0];
-      expect(membershipQuery.where).toMatchObject({
-        userId: 'u1',
-        isStarred: true,
-        repository: { platform: 'GITHUB' },
-        repositoryId: { notIn: ['r3'] },
-      });
-      expect(membershipQuery.where.accessLevel.notIn).toEqual(
-        expect.arrayContaining(['OWNER', 'ADMIN', 'MAINTAIN', 'WRITE']),
-      );
-      expect(result.items).toEqual([]);
-    });
-
-    it('returns events from candidate repositories only', async () => {
-      mockPrismaEventFindMany.mockResolvedValue([
-        {
-          id: 'evt-r2',
-          repositoryId: 'r2',
-          repository: { id: 'r2', fullName: 'org/repo-r2' },
-          type: 'ISSUE_OPENED',
-          title: 'Bug fix',
-          body: 'Fixing a bug',
-          author: 'dev',
-          authorAvatar: null,
-          externalUrl: 'https://github.com/org/repo-r2/issues/1',
-          occurredAt: new Date('2025-06-01'),
-          createdAt: new Date('2025-06-01'),
-          analyses: [],
-        },
-      ]);
-
-      const result = await service.getWatchFeed('u1');
-
-      expect(result.items).toHaveLength(1);
-      expect(result.items[0].repositoryId).toBe('r2');
-      expect(result.items[0].canAddToMonitoring).toBe(true);
-    });
-
-    it('filters events by type parameter', async () => {
-      mockPrismaEventFindMany.mockResolvedValue([]);
-
-      await service.getWatchFeed('u1', 'issue');
-
-      // Verify the type filter was passed to prisma
-      const eventQuery = mockPrismaEventFindMany.mock.calls[0]?.[0];
-      expect(eventQuery.where.type).toBeDefined();
-      expect(eventQuery.where.type.in).toContain('ISSUE_OPENED');
-    });
-
-    it('returns nextCursor for pagination', async () => {
-      mockPrismaEventFindMany.mockResolvedValue(
-        Array.from({ length: 21 }, (_, i) => ({
-          id: `evt-r2-${i}`,
-          repositoryId: 'r2',
-          repository: { id: 'r2', fullName: 'org/repo-r2' },
-          type: 'PUSH',
-          title: `Commit ${i}`,
-          body: `Body ${i}`,
-          author: 'dev',
-          authorAvatar: null,
-          externalUrl: null,
-          occurredAt: new Date(`2025-06-${String(i + 1).padStart(2, '0')}`),
-          createdAt: new Date(`2025-06-${String(i + 1).padStart(2, '0')}`),
-          analyses: [],
-        })),
-      );
-
-      const result = await service.getWatchFeed('u1', undefined, undefined, 20);
-
-      expect(result.items).toHaveLength(20);
-      expect(result.nextCursor).toBeTruthy();
-    });
-
-    it('returns empty when no candidate repos', async () => {
-      mockPrismaUserRepoFindMany.mockResolvedValue([]);
-      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r1']);
-
-      const result = await service.getWatchFeed('u1');
-
-      expect(result.items).toEqual([]);
-      expect(result.nextCursor).toBeNull();
-      expect(mockPrismaEventFindMany).not.toHaveBeenCalled();
-    });
-
-    it('excludes monitored starred repositories from feed candidates', async () => {
-      mockPrismaUserRepoFindMany.mockResolvedValue([]);
-      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r2']);
-
-      await service.getWatchFeed('u1');
-
-      const membershipQuery = mockPrismaUserRepoFindMany.mock.calls[0]?.[0];
-      expect(membershipQuery.where.repositoryId).toEqual({ notIn: ['r2'] });
-    });
-
-    it('excludes editable starred repositories from feed candidates', async () => {
-      mockPrismaUserRepoFindMany.mockResolvedValue([]);
-
-      await service.getWatchFeed('u1');
-
-      const membershipQuery = mockPrismaUserRepoFindMany.mock.calls[0]?.[0];
-      expect(membershipQuery.where.accessLevel.notIn).toEqual(
-        expect.arrayContaining(['OWNER', 'ADMIN', 'MAINTAIN', 'WRITE']),
-      );
-    });
-
-    it('excludes non-starred read-only repositories from feed candidates', async () => {
-      mockPrismaUserRepoFindMany.mockResolvedValue([]);
-
-      await service.getWatchFeed('u1');
-
-      const membershipQuery = mockPrismaUserRepoFindMany.mock.calls[0]?.[0];
-      expect(membershipQuery.where.isStarred).toBe(true);
-    });
-
-    it('limits watch feed candidates to GitHub starred repositories', async () => {
-      mockPrismaUserRepoFindMany.mockResolvedValue([]);
-
-      await service.getWatchFeed('u1');
-
-      const membershipQuery = mockPrismaUserRepoFindMany.mock.calls[0]?.[0];
-      expect(membershipQuery.where.repository).toEqual({ platform: 'GITHUB' });
-    });
-
-    it('includes aiInsight from completed analyses', async () => {
-      mockPrismaEventFindMany.mockResolvedValue([
-        {
-          id: 'evt-r2',
-          repositoryId: 'r2',
-          repository: { id: 'r2', fullName: 'org/repo-r2' },
-          type: 'PR_OPENED',
-          title: 'New feature',
-          body: 'Adding feature X',
-          author: 'dev',
-          authorAvatar: null,
-          externalUrl: null,
-          occurredAt: new Date('2025-06-01'),
-          createdAt: new Date('2025-06-01'),
-          analyses: [{ summary: 'This PR may affect authentication module' }],
-        },
-      ]);
-
-      const result = await service.getWatchFeed('u1');
-
-      expect(result.items[0].aiInsight).toBe('This PR may affect authentication module');
-    });
+    // 传入更早的时间
+    await svc.markConversationAsRead('u1', 'r1', { readAt: '2025-01-01T00:00:00.000Z' });
+    const upsertCall = mockConversationStateUpsert.mock.calls[0][0];
+    // lastReadAt 应保持原有的更晚时间
+    expect(upsertCall.update.lastReadAt).toEqual(existingReadAt);
   });
 });
