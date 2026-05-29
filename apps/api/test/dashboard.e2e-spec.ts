@@ -74,7 +74,7 @@ describe('DashboardModule (e2e)', () => {
         },
         {
           repositoryId: testRepoId,
-          type: EventType.PULL_REQUEST,
+          type: EventType.PR_OPENED,
           action: 'opened',
           title: 'Dashboard E2E Test PR 1',
           body: 'test body 2',
