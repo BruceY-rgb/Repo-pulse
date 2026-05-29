@@ -33,7 +33,6 @@ describe('Event → Notification pipeline (e2e)', () => {
         email: TEST_USER.email,
         name: TEST_USER.name,
         passwordHash: 'unused-for-this-test',
-        // 默认 preferences 为 {}, NotificationService.getPreferences 将返回 IN_APP 默认值
       },
     });
     testUserId = user.id;
@@ -48,6 +47,18 @@ describe('Event → Notification pipeline (e2e)', () => {
       },
     });
     testRepoId = repo.id;
+
+    // notifyRepositoryUsers 检查 monitoringScope，必须包含 testRepoId 才会发通知
+    await prisma.user.update({
+      where: { id: testUserId },
+      data: {
+        preferences: {
+          monitoringScope: { repositoryIds: [testRepoId] },
+          channels: ['IN_APP'],
+          events: {},
+        },
+      },
+    });
 
     await prisma.userRepository.create({
       data: { userId: testUserId, repositoryId: testRepoId, role: 'ADMIN' },

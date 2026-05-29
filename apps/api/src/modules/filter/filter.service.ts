@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { prisma, FilterRule, FilterAction } from '@repo-pulse/database';
 
 export interface FilterCondition {
@@ -54,6 +54,12 @@ export class FilterService {
    * 创建过滤规则
    */
   async createRule(userId: string, dto: CreateFilterRuleDto): Promise<FilterRule> {
+    if (!dto.name) {
+      throw new BadRequestException('name is required');
+    }
+    if (!dto.action) {
+      throw new BadRequestException('action is required');
+    }
     return prisma.filterRule.create({
       data: {
         userId,
@@ -80,7 +86,7 @@ export class FilterService {
     });
 
     if (!rule) {
-      throw new Error(`Filter rule not found: ${ruleId}`);
+      throw new NotFoundException(`Filter rule not found: ${ruleId}`);
     }
 
     return prisma.filterRule.update({
@@ -105,7 +111,7 @@ export class FilterService {
     });
 
     if (!rule) {
-      throw new Error(`Filter rule not found: ${ruleId}`);
+      throw new NotFoundException(`Filter rule not found: ${ruleId}`);
     }
 
     await prisma.filterRule.delete({
