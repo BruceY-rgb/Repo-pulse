@@ -34,6 +34,7 @@ jest.mock('@repo-pulse/database', () => ({
   RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
   Role: { ADMIN: 'ADMIN', MANAGER: 'MANAGER', MEMBER: 'MEMBER', VIEWER: 'VIEWER' },
   Platform: { GITHUB: 'GITHUB', GITLAB: 'GITLAB' },
+  NotificationChannel: { IN_APP: 'IN_APP', EMAIL: 'EMAIL' },
   RepositoryAccessLevel: {
     OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN',
     WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE',
