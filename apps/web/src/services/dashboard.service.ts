@@ -54,6 +54,75 @@ export interface DashboardRecentActivity {
   time: string;
 }
 
+export interface ProjectRiverDailyRow {
+  date: string;
+  contributor: string;
+  commits: number;
+  linesAdded: number;
+  linesDeleted: number;
+  filesTouched: number;
+  cumulativeCommits: number;
+}
+
+export type ProjectRiverKeyNodeType =
+  | 'contributor_first_commit'
+  | 'contributor_exit'
+  | 'activity_spike'
+  | 'activity_drop'
+  | 'major_refactor'
+  | 'commit_milestone'
+  | 'project_start'
+  | 'project_archived';
+
+export type ProjectRiverSeverity = 'info' | 'positive' | 'warning';
+
+export interface ProjectRiverKeyNode {
+  id: string;
+  type: ProjectRiverKeyNodeType;
+  date: string;
+  severity: ProjectRiverSeverity;
+  priority?: number;
+  impactScore: number;
+  titleKey: string;
+  descriptionKey: string;
+  params: Record<string, string | number>;
+  contributors?: string[];
+}
+
+export interface ProjectRiverEventMarker {
+  id: string;
+  date: string;
+  title: string;
+  description: string;
+  type: 'push' | 'pull_request' | 'issue' | 'release' | 'security' | 'other';
+  severity: ProjectRiverSeverity;
+  externalUrl: string | null;
+  source: 'event';
+}
+
+export interface ProjectRiverDashboardData {
+  repositoryId: string;
+  generatedAt: string;
+  source: 'event_store';
+  dailyRows: ProjectRiverDailyRow[];
+  keyNodes: ProjectRiverKeyNode[];
+  eventMarkers: ProjectRiverEventMarker[];
+  summary: {
+    totalCommits: number;
+    totalContributors: number;
+    totalEvents: number;
+    analyzedEvents: number;
+    isTruncated: boolean;
+    latestEventAt: string | null;
+  };
+  cache: {
+    status: 'hit' | 'miss';
+    ttlMs: number;
+    expiresAt: string;
+    fingerprint: string;
+  };
+}
+
 class DashboardService {
   async getOverview(
     repositoryIds?: string[],
@@ -84,6 +153,19 @@ class DashboardService {
     const response = await apiClient.get<{ data: DashboardRecentActivity[] }>('/dashboard/recent-activity', {
       params: buildDashboardParams(repositoryIds, repositoryBranchScopes, { limit }),
     });
+    return response.data.data;
+  }
+
+  async getProjectRiverRepositoryDashboard(
+    repositoryId: string,
+    repositoryBranchScopes?: RepositoryBranchScopeMap,
+  ): Promise<ProjectRiverDashboardData> {
+    const response = await apiClient.get<{ data: ProjectRiverDashboardData }>(
+      `/dashboard/project-river/${repositoryId}`,
+      {
+        params: buildDashboardParams([repositoryId], repositoryBranchScopes),
+      },
+    );
     return response.data.data;
   }
 }
