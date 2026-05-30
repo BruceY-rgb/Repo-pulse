@@ -617,7 +617,12 @@ export class RepositoryService {
    * 重新注册 Webhook
    */
   async registerWebhook(id: string) {
-    const repository = await this.findById(id);
+    const repository = await this.prisma.repository.findUnique({
+      where: { id },
+    });
+    if (!repository) {
+      throw new NotFoundException(`Repository not found: ${id}`);
+    }
 
     // 获取用户的 OAuth Token
     const userRepo = await this.prisma.userRepository.findFirst({

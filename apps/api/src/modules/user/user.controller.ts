@@ -17,10 +17,10 @@ export class UserController {
 
   @Get('me')
   @ApiOperation({ summary: '获取当前用户信息' })
-  async getMe(@CurrentUser() user: { sub: string }, @Req() req: Request) {
+  async getMe(@CurrentUser() user: { sub: string }, @Req() req?: Request) {
     const userData = await this.userService.findById(user.sub);
     // TODO: 生产环境移除 - 用于 WebSocket 测试
-    const accessToken = req.cookies?.access_token;
+    const accessToken = req?.cookies?.access_token;
     return { ...userData, accessToken };
   }
 
