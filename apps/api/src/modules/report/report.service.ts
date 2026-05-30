@@ -73,8 +73,8 @@ export class ReportService {
       .map((id) => id.trim())
       .filter(Boolean);
 
-    const effectiveSet = new Set(effectiveIds);
-    return requested.filter((id) => effectiveSet.has(id));
+    const accessibleSet = new Set(accessibleIds);
+    return requested.filter((id) => accessibleSet.has(id));
   }
 
   async getReports(

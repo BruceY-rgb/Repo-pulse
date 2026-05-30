@@ -19,6 +19,8 @@ export interface User {
   preferences: UserPreferences;
   createdAt: string;
   updatedAt: string;
+  // TODO: 生产环境移除 - 用于 WebSocket 测试
+  accessToken?: string;
 }
 
 export interface DashboardPreferences {
@@ -303,6 +305,21 @@ export interface SearchResult {
     avatarUrl: string;
   };
   platform: Platform;
+}
+
+export interface WatchRepositoryItem {
+  id: string;
+  name: string;
+  fullName: string;
+  platform: Platform;
+  externalId: string;
+  url: string;
+  defaultBranch: string;
+  isActive: boolean;
+  lastSyncAt: string | null;
+  eventCount: number;
+  isMonitored: boolean;
+  canAddToMonitoring: boolean;
 }
 
 export interface RepositoryBranchScopeOption {

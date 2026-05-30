@@ -105,6 +105,14 @@ export class RepositoryController {
     return this.repositoryService.getBranches(userId, id);
   }
 
+  @Get(':id/contributors')
+  @ApiOperation({ summary: 'Get repository contributors' })
+  async getContributors(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req.user as { sub: string }).sub;
+    const user = await this.userService.findById(userId);
+    return this.repositoryService.getContributors(id, user?.githubAccessToken || undefined);
+  }
+
   @Patch(':id')
   @ApiOperation({ summary: 'Update repository' })
   async update(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateRepositoryDto) {

@@ -133,4 +133,12 @@ export const repositoryService = {
     const { data } = await apiClient.get<ApiResponse<SearchResult[]>>('/repositories/starred');
     return data.data;
   },
+
+  /**
+   * 获取指定监控仓库的贡献者列表
+   */
+  async getContributors(id: string): Promise<Array<{ username: string; avatarUrl: string | null }>> {
+    const { data } = await apiClient.get<ApiResponse<Array<{ username: string; avatarUrl: string | null }>>>(`/repositories/${id}/contributors`);
+    return data.data;
+  },
 };

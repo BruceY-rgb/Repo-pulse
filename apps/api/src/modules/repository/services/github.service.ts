@@ -410,24 +410,38 @@ export class GithubService {
     refreshToken?: string,
   ): Promise<GithubRepoResponse[]> {
     const maxRetries = 3;
+    let currentUserToken = userToken;
+    let currentRefreshToken = refreshToken;
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const client = this.createUserClient(userToken);
-        const response = await client.get<GithubRepoResponse[]>('/user/repos', {
-          params: {
-            sort: 'updated',
-            per_page: 100,
-            affiliation: 'owner,collaborator,organization_member',
-          },
-        });
-        return response.data;
+        const client = this.createUserClient(currentUserToken);
+        const allRepos: GithubRepoResponse[] = [];
+        let page = 1;
+        const perPage = 100;
+        while (true) {
+          const response = await client.get<GithubRepoResponse[]>('/user/repos', {
+            params: {
+              sort: 'updated',
+              per_page: perPage,
+              page,
+              affiliation: 'owner,collaborator,organization_member',
+            },
+          });
+          allRepos.push(...response.data);
+          if (response.data.length < perPage) {
+            break;
+          }
+          page++;
+        }
+        return allRepos;
       } catch (error: any) {
         // 如果是 401 错误且有 refreshToken，尝试刷新
-        if (error.response?.status === 401 && refreshToken && attempt === 1) {
+        if (error.response?.status === 401 && currentRefreshToken && attempt === 1) {
           try {
-            const newTokens = await this.refreshGithubToken(refreshToken);
-            userToken = newTokens.accessToken;
-            refreshToken = newTokens.refreshToken;
+            const newTokens = await this.refreshGithubToken(currentRefreshToken);
+            currentUserToken = newTokens.accessToken;
+            currentRefreshToken = newTokens.refreshToken;
             this.logger.log('GitHub token 刷新成功，重试请求');
             continue;
           } catch (refreshError) {
@@ -451,20 +465,33 @@ export class GithubService {
     options?: { throwOnError?: boolean },
   ): Promise<GithubRepoResponse[]> {
     const maxRetries = 3;
+    let currentUserToken = userToken;
+    let currentRefreshToken = refreshToken;
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const client = this.createUserClient(userToken);
-        const response = await client.get<GithubRepoResponse[]>('/user/starred', {
-          params: { per_page: 100 },
-        });
-        return response.data;
+        const client = this.createUserClient(currentUserToken);
+        const allRepos: GithubRepoResponse[] = [];
+        let page = 1;
+        const perPage = 100;
+        while (true) {
+          const response = await client.get<GithubRepoResponse[]>('/user/starred', {
+            params: { per_page: perPage, page },
+          });
+          allRepos.push(...response.data);
+          if (response.data.length < perPage) {
+            break;
+          }
+          page++;
+        }
+        return allRepos;
       } catch (error: any) {
         // 如果是 401 错误且有 refreshToken，尝试刷新
-        if (error.response?.status === 401 && refreshToken && attempt === 1) {
+        if (error.response?.status === 401 && currentRefreshToken && attempt === 1) {
           try {
-            const newTokens = await this.refreshGithubToken(refreshToken);
-            userToken = newTokens.accessToken;
-            refreshToken = newTokens.refreshToken;
+            const newTokens = await this.refreshGithubToken(currentRefreshToken);
+            currentUserToken = newTokens.accessToken;
+            currentRefreshToken = newTokens.refreshToken;
             this.logger.log('GitHub token 刷新成功，重试请求');
             continue;
           } catch (refreshError) {
@@ -497,5 +524,18 @@ export class GithubService {
     // 需要用户重新进行 OAuth 授权
     this.logger.warn('GitHub OAuth 不支持 token 刷新，请引导用户重新授权');
     throw new Error('GitHub OAuth 不支持 token 刷新，请重新登录授权');
+  }
+
+  async getContributors(owner: string, repo: string, userToken?: string): Promise<Array<{ login: string; avatar_url: string; html_url: string }>> {
+    try {
+      const client = this.createUserClient(userToken);
+      const response = await client.get<Array<{ login: string; avatar_url: string; html_url: string }>>(`/repos/${owner}/${repo}/contributors`, {
+        params: { per_page: 100 },
+      });
+      return Array.isArray(response.data) ? response.data : [];
+    } catch (error) {
+      this.logger.error(`Failed to fetch contributors for ${owner}/${repo}`, this.formatErrorForLog(error));
+      return [];
+    }
   }
 }

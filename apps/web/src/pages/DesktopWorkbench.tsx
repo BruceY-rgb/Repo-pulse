@@ -43,15 +43,26 @@ import {
   ShieldAlert,
   Sparkles,
   Star,
+  SlidersHorizontal,
+  CheckCheck,
   Trash2,
   VolumeX,
   XCircle,
+  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -66,13 +77,24 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { useApiQuery } from '@/lib/query-hooks';
 import {
   useRepositoryBranchesQuery,
   useRepositoryListQuery,
   repositoryQueryKeys,
+  useSearchRepositoryCandidatesQuery,
 } from '@/hooks/queries/use-repository-queries';
+import {
+  useChatRepositoriesQuery,
+  useConversationMessagesQuery,
+  useWatchFeedQuery,
+} from '@/hooks/queries/use-workbench-queries';
 import { useMonitoringScopePreferences } from '@/hooks/use-monitoring-scope-preferences';
 import {
   useNotificationsQuery,
@@ -88,6 +110,11 @@ import { eventService } from '@/services/event.service';
 import { approvalService, type Approval } from '@/services/approval.service';
 import { repositoryService } from '@/services/repository.service';
 import { workbenchService } from '@/services/workbench.service';
+import { getApiBaseUrl } from '@/lib/desktop';
+import {
+  useWorkbenchUnreadStore,
+  type WorkbenchUnreadBoundary,
+} from '@/stores/workbench-unread.store';
 import type { Notification } from '@/services/notification.service';
 import { Dashboard } from '@/pages/Dashboard';
 import { Repositories } from '@/pages/Repositories';
@@ -103,6 +130,7 @@ import type {
   MessageAction,
   RiskLevel,
   WatchFeedItem,
+  WatchRepositoryItem,
 } from '@/types/api';
 
 type WorkbenchView = 'inbox' | 'repository' | 'repositories' | 'watch' | 'dashboard' | 'reports' | 'agent' | 'settings';
@@ -351,6 +379,41 @@ function formatRelativeTime(dateString?: string | null) {
   return `${Math.floor(deltaHours / 24)} 天前`;
 }
 
+function getTimestamp(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function isMessageCoveredByRead(messageAt?: string | null, readAt?: string | null) {
+  const readAtMs = getTimestamp(readAt);
+  if (readAtMs === null) {
+    return false;
+  }
+
+  const messageAtMs = getTimestamp(messageAt);
+  if (messageAtMs === null) {
+    return true;
+  }
+
+  return messageAtMs <= readAtMs;
+}
+
+function getLatestWorkbenchMessageAt(messages: Array<Pick<WorkbenchConversationMessage, 'createdAt'>>) {
+  return messages.reduce<string | null>((latest, message) => {
+    const messageAt = getTimestamp(message.createdAt);
+    if (messageAt === null) {
+      return latest;
+    }
+
+    const latestAt = getTimestamp(latest);
+    return latestAt === null || messageAt > latestAt ? message.createdAt : latest;
+  }, null);
+}
+
 function getRepoInitial(repo: Pick<Repository, 'name' | 'fullName'>) {
   return (repo.name || repo.fullName || 'R').slice(0, 1).toUpperCase();
 }
@@ -385,6 +448,13 @@ function getRepositoryAvatarUrl(repo: Pick<Repository, 'fullName' | 'platform' |
   } catch {
     return undefined;
   }
+}
+
+/** Derive GitHub avatar URL from a WatchFeedItem's repositoryFullName (e.g. "owner/repo") */
+function getWatchFeedAvatarUrl(repositoryFullName: string) {
+  const owner = repositoryFullName.split('/')[0];
+  if (!owner) return undefined;
+  return `https://github.com/${encodeURIComponent(owner)}.png`;
 }
 
 function getAuthorAvatarUrl(message: ConversationMessage) {
@@ -1044,6 +1114,7 @@ function RepositorySidebar({
   onUnpinRepository,
   onMarkRead,
   onFilterByType,
+  newlyMonitoredRepoIds,
 }: {
   editableRepos: ChatRepositoryItem[];
   monitoredRepos: ChatRepositoryItem[];
@@ -1061,11 +1132,15 @@ function RepositorySidebar({
   onUnpinRepository: (repository: Repository) => void;
   onMarkRead: (repository: Repository) => void;
   onFilterByType: (repository: Repository, type: string) => void;
+  newlyMonitoredRepoIds?: Set<string>;
 }) {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_REPOSITORY_SIDEBAR_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
   const [contextMenu, setContextMenu] = useState<RepositoryContextMenuState | null>(null);
   const [repositorySearch, setRepositorySearch] = useState('');
+  const optimisticReadAtByRepository = useWorkbenchUnreadStore(
+    (state) => state.optimisticReadAtByRepository,
+  );
   const resizeStartRef = useRef({
     clientX: 0,
     width: DEFAULT_REPOSITORY_SIDEBAR_WIDTH,
@@ -1075,7 +1150,14 @@ function RepositorySidebar({
   const filterBySearch = (items: ChatRepositoryItem[]) =>
     items.filter((item) => {
       if (!normalizedRepositorySearch) {
-        return true;
+        // 没有搜索词时，隐藏尚无可渲染消息的仓库。
+        // 但如果是当前选中的、置顶的，或者刚刚加入监控的仓库，则强制展示，避免新加入侧边栏找不到。
+        return (
+          !!item.latestMessagePreview ||
+          item.repository.id === selectedRepositoryId ||
+          pinnedRepoIds.has(item.repository.id) ||
+          newlyMonitoredRepoIds?.has(item.repository.id)
+        );
       }
       return [
         item.repository.name,
@@ -1107,8 +1189,11 @@ function RepositorySidebar({
   const allFilteredRepos = [...filteredEditable, ...filteredMonitored];
 
   function getEffectiveUnread(item: ChatRepositoryItem): number {
-    // 直接使用后端返回的 unreadCount，不再依赖 localStorage
-    // 后端已基于 lastReadAt 与消息时间比较计算真实未读数
+    const optimisticReadAt = optimisticReadAtByRepository[item.repository.id];
+    if (isMessageCoveredByRead(item.latestMessageAt, optimisticReadAt)) {
+      return 0;
+    }
+
     return item.unreadCount || 0;
   }
 
@@ -1204,8 +1289,11 @@ function RepositorySidebar({
     const avatarUrl = getRepositoryAvatarUrl(repo);
     const latestMessage = item.latestMessagePreview || '等待新的仓库事件';
     const isSyncing = syncingRepoIds.has(repo.id);
-    const hasAttention = item.requiresAttention || (item.unreadRiskLevel === 'HIGH' || item.unreadRiskLevel === 'CRITICAL');
     const hasPendingApproval = item.hasPendingApproval || item.pendingApprovalCount > 0;
+    const hasPendingAgentAction = item.hasPendingAgentAction || item.pendingAgentActionCount > 0;
+    const hasUnreadRiskAttention =
+      unread > 0 && (item.unreadRiskLevel === 'HIGH' || item.unreadRiskLevel === 'CRITICAL');
+    const hasAttention = unread > 0 || hasPendingApproval || hasPendingAgentAction || hasUnreadRiskAttention;
 
     return (
       <Link
@@ -1226,7 +1314,7 @@ function RepositorySidebar({
           });
         }}
         className={cn(
-          'relative flex w-full min-w-0 overflow-hidden gap-3 rounded-xl border border-transparent px-3 py-3 text-left transition-colors hover:bg-secondary/70',
+          'relative flex w-full min-w-0 gap-3 rounded-xl border border-transparent px-3 py-3 text-left transition-colors hover:bg-secondary/70',
           selected && 'border-primary/30 bg-primary/10',
           hasAttention && !selected && 'border-warning/20 bg-warning/5',
         )}
@@ -1242,10 +1330,10 @@ function RepositorySidebar({
             {getRepoInitial(repo)}
           </AvatarFallback>
         </Avatar>
-        <div className={cn('min-w-0 flex-1 overflow-hidden', unread > 0 && 'pr-14')}>
+        <div className={cn('min-w-0 flex-1', unread > 0 && 'pr-14')}>
           <div className="flex min-w-0 items-center gap-1.5">
             <p
-              className="min-w-0 break-words text-sm font-semibold leading-5 text-foreground"
+              className="min-w-0 truncate text-sm font-semibold leading-5 text-foreground"
               title={repo.fullName}
             >
               {repo.fullName}
@@ -1260,7 +1348,7 @@ function RepositorySidebar({
           <p className="mt-1 block max-w-full truncate text-xs text-muted-foreground" title={latestMessage}>
             {latestMessage}
           </p>
-          <div className="mt-2 flex min-w-0 items-center gap-2 overflow-hidden text-[11px] text-muted-foreground">
+          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
             {hasPendingApproval ? (
               <Badge
                 variant="outline"
@@ -1269,7 +1357,7 @@ function RepositorySidebar({
                 待审批 {item.pendingApprovalCount}
               </Badge>
             ) : null}
-            {item.unreadRiskLevel === 'HIGH' || item.unreadRiskLevel === 'CRITICAL' ? (
+            {hasUnreadRiskAttention ? (
               <Badge
                 variant="outline"
                 className="shrink-0 rounded-full border-destructive/40 bg-destructive/10 px-1.5 py-0 text-[10px] text-destructive-foreground"
@@ -1280,7 +1368,7 @@ function RepositorySidebar({
             <Badge
               variant="outline"
               className={cn(
-                'rounded-full px-1.5 py-0 text-[10px]',
+                'shrink-0 rounded-full px-1.5 py-0 text-[10px]',
                 kind === 'editable'
                   ? 'border-success/40 text-success-foreground'
                   : 'border-muted-foreground/30 text-muted-foreground',
@@ -1481,11 +1569,11 @@ function RepositorySidebar({
     <aside
       style={{ width: sidebarWidth }}
       className={cn(
-        'relative hidden h-screen shrink-0 overflow-visible border-r border-border bg-background/60 lg:block',
+        'relative hidden h-screen shrink-0 flex-col overflow-visible border-r border-border bg-background/60 lg:flex',
         !isResizing && 'transition-[width] duration-200',
       )}
     >
-      <div className="desktop-drag border-b border-border px-4 pb-4 pt-9">
+      <div className="desktop-drag shrink-0 border-b border-border px-4 pb-4 pt-9">
         <div className="desktop-no-drag flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-foreground">仓库会话</h2>
@@ -1524,8 +1612,8 @@ function RepositorySidebar({
         </div>
       </div>
 
-      <ScrollArea className="h-[calc(100vh-98px)] overflow-hidden">
-        <div className="w-full max-w-full space-y-1 overflow-hidden p-3">
+      <ScrollArea className="min-h-0 flex-1 overflow-hidden">
+        <div className="w-full min-w-0 space-y-1 overflow-hidden p-3">
           {filteredEditable.length > 0 && (
             <>
               <p className="px-2 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -1629,6 +1717,15 @@ function WorkbenchHeader({
   onAgent,
   onSearch,
   onOpenBranchMonitor,
+  feedSearchKeyword,
+  onFeedSearchKeywordChange,
+  feedFilters,
+  onFeedFiltersChange,
+  isRefreshing,
+  onRefresh,
+  onMarkAllRead,
+  onAddRepositoryClick,
+  onOpenContributors,
 }: {
   activeView: WorkbenchView;
   repository?: Repository;
@@ -1636,7 +1733,28 @@ function WorkbenchHeader({
   onAgent: () => void;
   onSearch: () => void;
   onOpenBranchMonitor: () => void;
+  feedSearchKeyword?: string;
+  onFeedSearchKeywordChange?: (value: string) => void;
+  feedFilters?: {
+    showOnlyDefaultBranch: boolean;
+    hideBranchDelete: boolean;
+    showPRAndIssueOnly: boolean;
+  };
+  onFeedFiltersChange?: (filters: {
+    showOnlyDefaultBranch: boolean;
+    hideBranchDelete: boolean;
+    showPRAndIssueOnly: boolean;
+  }) => void;
+  isRefreshing?: boolean;
+  onRefresh?: () => void;
+  onMarkAllRead?: () => void;
+  onAddRepositoryClick?: () => void;
+  onOpenContributors?: () => void;
 }) {
+  const [searchParams] = useSearchParams();
+  const repositoryIdParam = searchParams.get('repositoryId');
+  const hasRepositoryContext = activeView === 'repository' || ((activeView === 'dashboard' || activeView === 'reports') && repositoryIdParam);
+
   const titleByView: Record<WorkbenchView, string> = {
     inbox: '今日工作台',
     repository: repository?.fullName ?? '仓库会话',
@@ -1647,17 +1765,30 @@ function WorkbenchHeader({
     agent: 'Agent 会话',
     settings: '设置',
   };
+  const subtitleByView: Partial<Record<WorkbenchView, string>> = {
+    watch: 'Watch Feed / 关注源管理',
+    repositories: 'Repository inventory / 监控范围管理',
+    dashboard: 'Dashboard / 仓库指标',
+    reports: 'Reports / Markdown 与 PDF',
+    agent: 'Agent run / 独立执行上下文',
+    settings: 'Workspace settings',
+  };
   const repositoryAvatarUrl = repository ? getRepositoryAvatarUrl(repository) : undefined;
-  const dashboardHref = activeView === 'repository' && repository
+
+  const dashboardHref = (activeView === 'repository' && repository) || ((activeView === 'dashboard' || activeView === 'reports') && repositoryIdParam && repository)
     ? `/workbench/dashboard?repositoryId=${encodeURIComponent(repository.id)}`
     : '/workbench/dashboard';
 
-  const isReadOnly = activeView === 'repository' && repositoryCanOperate === false;
+  const reportsHref = (activeView === 'repository' && repository) || ((activeView === 'dashboard' || activeView === 'reports') && repositoryIdParam && repository)
+    ? `/workbench/reports?repositoryId=${encodeURIComponent(repository.id)}`
+    : '/workbench/reports';
+
+  const isReadOnly = hasRepositoryContext && repositoryCanOperate === false;
 
   return (
     <header className="desktop-drag flex h-24 shrink-0 items-end justify-between gap-4 border-b border-border bg-background/95 px-6 pb-4 backdrop-blur">
       <div className="flex min-w-0 items-center gap-3">
-        {activeView === 'repository' && repository ? (
+        {hasRepositoryContext && repository ? (
           <Avatar className="desktop-no-drag h-12 w-12 rounded-xl border border-border">
             <AvatarImage src={repositoryAvatarUrl} alt={repository.fullName} className="object-cover" />
             <AvatarFallback className="rounded-xl bg-secondary text-sm font-semibold">
@@ -1669,12 +1800,14 @@ function WorkbenchHeader({
           <p className="truncate text-sm text-muted-foreground">
             {isReadOnly
               ? '只读监控 · 仅查看权限'
-              : activeView === 'repository'
+              : hasRepositoryContext
                 ? '可编辑仓库 / 独立 Agent 会话'
-                : 'Repo-Pulse Desktop Workbench'}
+                : subtitleByView[activeView] ?? 'Repo-Pulse Desktop Workbench'}
           </p>
           <h1 className="truncate text-2xl font-semibold tracking-tight text-foreground">
-            {titleByView[activeView]}
+            {hasRepositoryContext && repository && activeView !== 'repository'
+              ? `${repository.fullName} · ${titleByView[activeView]}`
+              : titleByView[activeView]}
             {isReadOnly ? (
               <Badge variant="outline" className="ml-3 align-middle rounded-full border-muted-foreground/30 text-xs text-muted-foreground">
                 只读监控
@@ -1683,50 +1816,190 @@ function WorkbenchHeader({
           </h1>
         </div>
       </div>
-      <div className="desktop-no-drag flex items-center gap-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="icon" variant="outline" aria-label="搜索会话" onClick={onSearch}>
-              <Search className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>搜索会话</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="icon" variant="outline" asChild aria-label="看板">
-              <Link to={dashboardHref}>
-                <LayoutDashboard className="h-4 w-4" />
-              </Link>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{activeView === 'repository' ? '查看当前仓库看板' : '仓库看板'}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="icon" variant="outline" aria-label="分支监控" onClick={onOpenBranchMonitor}>
-              <GitBranch className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>分支监控</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="icon" variant="outline" asChild aria-label="生成报告">
-              <Link to="/workbench/reports">
-                <FileText className="h-4 w-4" />
-              </Link>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>生成报告</TooltipContent>
-        </Tooltip>
-        {!isReadOnly ? (
-          <Button className="gap-2" onClick={onAgent}>
-            <Bot className="h-4 w-4" />
-            让 Agent 处理
+      {activeView === 'watch' ? (
+        <div className="desktop-no-drag flex items-center gap-2">
+          {/* Dynamic Search Filter */}
+          <div className="relative w-48 sm:w-64">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={feedSearchKeyword ?? ''}
+              onChange={(e) => onFeedSearchKeywordChange?.(e.target.value)}
+              placeholder="搜索动态内容..."
+              className="h-9 w-full rounded-lg border-border bg-background/50 pl-8 pr-7 text-xs focus-visible:ring-1 focus-visible:ring-primary"
+            />
+            {feedSearchKeyword ? (
+              <button
+                type="button"
+                onClick={() => onFeedSearchKeywordChange?.('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <XCircle className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+          </div>
+
+          {/* Noise Reduction Filter Popover */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                <span>降噪</span>
+                {(feedFilters?.showOnlyDefaultBranch || feedFilters?.hideBranchDelete || feedFilters?.showPRAndIssueOnly) ? (
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                ) : null}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-56 p-3 bg-popover border-border">
+              <div className="space-y-3">
+                <div className="text-xs font-semibold text-foreground">降噪与过滤</div>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
+                    <Checkbox
+                      checked={feedFilters?.showOnlyDefaultBranch ?? false}
+                      onCheckedChange={(checked) =>
+                        onFeedFiltersChange?.({
+                          ...feedFilters!,
+                          showOnlyDefaultBranch: Boolean(checked),
+                        })
+                      }
+                    />
+                    <span>仅显示默认分支</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
+                    <Checkbox
+                      checked={feedFilters?.hideBranchDelete ?? false}
+                      onCheckedChange={(checked) =>
+                        onFeedFiltersChange?.({
+                          ...feedFilters!,
+                          hideBranchDelete: Boolean(checked),
+                        })
+                      }
+                    />
+                    <span>隐藏分支删除</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
+                    <Checkbox
+                      checked={feedFilters?.showPRAndIssueOnly ?? false}
+                      onCheckedChange={(checked) =>
+                        onFeedFiltersChange?.({
+                          ...feedFilters!,
+                          showPRAndIssueOnly: Boolean(checked),
+                        })
+                      }
+                    />
+                    <span>仅 Issue & PR</span>
+                  </label>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Refresh Button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 text-muted-foreground hover:text-foreground"
+                onClick={onRefresh}
+                disabled={isRefreshing}
+              >
+                <RotateCcw className={cn("h-4 w-4 transition-transform duration-200 active:scale-90", isRefreshing && "animate-refresh")} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>刷新动态</TooltipContent>
+          </Tooltip>
+
+          {/* Mark All Ignored */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 text-muted-foreground hover:text-foreground"
+                onClick={onMarkAllRead}
+              >
+                <CheckCheck className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>忽略当前全部动态</TooltipContent>
+          </Tooltip>
+
+          {/* Add Repository */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            onClick={onAddRepositoryClick}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            添加仓库
           </Button>
-        ) : null}
-      </div>
+        </div>
+      ) : activeView !== 'watch' ? (
+        <div className="desktop-no-drag flex items-center gap-2">
+          {activeView === 'repository' && onOpenContributors ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button size="icon" variant="outline" aria-label="查看贡献者" onClick={onOpenContributors}>
+                  <Users className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>查看项目贡献者</TooltipContent>
+            </Tooltip>
+          ) : null}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="icon" variant="outline" aria-label="搜索会话" onClick={onSearch}>
+                <Search className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>搜索会话</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="icon" variant="outline" asChild aria-label="看板">
+                <Link to={dashboardHref}>
+                  <LayoutDashboard className="h-4 w-4" />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{hasRepositoryContext ? '查看当前仓库看板' : '仓库看板'}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="icon" variant="outline" aria-label="分支监控" onClick={onOpenBranchMonitor}>
+                <GitBranch className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>分支监控</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="icon" variant="outline" asChild aria-label="生成报告">
+                <Link to={reportsHref}>
+                  <FileText className="h-4 w-4" />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>生成报告</TooltipContent>
+          </Tooltip>
+          {!isReadOnly ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button size="icon" variant="outline" aria-label="让 Agent 处理" onClick={onAgent}>
+                  <Bot className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>让 Agent 处理</TooltipContent>
+            </Tooltip>
+          ) : null}
+        </div>
+      ) : null}
     </header>
   );
 }
@@ -1758,6 +2031,17 @@ function ConversationBubble({
         ? Bell
         : Github;
   const authorAvatarUrl = getAuthorAvatarUrl(message) ?? getRepositoryAvatarUrl(repository);
+
+  const isRealUser = Boolean(message.author && !['system', 'agent', 'bot', 'ai'].some(kw => message.author.toLowerCase().includes(kw)));
+
+  const handleAvatarClick = (e: MouseEvent) => {
+    if (!isRealUser) return;
+    e.stopPropagation();
+    const userUrl = repository.platform === 'GITLAB' 
+      ? `https://gitlab.com/${message.author}` 
+      : `https://github.com/${message.author}`;
+    window.open(userUrl, '_blank', 'noopener,noreferrer');
+  };
 
   // Filter actions: hide requiresPermission actions when repositoryCanOperate is false
   const visibleActions = (message.actions ?? []).filter(
@@ -1870,7 +2154,13 @@ function ConversationBubble({
       }}
       onContextMenu={(event) => onContextMenu(event, message)}
     >
-      <Avatar className="mt-1 h-10 w-10 shrink-0 rounded-xl border border-border">
+      <Avatar 
+        onClick={handleAvatarClick} 
+        className={cn(
+          "mt-1 h-10 w-10 shrink-0 rounded-xl border border-border",
+          isRealUser && "cursor-pointer hover:opacity-80 transition-opacity"
+        )}
+      >
         <AvatarImage src={authorAvatarUrl} alt={message.author} className="object-cover" />
         <AvatarFallback className="rounded-xl bg-secondary text-sm font-semibold">
           {getMessageAvatarFallback(message, repository)}
@@ -2221,6 +2511,7 @@ function BranchMonitorSheet({
 function RepositoryConversation({
   repository,
   messages,
+  unreadBoundary,
   repositoryCanOperate,
   onOpenAgent,
   onApproveMessage,
@@ -2229,6 +2520,7 @@ function RepositoryConversation({
 }: {
   repository: Repository;
   messages: ConversationMessage[];
+  unreadBoundary?: WorkbenchUnreadBoundary | null;
   repositoryCanOperate?: boolean;
   onOpenAgent: (prompt: string) => void;
   onApproveMessage: (message: ConversationMessage) => void;
@@ -2238,10 +2530,52 @@ function RepositoryConversation({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<ConversationMessage | null>(null);
   const [activeFilter, setActiveFilter] = useState<MessageFilterKey>('all');
+  const [pendingUnreadJump, setPendingUnreadJump] = useState(false);
+  const unreadBoundaryRef = useRef<HTMLDivElement | null>(null);
   const filteredMessages = useMemo(
     () => messages.filter((message) => doesMessageMatchFilter(message, activeFilter)),
     [activeFilter, messages],
   );
+  const hasUnreadBoundary = Boolean(
+    unreadBoundary &&
+      unreadBoundary.repositoryId === repository.id &&
+      messages.some((message) => message.id === unreadBoundary.messageId),
+  );
+  const isUnreadBoundaryVisible = Boolean(
+    hasUnreadBoundary &&
+      filteredMessages.some((message) => message.id === unreadBoundary?.messageId),
+  );
+
+  const handleJumpToUnread = () => {
+    if (!hasUnreadBoundary) {
+      return;
+    }
+
+    if (!isUnreadBoundaryVisible) {
+      setActiveFilter('all');
+    }
+    setPendingUnreadJump(true);
+  };
+
+  useEffect(() => {
+    if (!pendingUnreadJump || !hasUnreadBoundary) {
+      return;
+    }
+
+    if (!isUnreadBoundaryVisible) {
+      return;
+    }
+
+    unreadBoundaryRef.current?.scrollIntoView({
+      block: 'end',
+      behavior: 'smooth',
+    });
+    const frame = window.requestAnimationFrame(() => {
+      setPendingUnreadJump(false);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [hasUnreadBoundary, isUnreadBoundaryVisible, pendingUnreadJump]);
 
   useEffect(() => {
     if (!contextMenu) {
@@ -2260,45 +2594,76 @@ function RepositoryConversation({
     <div className="flex h-full min-h-0 flex-col">
       <div className="border-b border-border bg-background px-6 py-3">
         <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-2">
-          {messageFilters.map((filter) => (
+          <div className="flex flex-wrap items-center gap-2">
+            {messageFilters.map((filter) => (
+              <Button
+                key={filter.key}
+                type="button"
+                size="sm"
+                variant={activeFilter === filter.key ? 'default' : 'outline'}
+                className="h-8 rounded-full"
+                onClick={() => setActiveFilter(filter.key)}
+              >
+                {filter.label}
+              </Button>
+            ))}
+          </div>
+          {hasUnreadBoundary && unreadBoundary ? (
             <Button
-              key={filter.key}
               type="button"
               size="sm"
-              variant={activeFilter === filter.key ? 'default' : 'outline'}
-              className="h-8 rounded-full"
-              onClick={() => setActiveFilter(filter.key)}
+              variant="secondary"
+              className="ml-auto h-8 rounded-full border border-primary/30 bg-primary/10 text-primary hover:bg-primary/15"
+              onClick={handleJumpToUnread}
             >
-              {filter.label}
+              跳到未读 · {unreadBoundary.unreadCount}
             </Button>
-          ))}
+          ) : null}
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 py-6">
           {filteredMessages.length > 0 ? (
-            filteredMessages.map((message) => (
-              <ConversationBubble
-                key={message.id}
-                message={message}
-                repository={repository}
-                onOpenDetail={setSelectedMessage}
-                onOpenAgent={onOpenAgent}
-                onApproveMessage={onApproveMessage}
-                onRejectMessage={onRejectMessage}
-                approvalActionId={approvalActionId}
-                onContextMenu={(event, selectedMessage) => {
-                  event.preventDefault();
-                  const position = getSafeContextMenuPosition(
-                    event.clientX,
-                    event.clientY,
-                    MESSAGE_CONTEXT_MENU_WIDTH,
-                    MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT,
-                  );
-                  setContextMenu({ x: position.x, y: position.y, message: selectedMessage });
-                }}
-              />
-            ))
+            filteredMessages.map((message) => {
+              const shouldRenderUnreadBoundary =
+                hasUnreadBoundary && unreadBoundary?.messageId === message.id;
+
+              return (
+                <div key={message.id} className="contents">
+                  <ConversationBubble
+                    message={message}
+                    repository={repository}
+                    onOpenDetail={setSelectedMessage}
+                    onOpenAgent={onOpenAgent}
+                    onApproveMessage={onApproveMessage}
+                    onRejectMessage={onRejectMessage}
+                    approvalActionId={approvalActionId}
+                    onContextMenu={(event, selectedMessage) => {
+                      event.preventDefault();
+                      const position = getSafeContextMenuPosition(
+                        event.clientX,
+                        event.clientY,
+                        MESSAGE_CONTEXT_MENU_WIDTH,
+                        MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT,
+                      );
+                      setContextMenu({ x: position.x, y: position.y, message: selectedMessage });
+                    }}
+                  />
+                  {shouldRenderUnreadBoundary ? (
+                    <div
+                      ref={unreadBoundaryRef}
+                      className="flex scroll-mb-6 items-center gap-3 py-1"
+                    >
+                      <div className="h-px flex-1 bg-primary/40" />
+                      <span className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary">
+                        未读消息
+                      </span>
+                      <div className="h-px flex-1 bg-primary/40" />
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })
           ) : (
             <div className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 px-6 text-center">
               <MessageSquare className="h-10 w-10 text-muted-foreground" />
@@ -2455,132 +2820,673 @@ const watchFeedEventTypes = [
   { key: 'push', label: 'Push' },
   { key: 'release', label: 'Release' },
   { key: 'security', label: 'Security' },
+  { key: 'favorite', label: '收藏' },
 ] as const;
+
+const watchFeedTypeMeta: Record<WatchFeedItem['type'], {
+  label: string;
+  icon: typeof CircleDot;
+  badgeClass: string;
+  dotClass: string;
+}> = {
+  issue: {
+    label: 'Issue',
+    icon: CircleDot,
+    badgeClass: 'border-warning/40 bg-warning/10 text-warning',
+    dotClass: 'bg-warning',
+  },
+  pull_request: {
+    label: 'PR',
+    icon: GitBranch,
+    badgeClass: 'border-primary/40 bg-primary/10 text-primary',
+    dotClass: 'bg-primary',
+  },
+  push: {
+    label: 'Push',
+    icon: GitBranch,
+    badgeClass: 'border-border bg-secondary text-muted-foreground',
+    dotClass: 'bg-muted-foreground',
+  },
+  release: {
+    label: 'Release',
+    icon: FileText,
+    badgeClass: 'border-foreground/15 bg-foreground/5 text-foreground',
+    dotClass: 'bg-foreground',
+  },
+  security: {
+    label: 'Security',
+    icon: ShieldAlert,
+    badgeClass: 'border-destructive/40 bg-destructive/10 text-destructive',
+    dotClass: 'bg-destructive',
+  },
+};
+
+function WatchFeedActionBar({
+  item,
+  onAddToMonitoring,
+  onIgnore,
+  onAfterAction,
+  favoriteEventIds,
+  onToggleFavorite,
+}: {
+  item: WatchFeedItem;
+  onAddToMonitoring: (item: WatchFeedItem) => void | Promise<void>;
+  onIgnore: (item: WatchFeedItem) => void;
+  onAfterAction?: () => void;
+  favoriteEventIds?: Set<string>;
+  onToggleFavorite?: (eventId: string) => void;
+}) {
+  const isFavorited = favoriteEventIds?.has(item.id) ?? false;
+  return (
+    <div className="flex flex-nowrap items-center gap-2 shrink-0">
+      <Button
+        size="sm"
+        variant="outline"
+        className="gap-1.5"
+        onClick={() => toast.info(`AI 正在分析 ${item.repositoryFullName} 的事件...`)}
+      >
+        <Sparkles className="h-3.5 w-3.5" />
+        AI 分析
+      </Button>
+      {item.canAddToMonitoring ? (
+        <Button
+          size="sm"
+          variant="secondary"
+          className="gap-1.5"
+          onClick={() => {
+            void onAddToMonitoring(item);
+            onAfterAction?.();
+          }}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          加入监控
+        </Button>
+      ) : null}
+      {item.externalUrl ? (
+        <Button size="sm" variant="ghost" className="gap-1.5" asChild>
+          <a href={item.externalUrl} target="_blank" rel="noreferrer">
+            <ExternalLink className="h-3.5 w-3.5" />
+            GitHub
+          </a>
+        </Button>
+      ) : null}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="gap-1.5 text-muted-foreground"
+        onClick={() => {
+          onIgnore(item);
+          onAfterAction?.();
+        }}
+      >
+        <EyeOff className="h-3.5 w-3.5" />
+        忽略
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className={cn(
+          "gap-1.5 transition-colors",
+          isFavorited ? "text-primary hover:text-primary/80" : "text-muted-foreground"
+        )}
+        onClick={() => {
+          onToggleFavorite?.(item.id);
+        }}
+      >
+        <Star className={cn("h-3.5 w-3.5", isFavorited && "fill-current")} />
+        {isFavorited ? '已收藏' : '收藏'}
+      </Button>
+    </div>
+  );
+}
+
+function WatchFeedCard({
+  item,
+  onOpenPreview,
+  onAddToMonitoring,
+  onIgnore,
+  favoriteEventIds,
+  onToggleFavorite,
+}: {
+  item: WatchFeedItem;
+  onOpenPreview: (item: WatchFeedItem) => void;
+  onAddToMonitoring: (item: WatchFeedItem) => void | Promise<void>;
+  onIgnore: (item: WatchFeedItem) => void;
+  favoriteEventIds: Set<string>;
+  onToggleFavorite: (eventId: string) => void;
+}) {
+  const meta = watchFeedTypeMeta[item.type];
+  const TypeIcon = meta.icon;
+  const preview = item.summary || item.aiInsight || item.title;
+  const githubUrl = item.externalUrl || (() => {
+    const base = `https://github.com/${item.repositoryFullName}`;
+    switch (item.type) {
+      case 'issue': return `${base}/issues`;
+      case 'pull_request': return `${base}/pulls`;
+      case 'push': return `${base}/commits`;
+      case 'release': return `${base}/releases`;
+      case 'security': return `${base}/security/advisories`;
+      default: return base;
+    }
+  })();
+
+  const openPreview = () => onOpenPreview(item);
+  const isFavorited = favoriteEventIds.has(item.id);
+
+  return (
+    <article className="group overflow-hidden rounded-xl border border-border bg-card/80 shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-card">
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={`${item.title} 预览`}
+        className="cursor-pointer rounded-t-xl p-5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={openPreview}
+        onKeyDown={(event: KeyboardEvent<HTMLElement>) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openPreview();
+          }
+        }}
+      >
+        <div className="flex gap-4">
+          <div className="relative shrink-0">
+            <Avatar className="h-12 w-12 rounded-xl border border-border bg-background">
+              <AvatarImage src={item.repositoryAvatar || getWatchFeedAvatarUrl(item.repositoryFullName)} alt={item.repositoryFullName} />
+              <AvatarFallback className="rounded-xl bg-secondary text-sm font-semibold">
+                {item.repositoryFullName.slice(0, 1).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            <span className={cn(
+              'absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-md border border-background text-background',
+              meta.dotClass,
+            )}>
+              <TypeIcon className="h-3 w-3" />
+            </span>
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="truncate font-medium text-foreground">{item.repositoryFullName}</span>
+              <span>{formatRelativeTime(item.occurredAt)}</span>
+              <span>{item.author}</span>
+              <Badge variant="outline" className={cn('rounded-md px-2 py-0.5 text-[11px]', meta.badgeClass)}>
+                {meta.label}
+              </Badge>
+              {item.canAddToMonitoring ? (
+                <Badge variant="secondary" className="rounded-md px-2 py-0.5 text-[11px]">
+                  可监控
+                </Badge>
+              ) : null}
+              <a
+                href={githubUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-primary"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <ExternalLink className="h-3 w-3" />
+                GitHub
+              </a>
+            </div>
+
+            <div className="mt-3 flex gap-3">
+              <div className={cn('mt-1 h-2 w-2 shrink-0 rounded-full', meta.dotClass)} />
+              <div className="min-w-0 flex-1">
+                <h3 className="text-base font-semibold leading-6 text-foreground transition-colors group-hover:text-primary">
+                  {item.title}
+                </h3>
+                <MarkdownContent className="mt-2 line-clamp-3 prose-headings:my-1 prose-h1:text-base prose-h2:text-sm prose-h3:text-sm prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-pre:my-2 prose-pre:max-h-32">
+                  {preview}
+                </MarkdownContent>
+                {item.aiInsight ? (
+                  <div className="mt-4 border-l border-primary/50 pl-3">
+                    <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-primary">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      AI 洞察
+                    </div>
+                    <p className="line-clamp-2 text-sm leading-6 text-foreground/90">{item.aiInsight}</p>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between border-t border-border/70 px-5 py-2.5">
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', meta.dotClass)} />
+          <span className="truncate">{item.repositoryFullName}</span>
+          <span>·</span>
+          <span>{formatRelativeTime(item.occurredAt)}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          {item.canAddToMonitoring ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  onClick={(event) => { event.stopPropagation(); void onAddToMonitoring(item); }}
+                  aria-label="加入监控"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>加入监控</TooltipContent>
+            </Tooltip>
+          ) : null}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <a
+                href={githubUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                onClick={(event) => event.stopPropagation()}
+                aria-label="在 GitHub 中查看"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </TooltipTrigger>
+            <TooltipContent>在 GitHub 中查看</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  "inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-secondary",
+                  isFavorited ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                )}
+                onClick={(event) => { event.stopPropagation(); onToggleFavorite(item.id); }}
+                aria-label={isFavorited ? "取消收藏" : "收藏"}
+              >
+                <Star className={cn("h-3.5 w-3.5", isFavorited && "fill-current")} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{isFavorited ? "取消收藏" : "收藏"}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                onClick={(event) => { event.stopPropagation(); onIgnore(item); }}
+                aria-label="忽略"
+              >
+                <EyeOff className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>忽略</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function WatchFeedPreviewDialog({
+  item,
+  onOpenChange,
+  onAddToMonitoring,
+  onIgnore,
+  favoriteEventIds,
+  onToggleFavorite,
+}: {
+  item: WatchFeedItem | null;
+  onOpenChange: (item: WatchFeedItem | null) => void;
+  onAddToMonitoring: (item: WatchFeedItem) => void | Promise<void>;
+  onIgnore: (item: WatchFeedItem) => void;
+  favoriteEventIds: Set<string>;
+  onToggleFavorite: (eventId: string) => void;
+}) {
+  const meta = item ? watchFeedTypeMeta[item.type] : null;
+  const TypeIcon = meta?.icon ?? CircleDot;
+
+  return (
+    <Dialog open={Boolean(item)} onOpenChange={(open) => {
+      if (!open) {
+        onOpenChange(null);
+      }
+    }}>
+      {item && meta ? (
+        <DialogContent className="max-h-[min(760px,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-3xl gap-0 overflow-hidden rounded-xl border-border bg-background p-0">
+          <DialogHeader className="border-b border-border bg-card/80 px-6 py-5 pr-12 text-left">
+            <div className="flex items-start gap-4">
+              <Avatar className="h-12 w-12 rounded-xl border border-border bg-background">
+                <AvatarImage src={item.repositoryAvatar || getWatchFeedAvatarUrl(item.repositoryFullName)} alt={item.repositoryFullName} />
+                <AvatarFallback className="rounded-xl bg-secondary text-sm font-semibold">
+                  {item.repositoryFullName.slice(0, 1).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="truncate font-medium text-foreground">{item.repositoryFullName}</span>
+                  <span>{item.author}</span>
+                  <span>{formatRelativeTime(item.occurredAt)}</span>
+                  <Badge variant="outline" className={cn('rounded-md px-2 py-0.5 text-[11px]', meta.badgeClass)}>
+                    <TypeIcon className="mr-1 h-3 w-3" />
+                    {meta.label}
+                  </Badge>
+                </div>
+                <DialogTitle className="mt-3 text-xl leading-7 text-foreground">
+                  {item.title}
+                </DialogTitle>
+                <DialogDescription className="sr-only">
+                  {item.repositoryFullName} 的关注动态正文预览
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <ScrollArea className="max-h-[calc(100dvh-18rem)]">
+            <div className="space-y-6 px-6 py-5">
+              <section>
+                <div className="mb-3 flex items-center gap-2 text-sm font-medium text-foreground">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  正文
+                </div>
+                <MarkdownContent className="prose-pre:max-h-none">
+                  {item.summary || item.title}
+                </MarkdownContent>
+              </section>
+
+              {item.aiInsight ? (
+                <section className="border-t border-border pt-5">
+                  <div className="mb-3 flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    AI 洞察
+                  </div>
+                  <MarkdownContent className="prose-pre:max-h-none">
+                    {item.aiInsight}
+                  </MarkdownContent>
+                </section>
+              ) : null}
+            </div>
+          </ScrollArea>
+
+          <DialogFooter className="border-t border-border bg-background/95 px-6 py-4 sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+              <span className={cn('h-2 w-2 shrink-0 rounded-full', meta.dotClass)} />
+              <span className="truncate">{item.repositoryFullName}</span>
+            </div>
+            <WatchFeedActionBar
+              item={item}
+              onAddToMonitoring={onAddToMonitoring}
+              onIgnore={onIgnore}
+              onAfterAction={() => onOpenChange(null)}
+              favoriteEventIds={favoriteEventIds}
+              onToggleFavorite={onToggleFavorite}
+            />
+          </DialogFooter>
+        </DialogContent>
+      ) : null}
+    </Dialog>
+  );
+}
+
+function getSearchResultKey(candidate: SearchResult) {
+  return `${candidate.platform}:${candidate.fullName}`;
+}
+
+function WatchRepositoryPanel({
+  repositories,
+  loading,
+  onAddRepositoryToMonitoring,
+}: {
+  repositories: WatchRepositoryItem[];
+  loading?: boolean;
+  onAddRepositoryToMonitoring: (repository: WatchRepositoryItem) => void | Promise<void>;
+}) {
+  const [filterQuery, setFilterQuery] = useState('');
+
+  const filteredRepositories = useMemo(() => {
+    if (!filterQuery.trim()) return repositories;
+    const query = filterQuery.toLowerCase();
+    return repositories.filter((repo) => repo.fullName.toLowerCase().includes(query));
+  }, [repositories, filterQuery]);
+
+  return (
+    <aside className="min-w-0 space-y-4 lg:sticky lg:top-6 lg:self-start">
+      <section className="rounded-xl border border-border bg-card/80 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-foreground">关注源</p>
+          </div>
+          <Badge variant="secondary" className="rounded-md">
+            {filteredRepositories.length}
+          </Badge>
+        </div>
+
+        <div className="relative mt-3">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={filterQuery}
+            onChange={(e) => setFilterQuery(e.target.value)}
+            placeholder="搜索关注源仓库..."
+            className="h-8 rounded-lg border-border bg-background/50 pl-8 pr-7 text-xs focus-visible:ring-1 focus-visible:ring-primary"
+          />
+          {filterQuery ? (
+            <button
+              type="button"
+              onClick={() => setFilterQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <XCircle className="h-3 w-3" />
+            </button>
+          ) : null}
+        </div>
+
+        <div className="mt-3 lg:max-h-[calc(100vh-280px)] max-h-[400px] overflow-y-auto scrollbar-thin pr-1.5 space-y-2">
+          {loading ? (
+            [0, 1, 2].map((item) => (
+              <div key={item} className="flex animate-pulse items-center gap-3 rounded-lg border border-border bg-background/50 p-3">
+                <div className="h-9 w-9 rounded-lg bg-secondary" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="h-3 w-2/3 rounded bg-secondary" />
+                  <div className="h-3 w-1/2 rounded bg-secondary" />
+                </div>
+              </div>
+            ))
+          ) : filteredRepositories.length > 0 ? (
+            filteredRepositories.map((repository) => {
+              const avatarUrl = getRepositoryAvatarUrl(repository);
+              return (
+                <div
+                  key={repository.id}
+                  className="flex items-center gap-3 rounded-lg border border-border bg-background/45 p-3 hover:bg-secondary/45 transition-colors cursor-pointer group"
+                  onClick={() => window.open(repository.url, '_blank', 'noopener,noreferrer')}
+                >
+                  <Avatar className="h-9 w-9 shrink-0 rounded-lg border border-border">
+                    <AvatarImage src={avatarUrl} alt={repository.fullName} className="object-cover" />
+                    <AvatarFallback className="rounded-lg bg-secondary text-xs font-semibold">
+                      {getRepoInitial(repository)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <p className="truncate text-sm font-medium text-foreground group-hover:text-primary transition-colors" title={repository.fullName}>
+                          {repository.fullName}
+                        </p>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" align="start" className="max-w-[280px] break-all bg-popover/95 border border-border text-foreground p-2 text-xs shadow-xl">
+                        {repository.fullName}
+                      </TooltipContent>
+                    </Tooltip>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      {repository.eventCount} 条事件
+                      {repository.isMonitored ? ' · 已监控' : ' · 关注中'}
+                    </p>
+                  </div>
+                  {repository.canAddToMonitoring ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="ghost"
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void onAddRepositoryToMonitoring(repository);
+                          }}
+                          aria-label={`将 ${repository.fullName} 加入监控`}
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>加入监控</TooltipContent>
+                    </Tooltip>
+                  ) : null}
+                </div>
+              );
+            })
+          ) : (
+            <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+              {filterQuery ? '无匹配关注源仓库' : '还没有关注源。'}
+            </div>
+          )}
+        </div>
+      </section>
+    </aside>
+  );
+}
 
 function WatchFeed({
   items,
   loading,
   activeType,
   onTypeChange,
+  watchRepositories,
+  watchRepositoriesLoading,
   onAddToMonitoring,
+  onAddWatchRepositoryToMonitoring,
   onIgnore,
+  favoriteEventIds,
+  onToggleFavorite,
+  isRefreshing,
 }: {
   items: WatchFeedItem[];
   loading?: boolean;
   activeType: string;
   onTypeChange: (type: string) => void;
+  watchRepositories: WatchRepositoryItem[];
+  watchRepositoriesLoading?: boolean;
   onAddToMonitoring: (item: WatchFeedItem) => void;
+  onAddWatchRepositoryToMonitoring: (repository: WatchRepositoryItem) => void | Promise<void>;
   onIgnore: (item: WatchFeedItem) => void;
+  favoriteEventIds: Set<string>;
+  onToggleFavorite: (eventId: string) => void;
+  isRefreshing?: boolean;
 }) {
+  const [previewItem, setPreviewItem] = useState<WatchFeedItem | null>(null);
+
   return (
-    <ScrollArea className="h-full">
-      <div className="mx-auto max-w-3xl divide-y divide-border border-x border-border">
-        <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-5 py-4 backdrop-blur">
-          <h2 className="text-xl font-semibold text-foreground">关注动态</h2>
-          <p className="text-sm text-muted-foreground">展示已 Star 但尚未加入监控的仓库动态，过滤噪音聚焦感兴趣的事件</p>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {watchFeedEventTypes.map(({ key, label }) => (
-              <Badge
-                key={key}
-                variant={activeType === key ? 'default' : 'outline'}
-                className="cursor-pointer rounded-full"
-                onClick={() => onTypeChange(key)}
-              >
-                {label}
-              </Badge>
-            ))}
-          </div>
-        </div>
-        {loading ? (
-          <div className="flex items-center justify-center px-5 py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : items.length === 0 ? (
-          <div className="px-5 py-16 text-center text-sm text-muted-foreground">
-            暂无 Star 仓库动态。登录或同步 GitHub 后，会展示可加入监控的仓库事件。
-          </div>
-        ) : items.map((item) => (
-          <article key={item.id} className="px-5 py-5 transition-colors hover:bg-secondary/20">
-            <div className="flex gap-4">
-              <Avatar className="h-11 w-11 shrink-0 rounded-xl">
-                <AvatarImage src={item.repositoryAvatar} alt={item.repositoryFullName} />
-                <AvatarFallback className="rounded-xl bg-secondary text-sm font-semibold">
-                  {item.repositoryFullName.slice(0, 1).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold text-foreground">{item.repositoryFullName}</span>
-                  <span className="text-sm text-muted-foreground">{item.author}</span>
-                  <Badge variant="outline" className="rounded-full text-[11px]">
-                    {item.type === 'pull_request' ? 'PR' : item.type === 'issue' ? 'Issue' : item.type === 'release' ? 'Release' : item.type === 'security' ? 'Security' : 'Push'}
-                  </Badge>
-                  {item.canAddToMonitoring ? (
-                    <Badge variant="secondary" className="rounded-full text-[11px]">可监控</Badge>
-                  ) : null}
-                </div>
-                <h3 className="mt-2 text-sm font-medium text-foreground">{item.title}</h3>
-                <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{item.summary}</p>
-                {item.aiInsight ? (
-                  <div className="mt-3 rounded-xl border border-border bg-background p-3">
-                    <p className="text-xs text-muted-foreground">AI 洞察</p>
-                    <p className="mt-1 line-clamp-2 text-sm text-foreground">{item.aiInsight}</p>
-                  </div>
-                ) : null}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1.5"
-                    onClick={() => toast.info(`AI 正在分析 ${item.repositoryFullName} 的事件...`)}
+    <>
+      <ScrollArea className="h-full">
+        <div className="mx-auto grid max-w-7xl gap-5 p-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <section className="min-w-0 space-y-4">
+            <div className="sticky top-0 z-10 rounded-xl border border-border bg-background/95 p-3 backdrop-blur">
+              <div className="flex flex-wrap gap-1.5 rounded-lg border border-border bg-card/80 p-1" aria-label="关注动态筛选">
+                {watchFeedEventTypes.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={activeType === key}
+                    className={cn(
+                      'rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground',
+                      activeType === key && 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground',
+                    )}
+                    onClick={() => onTypeChange(key)}
                   >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    AI 分析
-                  </Button>
-                  {item.canAddToMonitoring ? (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="gap-1.5"
-                      onClick={() => onAddToMonitoring(item)}
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      加入监控
-                    </Button>
-                  ) : null}
-                  {item.externalUrl ? (
-                    <Button size="sm" variant="ghost" className="gap-1.5" asChild>
-                      <a href={item.externalUrl} target="_blank" rel="noreferrer">
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        GitHub
-                      </a>
-                    </Button>
-                  ) : null}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="gap-1.5 text-muted-foreground"
-                    onClick={() => onIgnore(item)}
-                  >
-                    <EyeOff className="h-3.5 w-3.5" />
-                    忽略
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="gap-1.5 text-muted-foreground"
-                    onClick={() => toast.success('已收藏')}
-                  >
-                    <Star className="h-3.5 w-3.5" />
-                    收藏
-                  </Button>
-                </div>
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
-          </article>
-        ))}
-      </div>
-    </ScrollArea>
+
+            <div className="relative">
+              {/* Pull-down Weibo-style Loading Spinner */}
+              <div className={cn(
+                "absolute left-1/2 -translate-x-1/2 z-0 refresh-transition",
+                isRefreshing 
+                  ? "top-4 opacity-100 scale-100 pointer-events-auto" 
+                  : "-top-12 opacity-0 scale-50 pointer-events-none"
+              )}>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card shadow-lg ring-1 ring-black/5 dark:ring-white/10">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                </div>
+              </div>
+
+              {/* Feed Card List with translation transition */}
+              <div className={cn(
+                "refresh-transition",
+                isRefreshing ? "translate-y-16" : "translate-y-0"
+              )}>
+                {loading ? (
+                  <div className="space-y-3">
+                    {[0, 1, 2].map((item) => (
+                      <div key={item} className="rounded-xl border border-border bg-card/70 p-5">
+                        <div className="flex animate-pulse gap-4">
+                          <div className="h-12 w-12 rounded-xl bg-secondary" />
+                          <div className="min-w-0 flex-1 space-y-3">
+                            <div className="h-3 w-1/3 rounded bg-secondary" />
+                            <div className="h-5 w-2/3 rounded bg-secondary" />
+                            <div className="h-3 w-full rounded bg-secondary" />
+                            <div className="h-3 w-4/5 rounded bg-secondary" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : items.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border bg-card/60 px-6 py-14 text-center">
+                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-background">
+                      <Star className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <p className="mt-4 text-base font-semibold text-foreground">暂无关注动态</p>
+                    <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+                      添加关注源或同步 GitHub 后，会展示可加入监控的仓库事件。
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {items.map((item) => (
+                      <WatchFeedCard
+                        key={item.id}
+                        item={item}
+                        onOpenPreview={setPreviewItem}
+                        onAddToMonitoring={onAddToMonitoring}
+                        onIgnore={onIgnore}
+                        favoriteEventIds={favoriteEventIds}
+                        onToggleFavorite={onToggleFavorite}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          <WatchRepositoryPanel
+            repositories={watchRepositories}
+            loading={watchRepositoriesLoading}
+            onAddRepositoryToMonitoring={onAddWatchRepositoryToMonitoring}
+          />
+        </div>
+      </ScrollArea>
+
+      <WatchFeedPreviewDialog
+        item={previewItem}
+        onOpenChange={setPreviewItem}
+        onAddToMonitoring={onAddToMonitoring}
+        onIgnore={onIgnore}
+        favoriteEventIds={favoriteEventIds}
+        onToggleFavorite={onToggleFavorite}
+      />
+    </>
   );
 }
 
@@ -2676,9 +3582,51 @@ export function DesktopWorkbench() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isBranchMonitorOpen, setIsBranchMonitorOpen] = useState(false);
+  const [isContributorsOpen, setIsContributorsOpen] = useState(false);
   const [syncingRepoIds, setSyncingRepoIds] = useState<Set<string>>(() => new Set());
+  const [newlyMonitoredRepoIds, setNewlyMonitoredRepoIds] = useState<Set<string>>(() => new Set());
   const [watchFeedType, setWatchFeedType] = useState('');
   const [ignoredFeedIds, setIgnoredFeedIds] = useState<Set<string>>(() => new Set());
+  const [feedSearchKeyword, setFeedSearchKeyword] = useState('');
+  const [feedFilters, setFeedFilters] = useState({
+    showOnlyDefaultBranch: false,
+    hideBranchDelete: false,
+    showPRAndIssueOnly: false,
+  });
+  const [favoriteEventIds, setFavoriteEventIds] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem('repo-pulse:favorite-events');
+      return stored ? new Set(JSON.parse(stored) as string[]) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  const handleToggleFavoriteEvent = (eventId: string) => {
+    setFavoriteEventIds((current) => {
+      const next = new Set(current);
+      if (next.has(eventId)) {
+        next.delete(eventId);
+      } else {
+        next.add(eventId);
+      }
+      localStorage.setItem('repo-pulse:favorite-events', JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  const [isAddRepositoryOpen, setIsAddRepositoryOpen] = useState(false);
+  const [watchRepositorySearch, setWatchRepositorySearch] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const autoReadRequestRef = useRef<Record<string, string>>({});
+  const autoReadSessionRef = useRef<{ repositoryId?: string; initialized: boolean }>({
+    initialized: false,
+  });
+  const unreadBoundaries = useWorkbenchUnreadStore((state) => state.boundaries);
+  const setOptimisticRead = useWorkbenchUnreadStore((state) => state.setOptimisticRead);
+  const clearOptimisticRead = useWorkbenchUnreadStore((state) => state.clearOptimisticRead);
+  const clearUnreadBoundary = useWorkbenchUnreadStore((state) => state.clearBoundary);
+  const [addingWatchRepositoryKey, setAddingWatchRepositoryKey] = useState<string>();
 
   // Pinned repositories (persisted in localStorage)
   const [pinnedRepoIds, setPinnedRepoIds] = useState<Set<string>>(() => {
@@ -2711,8 +3659,13 @@ export function DesktopWorkbench() {
   };
 
   const handleMarkRepoRead = async (repo: Repository) => {
+    const chatItem = [...editableRepos, ...monitoredRepos].find((item) => item.repository.id === repo.id);
+    const readAt = chatItem?.latestMessageAt ?? new Date().toISOString();
+    setOptimisticRead(repo.id, readAt);
+    clearUnreadBoundary(repo.id);
+
     try {
-      await workbenchService.markConversationRead(repo.id);
+      await workbenchService.markConversationRead(repo.id, { upToMessageAt: readAt });
       // 刷新仓库列表和当前会话，获取最新的 lastReadAt 和未读数
       await Promise.all([
         chatReposQuery.refetch(),
@@ -2721,6 +3674,7 @@ export function DesktopWorkbench() {
       toast.success(`${repo.fullName} 已标记为已读`);
     } catch (error) {
       console.error(error);
+      clearOptimisticRead(repo.id);
       toast.error('标记已读失败');
     }
   };
@@ -2737,11 +3691,7 @@ export function DesktopWorkbench() {
   const repositories = useMemo(() => repositoriesQuery.data ?? [], [repositoriesQuery.data]);
 
   // Workbench chat repositories (grouped by editable / monitored-readonly)
-  const chatReposQuery = useApiQuery({
-    queryKey: ['workbench', 'chat-repositories'],
-    queryFn: () => workbenchService.getChatRepositories(),
-    staleTime: 30 * 1000,
-  });
+  const chatReposQuery = useChatRepositoriesQuery();
   const editableRepos = useMemo(
     () => chatReposQuery.data?.editableRepositories ?? [],
     [chatReposQuery.data],
@@ -2751,15 +3701,102 @@ export function DesktopWorkbench() {
     [chatReposQuery.data],
   );
 
+  // GitHub repository search queries inside DesktopWorkbench
+  const searchCandidatesQuery = useSearchRepositoryCandidatesQuery(
+    watchRepositorySearch,
+    watchRepositorySearch.trim().length > 1
+  );
+  const searchResults = searchCandidatesQuery.data ?? [];
+  const searchLoading = searchCandidatesQuery.isLoading || searchCandidatesQuery.isFetching;
+
   // Watch Feed query
-  const watchFeedQuery = useApiQuery({
-    queryKey: ['workbench', 'watch-feed', watchFeedType],
-    queryFn: () => workbenchService.getWatchFeed({ type: watchFeedType || undefined }),
+  const queryType = watchFeedType === 'favorite' ? '' : watchFeedType;
+  const watchFeedQuery = useWatchFeedQuery(queryType);
+
+  const watchFeedItems = useMemo(() => {
+    let items = watchFeedQuery.data?.items ?? [];
+
+    // Filter ignored items
+    items = items.filter((item) => !ignoredFeedIds.has(item.id));
+
+    // Filter by favorites if the active tab is 'favorite'
+    if (watchFeedType === 'favorite') {
+      items = items.filter((item) => favoriteEventIds.has(item.id));
+    }
+
+    // Filter by noise reduction checkboxes
+    items = items.filter((item) => {
+      if (feedFilters.showPRAndIssueOnly && item.type !== 'pull_request' && item.type !== 'issue') {
+        return false;
+      }
+      if (feedFilters.hideBranchDelete && item.type === 'push' && (
+        item.title.toLowerCase().includes('delete branch') ||
+        item.title.toLowerCase().includes('deleted branch') ||
+        item.title.toLowerCase().includes('delete')
+      )) {
+        return false;
+      }
+      if (feedFilters.showOnlyDefaultBranch) {
+        if (item.type === 'push') {
+          const titleLower = item.title.toLowerCase();
+          const isPushToDefault = titleLower.includes('main') || titleLower.includes('master');
+          if (titleLower.includes('push') && !isPushToDefault) {
+            return false;
+          }
+        }
+      }
+      return true;
+    });
+
+    // Filter by search keyword
+    if (feedSearchKeyword.trim()) {
+      const keyword = feedSearchKeyword.toLowerCase();
+      items = items.filter(
+        (item) =>
+          item.title.toLowerCase().includes(keyword) ||
+          item.summary.toLowerCase().includes(keyword) ||
+          item.author.toLowerCase().includes(keyword) ||
+          item.repositoryFullName.toLowerCase().includes(keyword)
+      );
+    }
+
+    return items;
+  }, [watchFeedQuery.data, watchFeedType, ignoredFeedIds, favoriteEventIds, feedFilters, feedSearchKeyword]);
+
+  const handleRefreshFeed = async () => {
+    setIsRefreshing(true);
+    try {
+      await watchFeedQuery.refetch();
+      toast.success('关注动态已刷新');
+    } catch (error) {
+      console.error(error);
+      toast.error('刷新失败');
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 800);
+    }
+  };
+
+  const handleIgnoreAllVisibleFeedItems = () => {
+    if (watchFeedItems.length === 0) {
+      toast.info('当前没有可忽略的动态');
+      return;
+    }
+    setIgnoredFeedIds((current) => {
+      const next = new Set(current);
+      watchFeedItems.forEach((item) => next.add(item.id));
+      return next;
+    });
+    toast.success(`已忽略 ${watchFeedItems.length} 条动态`);
+  };
+
+  const watchRepositoriesQuery = useApiQuery({
+    queryKey: ['workbench', 'watch-repositories'],
+    queryFn: () => workbenchService.getWatchRepositories(),
     staleTime: 30 * 1000,
   });
-  const watchFeedItems = useMemo(
-    () => (watchFeedQuery.data?.items ?? []).filter((item) => !ignoredFeedIds.has(item.id)),
-    [watchFeedQuery.data, ignoredFeedIds],
+  const watchRepositories = useMemo(
+    () => watchRepositoriesQuery.data ?? [],
+    [watchRepositoriesQuery.data],
   );
 
   const handleAddToMonitoring = async (item: WatchFeedItem) => {
@@ -2781,6 +3818,73 @@ export function DesktopWorkbench() {
     }
   };
 
+  const handleAddWatchRepositoryToMonitoring = async (repository: WatchRepositoryItem) => {
+    try {
+      const nextRepositoryIds = Array.from(new Set([...monitoredRepositoryIds, repository.id]));
+      await persistMonitoringScope({
+        repositoryIds: nextRepositoryIds,
+        branchNames: [],
+        repositoryBranchScopes: monitoringScope.repositoryBranchScopes ?? {},
+      });
+      setNewlyMonitoredRepoIds((current) => {
+        const next = new Set(current);
+        next.add(repository.id);
+        return next;
+      });
+      toast.success(`${repository.fullName} 已加入监控`);
+      await Promise.all([
+        chatReposQuery.refetch(),
+        watchFeedQuery.refetch(),
+        watchRepositoriesQuery.refetch(),
+      ]);
+    } catch (error) {
+      console.error(error);
+      toast.error('加入监控失败');
+    }
+  };
+
+  const handleAddWatchRepository = async (candidate: SearchResult) => {
+    const [owner, repo] = candidate.fullName.split('/');
+    if (!owner || !repo) {
+      toast.error('仓库名称格式无效');
+      return;
+    }
+
+    const key = getSearchResultKey(candidate);
+    setAddingWatchRepositoryKey(key);
+    try {
+      const addedRepo = await workbenchService.addWatchRepository({
+        platform: candidate.platform,
+        owner,
+        repo,
+      });
+      toast.success(`${candidate.fullName} 已加入关注源`);
+
+      // Trigger repository sync in the background so events/messages sync immediately
+      if (addedRepo && addedRepo.id) {
+        repositoryService.sync(addedRepo.id)
+          .then(() => {
+            watchFeedQuery.refetch();
+            watchRepositoriesQuery.refetch();
+          })
+          .catch((err) => console.error('Auto-sync failed:', err));
+      }
+
+      await Promise.all([
+        watchRepositoriesQuery.refetch(),
+        watchFeedQuery.refetch(),
+        repositoriesQuery.refetch(),
+        chatReposQuery.refetch(),
+      ]);
+      await queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
+    } catch (error) {
+      console.error(error);
+      toast.error('添加关注仓库失败');
+    } finally {
+      setAddingWatchRepositoryKey(undefined);
+    }
+  };
+
   const handleIgnoreFeedItem = (item: WatchFeedItem) => {
     setIgnoredFeedIds((current) => {
       const next = new Set(current);
@@ -2791,7 +3895,7 @@ export function DesktopWorkbench() {
   };
 
   const repositoryIds = useMemo(() => repositories.map((repository) => repository.id), [repositories]);
-  const selectedRepository = repositories.find((repository) => repository.id === params.repositoryId) ?? repositories[0];
+  const selectedRepository = repositories.find((repository) => repository.id === (params.repositoryId || searchParams.get('repositoryId'))) ?? repositories[0];
   const agentRepository = repositories.find((repository) => repository.id === searchParams.get('repo')) ?? selectedRepository;
 
   // Determine if currently selected repository is editable
@@ -2830,12 +3934,7 @@ export function DesktopWorkbench() {
   });
 
   // 当前选中仓库的 Workbench 统一会话消息（替代前端自行拼接 events + approvals + notifications）
-  const conversationMessagesQuery = useApiQuery({
-    queryKey: ['workbench', 'conversation-messages', selectedRepository?.id ?? ''],
-    queryFn: () => workbenchService.getConversationMessages(selectedRepository!.id),
-    enabled: Boolean(selectedRepository?.id),
-    staleTime: 15 * 1000,
-  });
+  const conversationMessagesQuery = useConversationMessagesQuery(selectedRepository?.id);
 
   const conversationState = conversationMessagesQuery.data?.conversation ?? null;
 
@@ -2868,7 +3967,25 @@ export function DesktopWorkbench() {
             : params.view === 'settings'
               ? 'settings'
               : 'inbox';
-  const shouldShowRepositorySidebar = activeView === 'inbox' || activeView === 'repository';
+  const shouldShowRepositorySidebar =
+    activeView === 'inbox' ||
+    activeView === 'repository' ||
+    activeView === 'dashboard' ||
+    activeView === 'reports';
+
+  useEffect(() => {
+    if (activeView !== 'repository' || !selectedRepository?.id) {
+      autoReadSessionRef.current = { initialized: false };
+      return;
+    }
+
+    if (autoReadSessionRef.current.repositoryId !== selectedRepository.id) {
+      autoReadSessionRef.current = {
+        repositoryId: selectedRepository.id,
+        initialized: false,
+      };
+    }
+  }, [activeView, selectedRepository?.id]);
 
   // 仓库会话消息：使用后端统一接口，替代前端自行拼接
   const selectedMessages = useMemo(() => {
@@ -2882,6 +3999,149 @@ export function DesktopWorkbench() {
     // 降级：使用前端拼接的消息
     return getRepoMessages(selectedRepository.id, allMessages);
   }, [conversationMessagesQuery.data, selectedRepository, allMessages]);
+
+  // 通过后端 API 接口查询该仓库的完整贡献者列表（集成后端缓存与鉴权支持）
+  const contributorsQuery = useApiQuery({
+    queryKey: ['repository', selectedRepository?.id, 'contributors'],
+    queryFn: () => repositoryService.getContributors(selectedRepository!.id),
+    enabled: Boolean(selectedRepository?.id && activeView === 'repository'),
+    staleTime: 5 * 60 * 1000, // 5分钟前端缓存
+  });
+
+  // 融合计算活跃贡献者列表：优先使用官方完整 API，若加载中或为空则降级为会话消息提取
+  const contributors = useMemo(() => {
+    // 1. 如果官方 API 数据加载成功且有数据，优先展示
+    if (contributorsQuery.data && contributorsQuery.data.length > 0) {
+      return contributorsQuery.data.map((c) => ({
+        username: c.username,
+        avatarUrl: c.avatarUrl || `https://github.com/${encodeURIComponent(c.username)}.png`,
+      }));
+    }
+
+    // 2. 降级：从当前已加载的会话消息中实时提取
+    if (!selectedMessages || selectedMessages.length === 0) return [];
+    const map = new Map<string, { username: string; avatarUrl?: string | null }>();
+    
+    selectedMessages.forEach((msg) => {
+      if (!msg.author) return;
+      const authorLower = msg.author.toLowerCase();
+      const isBot = ['system', 'agent', 'bot', 'ai analysis', 'feishu'].some((kw) =>
+        authorLower.includes(kw)
+      );
+      if (isBot) return;
+
+      if (!map.has(msg.author)) {
+        map.set(msg.author, {
+          username: msg.author,
+          avatarUrl: getAuthorAvatarUrl(msg),
+        });
+      } else {
+        const existing = map.get(msg.author)!;
+        if (!existing.avatarUrl) {
+          existing.avatarUrl = getAuthorAvatarUrl(msg);
+        }
+      }
+    });
+    
+    return Array.from(map.values());
+  }, [contributorsQuery.data, selectedMessages]);
+
+  const selectedUnreadBoundary = selectedRepository
+    ? unreadBoundaries[selectedRepository.id] ?? null
+    : null;
+
+  useEffect(() => {
+    if (activeView !== 'repository' || !selectedRepository?.id || !conversationMessagesQuery.data) {
+      return;
+    }
+
+    const repositoryId = selectedRepository.id;
+    if (autoReadSessionRef.current.repositoryId !== repositoryId) {
+      autoReadSessionRef.current = {
+        repositoryId,
+        initialized: false,
+      };
+    }
+
+    if (autoReadSessionRef.current.initialized) {
+      return;
+    }
+
+    autoReadSessionRef.current.initialized = true;
+
+    const { conversation, messages } = conversationMessagesQuery.data;
+    if (conversation.unreadCount <= 0) {
+      clearUnreadBoundary(repositoryId);
+      return;
+    }
+
+    const hasUnreadMessage = messages.some((message) => message.isUnread);
+    const readUpToMessageAt = getLatestWorkbenchMessageAt(messages);
+    if (!hasUnreadMessage || !readUpToMessageAt) {
+      return;
+    }
+
+    const optimisticReadAt =
+      useWorkbenchUnreadStore.getState().optimisticReadAtByRepository[repositoryId];
+    if (isMessageCoveredByRead(readUpToMessageAt, optimisticReadAt)) {
+      clearUnreadBoundary(repositoryId);
+      return;
+    }
+
+    const requestKey = `${repositoryId}:${readUpToMessageAt}`;
+    if (autoReadRequestRef.current[repositoryId] === requestKey) {
+      return;
+    }
+
+    autoReadRequestRef.current[repositoryId] = requestKey;
+    setOptimisticRead(repositoryId, readUpToMessageAt);
+    clearUnreadBoundary(repositoryId);
+
+    void workbenchService
+      .markConversationRead(repositoryId, { upToMessageAt: readUpToMessageAt })
+      .then(async () => {
+        await Promise.all([
+          chatReposQuery.refetch(),
+          conversationMessagesQuery.refetch(),
+        ]);
+      })
+      .catch((error) => {
+        console.error(error);
+        delete autoReadRequestRef.current[repositoryId];
+        autoReadSessionRef.current = {
+          repositoryId,
+          initialized: false,
+        };
+        clearOptimisticRead(repositoryId);
+        toast.error('自动标记已读失败');
+      });
+  }, [
+    activeView,
+    chatReposQuery,
+    clearUnreadBoundary,
+    clearOptimisticRead,
+    conversationMessagesQuery,
+    selectedRepository?.id,
+    setOptimisticRead,
+  ]);
+
+  useEffect(() => {
+    if (!selectedRepository?.id || !conversationMessagesQuery.data) {
+      return;
+    }
+
+    const boundary = useWorkbenchUnreadStore.getState().boundaries[selectedRepository.id];
+    if (!boundary) {
+      return;
+    }
+
+    const boundaryMessageExists = conversationMessagesQuery.data.messages.some(
+      (message) => message.id === boundary.messageId,
+    );
+    if (!boundaryMessageExists) {
+      clearUnreadBoundary(selectedRepository.id);
+    }
+  }, [clearUnreadBoundary, conversationMessagesQuery.data, selectedRepository?.id]);
 
   const unreadCount = unreadNotificationCountQuery.data?.count ?? allMessages.length;
   // 待审批计数：优先使用仓库列表聚合接口的数据
@@ -3106,9 +4366,14 @@ export function DesktopWorkbench() {
           <RepositorySidebar
             editableRepos={editableRepos}
             monitoredRepos={monitoredRepos}
-            selectedRepositoryId={activeView === 'repository' ? selectedRepository?.id : undefined}
+            selectedRepositoryId={
+              (activeView === 'repository' || ((activeView === 'dashboard' || activeView === 'reports') && searchParams.get('repositoryId')))
+                ? selectedRepository?.id
+                : undefined
+            }
             syncingRepoIds={syncingRepoIds}
             pinnedRepoIds={pinnedRepoIds}
+            newlyMonitoredRepoIds={newlyMonitoredRepoIds}
             collapsed={isRepositorySidebarCollapsed}
             onToggleCollapsed={() => setIsRepositorySidebarCollapsed((current) => !current)}
             onRemoveFromMonitoring={removeRepositoryFromMonitoring}
@@ -3130,12 +4395,22 @@ export function DesktopWorkbench() {
             onAgent={() => openAgent(undefined, selectedRepository)}
             onSearch={() => setIsSearchOpen(true)}
             onOpenBranchMonitor={() => setIsBranchMonitorOpen(true)}
+            feedSearchKeyword={feedSearchKeyword}
+            onFeedSearchKeywordChange={setFeedSearchKeyword}
+            feedFilters={feedFilters}
+            onFeedFiltersChange={setFeedFilters}
+            isRefreshing={isRefreshing}
+            onRefresh={handleRefreshFeed}
+            onMarkAllRead={handleIgnoreAllVisibleFeedItems}
+            onAddRepositoryClick={() => setIsAddRepositoryOpen(true)}
+            onOpenContributors={() => setIsContributorsOpen(true)}
           />
           <main className="min-h-0 flex-1 overflow-hidden">
             {activeView === 'repository' && selectedRepository ? (
               <RepositoryConversation
                 repository={selectedRepository}
                 messages={selectedMessages}
+                unreadBoundary={selectedUnreadBoundary}
                 repositoryCanOperate={selectedRepositoryCanOperate}
                 onOpenAgent={(prompt) => openAgent(prompt, selectedRepository)}
                 onApproveMessage={handleApproveMessage}
@@ -3158,8 +4433,14 @@ export function DesktopWorkbench() {
                 loading={watchFeedQuery.isLoading}
                 activeType={watchFeedType}
                 onTypeChange={setWatchFeedType}
+                watchRepositories={watchRepositories}
+                watchRepositoriesLoading={watchRepositoriesQuery.isLoading}
                 onAddToMonitoring={handleAddToMonitoring}
+                onAddWatchRepositoryToMonitoring={handleAddWatchRepositoryToMonitoring}
                 onIgnore={handleIgnoreFeedItem}
+                favoriteEventIds={favoriteEventIds}
+                onToggleFavorite={handleToggleFavoriteEvent}
+                isRefreshing={isRefreshing}
               />
             ) : null}
 
@@ -3182,7 +4463,7 @@ export function DesktopWorkbench() {
             {activeView === 'reports' ? (
               <ScrollArea className="h-full">
                 <div className="p-6">
-                  <Reports />
+                  <Reports scopedRepositoryId={searchParams.get('repositoryId') ?? undefined} />
                 </div>
               </ScrollArea>
             ) : null}
@@ -3223,6 +4504,144 @@ export function DesktopWorkbench() {
           onToggleBranch={handleToggleSelectedRepositoryBranch}
           onResetBranches={handleResetSelectedRepositoryBranches}
         />
+        <Dialog open={isAddRepositoryOpen} onOpenChange={setIsAddRepositoryOpen}>
+          <DialogContent className="max-w-md bg-card border-border text-foreground">
+            <DialogHeader>
+              <DialogTitle>添加关注仓库</DialogTitle>
+              <DialogDescription>
+                搜索尚未进入关注源的公开仓库，添加后会纳入关注动态。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="relative mt-4">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={watchRepositorySearch}
+                onChange={(event) => setWatchRepositorySearch(event.target.value)}
+                placeholder="搜索 owner/repo 或关键词"
+                className="h-9 rounded-lg border-border bg-background/70 pl-9 text-sm"
+              />
+            </div>
+
+            <div className="mt-4 max-h-[300px] overflow-y-auto space-y-2 pr-1.5 scrollbar-thin">
+              {searchLoading ? (
+                <div className="flex items-center justify-center py-6">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : watchRepositorySearch.trim().length > 1 && searchResults.length > 0 ? (
+                searchResults.slice(0, 5).map((candidate) => {
+                  const key = getSearchResultKey(candidate);
+                  const isAdding = addingWatchRepositoryKey === key;
+                  return (
+                    <div key={key} className="flex items-center gap-3 rounded-lg border border-border bg-background/45 p-3">
+                      <Avatar className="h-9 w-9 shrink-0 rounded-lg border border-border">
+                        <AvatarImage src={candidate.owner.avatarUrl} alt={candidate.owner.login} className="object-cover" />
+                        <AvatarFallback className="rounded-lg bg-secondary text-xs font-semibold">
+                          {candidate.owner.login.slice(0, 1).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-foreground" title={candidate.fullName}>
+                          {candidate.fullName}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-muted-foreground" title={getWatchDescription(candidate)}>
+                          {getWatchDescription(candidate)}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        className="gap-1.5"
+                        disabled={isAdding}
+                        onClick={async () => {
+                          await handleAddWatchRepository(candidate);
+                        }}
+                      >
+                        {isAdding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                        关注
+                      </Button>
+                    </div>
+                  );
+                })
+              ) : watchRepositorySearch.trim().length > 1 ? (
+                <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+                  没有可添加的匹配仓库。
+                </div>
+              ) : (
+                <div className="rounded-lg border border-border bg-background/35 px-4 py-4 text-xs leading-5 text-muted-foreground">
+                  输入至少 2 个字符开始搜索。
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={isContributorsOpen} onOpenChange={setIsContributorsOpen}>
+          <DialogContent className="max-w-md bg-card border-border text-foreground">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-lg">
+                <Users className="h-5 w-5 text-primary" />
+                项目贡献者
+              </DialogTitle>
+              <DialogDescription>
+                以下是当前监控会话中活跃的项目贡献者（点击头像跳转 GitHub 主页）。
+              </DialogDescription>
+            </DialogHeader>
+
+            <ScrollArea className="mt-4 max-h-[320px] pr-3">
+              {contributors.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+                  暂无活跃贡献者事件记录。
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-3 py-2 justify-center sm:justify-start">
+                  {contributors.map((contrib) => {
+                    const profileUrl = selectedRepository?.platform === 'GITLAB'
+                      ? `https://gitlab.com/${contrib.username}`
+                      : `https://github.com/${contrib.username}`;
+                    
+                    return (
+                      <Tooltip key={contrib.username}>
+                        <TooltipTrigger asChild>
+                          <a
+                            href={profileUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="group relative transition-all duration-200 hover:scale-110 active:scale-95"
+                          >
+                            <Avatar className="h-12 w-12 rounded-full border-2 border-border group-hover:border-primary transition-colors shadow-sm">
+                              <AvatarImage 
+                                src={contrib.avatarUrl ?? undefined} 
+                                alt={contrib.username} 
+                                className="object-cover" 
+                              />
+                              <AvatarFallback className="rounded-full bg-secondary text-sm font-semibold uppercase text-muted-foreground">
+                                {contrib.username.slice(0, 2)}
+                              </AvatarFallback>
+                            </Avatar>
+                          </a>
+                        </TooltipTrigger>
+                        <TooltipContent className="bg-popover text-foreground border border-border px-2 py-1 text-xs">
+                          {contrib.username}
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  })}
+                </div>
+              )}
+            </ScrollArea>
+            
+            <DialogFooter className="mt-4 border-t border-border pt-4">
+              <Button 
+                type="button" 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setIsContributorsOpen(false)}
+              >
+                关闭
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </TooltipProvider>
   );

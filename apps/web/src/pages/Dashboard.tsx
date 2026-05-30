@@ -12,8 +12,6 @@ import {
   Activity,
   Shield,
   Zap,
-  ArrowUpRight,
-  ArrowDownRight,
   MoreHorizontal,
   RefreshCcw,
   ChevronsUpDown,
@@ -52,13 +50,19 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  BarChart,
-  Bar,
   PieChart,
   Pie,
   Cell,
 } from 'recharts';
 import gsap from 'gsap';
+import {
+  ContributorCapabilityRadar,
+  HourlyActivityRadialChart,
+  type ContributorRadarDatum,
+  type HourlyRadarDatum,
+  type RadarAxisKey,
+} from '@/components/dashboard/RadarInsightsCharts';
+import { ProjectRiverRepositoryDashboard } from '@/components/dashboard/ProjectRiverRepositoryDashboard';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useMonitoringScopePreferences } from '@/hooks/use-monitoring-scope-preferences';
 import { EventContextChips } from '@/components/shared/EventContextChips';
@@ -69,10 +73,11 @@ import {
   usePendingApprovalsCountQuery,
   useUnreadNotificationsCountQuery,
 } from '@/hooks/queries/use-dashboard-queries';
+import { useApiQuery } from '@/lib/query-hooks';
 import { eventService } from '@/services/event.service';
 import { useRepositoryBranchesQuery } from '@/hooks/queries/use-repository-queries';
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
-import { useDashboardActivity } from '@/hooks/use-dashboard';
+import { useDashboardActivity, useProjectRiverDashboard } from '@/hooks/use-dashboard';
 import { normalizeBranchOption } from '@/services/repository.service';
 import type { Event, Repository, RepositoryBranchScopeMap, RepositoryBranchScopeOption } from '@/types/api';
 
@@ -104,6 +109,40 @@ function getRiskByType(type: string): 'low' | 'medium' | 'high' {
   }
 
   return 'low';
+}
+
+const BOT_AUTHOR_KEYWORDS = ['system', 'agent', 'bot', 'ai analysis', 'feishu'];
+const RADAR_AXIS_KEYS: RadarAxisKey[] = [
+  'commits',
+  'prs',
+  'issues',
+  'releases',
+  'engagement',
+  'activeDays',
+];
+
+function isAutomationAuthor(author?: string | null) {
+  if (!author) {
+    return true;
+  }
+
+  const normalizedAuthor = author.toLowerCase();
+  return BOT_AUTHOR_KEYWORDS.some((keyword) => normalizedAuthor.includes(keyword));
+}
+
+function getEventDate(event: Event) {
+  const value = event.occurredAt ?? event.createdAt;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getEventClassifier(event: Event) {
+  return `${event.type} ${event.action}`.toLowerCase();
+}
+
+function isCommitEvent(event: Event) {
+  const classifier = getEventClassifier(event);
+  return classifier.includes('push') || classifier.includes('commit');
 }
 
 function areStringArraysEqual(left: string[], right: string[]) {
@@ -445,6 +484,243 @@ export function Dashboard({
     dashboardRepositoryBranchScopes,
   );
 
+  const eventsForStatsPageSize = isScopedRepositoryDashboard ? 500 : 150;
+
+  // scoped 仓库看板需要更长的历史窗口来复刻 project-river 的流图阅读体验
+  const eventsForStatsQuery = useApiQuery({
+    queryKey: ['dashboard', 'events-for-stats', dashboardRepositoryIds, dashboardRepositoryBranchScopes, eventsForStatsPageSize],
+    queryFn: () =>
+      eventService.getAll(dashboardRepositoryIds, dashboardRepositoryBranchScopes, {
+        page: 1,
+        pageSize: eventsForStatsPageSize,
+      }),
+    enabled: Boolean(dashboardRepositoryIds && dashboardRepositoryIds.length > 0 && !isScopedRepositoryDashboard),
+    staleTime: 60 * 1000,
+  });
+  const projectRiverDashboardQuery = useProjectRiverDashboard(
+    scopedRepository?.id,
+    dashboardRepositoryBranchScopes,
+  );
+
+  // 1. 代码河流图 (Code River Streamgraph) 数据聚合与转换
+  const riverData = useMemo(() => {
+    const items = eventsForStatsQuery.data?.items ?? [];
+    if (items.length === 0) return { dataPoints: [], contributors: [] };
+
+    // 统计贡献者活跃并排除系统机器人
+    const dateAuthorMap = new Map<string, Map<string, number>>();
+    const authorCounts = new Map<string, number>();
+
+    items.forEach((event) => {
+      if (!event.occurredAt && !event.createdAt) return;
+      const dateObj = new Date(event.occurredAt ?? event.createdAt);
+      const dateKey = `${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+
+      const author = event.author || 'Unknown';
+      const isBot = ['system', 'agent', 'bot', 'ai analysis', 'feishu'].some((kw) =>
+        author.toLowerCase().includes(kw)
+      );
+      if (isBot) return;
+
+      authorCounts.set(author, (authorCounts.get(author) ?? 0) + 1);
+
+      if (!dateAuthorMap.has(dateKey)) {
+        dateAuthorMap.set(dateKey, new Map());
+      }
+      const authorMap = dateAuthorMap.get(dateKey)!;
+      authorMap.set(author, (authorMap.get(author) ?? 0) + 1);
+    });
+
+    const sortedAuthors = Array.from(authorCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map((entry) => entry[0]);
+
+    const topAuthors = sortedAuthors.slice(0, 5);
+    const otherAuthors = sortedAuthors.slice(5);
+
+    // 按日期升序排列
+    const sortedDates = Array.from(dateAuthorMap.keys()).sort();
+
+    const dataPoints = sortedDates.map((dateKey) => {
+      const authorMap = dateAuthorMap.get(dateKey)!;
+      const point: Record<string, number | string> = { date: dateKey };
+
+      topAuthors.forEach((author) => {
+        point[author] = authorMap.get(author) ?? 0;
+      });
+
+      if (otherAuthors.length > 0) {
+        let othersCount = 0;
+        otherAuthors.forEach((author) => {
+          othersCount += authorMap.get(author) ?? 0;
+        });
+        point['Others'] = othersCount;
+      }
+
+      return point;
+    });
+
+    return {
+      dataPoints,
+      contributors: [...topAuthors, ...(otherAuthors.length > 0 ? ['Others'] : [])]
+    };
+  }, [eventsForStatsQuery.data]);
+
+  // 2. D3 雷达洞察：贡献者能力 + 24 小时提交偏好
+  const radarAxisLabels = useMemo<Record<RadarAxisKey, string>>(() => ({
+    commits: t('dashboard.radar.axes.commits'),
+    prs: t('dashboard.radar.axes.prs'),
+    issues: t('dashboard.radar.axes.issues'),
+    releases: t('dashboard.radar.axes.releases'),
+    engagement: t('dashboard.radar.axes.engagement'),
+    activeDays: t('dashboard.radar.axes.activeDays'),
+  }), [t]);
+
+  const contributorRadarData = useMemo<ContributorRadarDatum[]>(() => {
+    const items = eventsForStatsQuery.data?.items ?? [];
+    const authorStats = new Map<string, {
+      commits: number;
+      prs: number;
+      issues: number;
+      releases: number;
+      engagement: number;
+      dates: Set<string>;
+    }>();
+
+    items.forEach((event) => {
+      const author = event.author;
+      if (isAutomationAuthor(author)) return;
+
+      if (!authorStats.has(author)) {
+        authorStats.set(author, {
+          commits: 0,
+          prs: 0,
+          issues: 0,
+          releases: 0,
+          engagement: 0,
+          dates: new Set(),
+        });
+      }
+
+      const stats = authorStats.get(author)!;
+      const classifier = getEventClassifier(event);
+
+      if (classifier.includes('push') || classifier.includes('commit')) {
+        stats.commits += 1;
+      } else if (classifier.includes('pull_request') || classifier.includes('pr')) {
+        stats.prs += 1;
+      } else if (classifier.includes('issue')) {
+        stats.issues += 1;
+      } else if (classifier.includes('release')) {
+        stats.releases += 1;
+      } else {
+        stats.engagement += 1;
+      }
+
+      const eventDate = getEventDate(event);
+      if (eventDate) {
+        const dateStr = eventDate.toDateString();
+        stats.dates.add(dateStr);
+      }
+    });
+
+    const maxByAxis = RADAR_AXIS_KEYS.reduce<Record<RadarAxisKey, number>>(
+      (acc, key) => ({ ...acc, [key]: 0 }),
+      {
+        commits: 0,
+        prs: 0,
+        issues: 0,
+        releases: 0,
+        engagement: 0,
+        activeDays: 0,
+      },
+    );
+
+    authorStats.forEach((stats) => {
+      maxByAxis.commits = Math.max(maxByAxis.commits, stats.commits);
+      maxByAxis.prs = Math.max(maxByAxis.prs, stats.prs);
+      maxByAxis.issues = Math.max(maxByAxis.issues, stats.issues);
+      maxByAxis.releases = Math.max(maxByAxis.releases, stats.releases);
+      maxByAxis.engagement = Math.max(maxByAxis.engagement, stats.engagement);
+      maxByAxis.activeDays = Math.max(maxByAxis.activeDays, stats.dates.size);
+    });
+
+    return Array.from(authorStats.entries())
+      .map(([author, stats]) => {
+        const rawValues: Record<RadarAxisKey, number> = {
+          commits: stats.commits,
+          prs: stats.prs,
+          issues: stats.issues,
+          releases: stats.releases,
+          engagement: stats.engagement,
+          activeDays: stats.dates.size,
+        };
+        const totalEvents =
+          stats.commits + stats.prs + stats.issues + stats.releases + stats.engagement;
+
+        return {
+          contributor: author,
+          totalEvents,
+          activeDays: stats.dates.size,
+          axes: RADAR_AXIS_KEYS.map((key) => ({
+            key,
+            label: radarAxisLabels[key],
+            rawValue: rawValues[key],
+            normalizedValue:
+              maxByAxis[key] > 0 ? Math.round((rawValues[key] / maxByAxis[key]) * 100) : 0,
+          })),
+        };
+      })
+      .filter((datum) => datum.totalEvents > 0 || datum.activeDays > 0)
+      .sort((left, right) =>
+        right.totalEvents - left.totalEvents ||
+        right.activeDays - left.activeDays ||
+        left.contributor.localeCompare(right.contributor),
+      );
+  }, [eventsForStatsQuery.data?.items, radarAxisLabels]);
+
+  const radarContributors = useMemo(() => {
+    return contributorRadarData.map((datum) => datum.contributor);
+  }, [contributorRadarData]);
+
+  const [selectedRadarContributor, setSelectedRadarContributor] = useState<string>('');
+
+  const activeContributor = useMemo(() => {
+    if (selectedRadarContributor && radarContributors.includes(selectedRadarContributor)) {
+      return selectedRadarContributor;
+    }
+    return radarContributors[0] ?? '';
+  }, [radarContributors, selectedRadarContributor]);
+
+  const hourlyRadarData = useMemo<HourlyRadarDatum[]>(() => {
+    const counts = Array.from({ length: 24 }, (_, hour) => ({
+      hour,
+      count: 0,
+    }));
+
+    const items = eventsForStatsQuery.data?.items ?? [];
+    items.forEach((event) => {
+      if (isAutomationAuthor(event.author) || !isCommitEvent(event)) {
+        return;
+      }
+
+      const eventDate = getEventDate(event);
+      if (!eventDate) {
+        return;
+      }
+
+      counts[eventDate.getHours()].count += 1;
+    });
+
+    const maxCount = Math.max(...counts.map((item) => item.count), 0);
+    return counts.map((item) => ({
+      hour: item.hour,
+      label: `${String(item.hour).padStart(2, '0')}:00`,
+      count: item.count,
+      normalizedValue: maxCount > 0 ? Math.round((item.count / maxCount) * 100) : 0,
+    }));
+  }, [eventsForStatsQuery.data?.items]);
+
   // 周活动数据 - 来自后端 /dashboard/activity
   const activityQuery = useDashboardActivity(
     7,
@@ -455,6 +731,26 @@ export function Dashboard({
     const data = activityQuery.data ?? [];
     return data.map(item => ({ name: item.date, commits: item.commits, prs: item.prs, issues: item.issues }));
   }, [activityQuery.data]);
+
+  // 3. 微型折线趋势线 (Sparklines) 数据计算
+  const sparklineData = useMemo(() => {
+    const defaultSparkline = [10, 12, 11, 15, 14, 18, 20].map(v => ({ value: v }));
+    if (!activityData || activityData.length === 0) {
+      return {
+        repos: defaultSparkline,
+        events: defaultSparkline,
+        approvals: defaultSparkline,
+        notifications: defaultSparkline
+      };
+    }
+
+    return {
+      repos: activityData.map(item => ({ value: 2 + Math.round(item.commits / 4) })), // 模拟仓库活跃占比
+      events: activityData.map(item => ({ value: item.commits })),
+      approvals: activityData.map(item => ({ value: item.prs })),
+      notifications: activityData.map(item => ({ value: item.issues })),
+    };
+  }, [activityData]);
 
   // 风险分布 - 从事件类型动态计算
   const riskDistribution = useMemo(() => {
@@ -486,9 +782,6 @@ export function Dashboard({
   const totalEvents = statsQuery.data?.total ?? 0;
   const pendingApprovals = pendingApprovalsQuery.data?.count ?? 0;
   const unreadNotifications = unreadNotificationsQuery.data?.count ?? 0;
-  const hasWeeklyActivity = activityData.some(
-    (item) => item.commits > 0 || item.prs > 0 || item.issues > 0,
-  );
   const weeklyActivityEmptyMessage = totalEvents > 0
     ? t('dashboard.activity.emptyWithHistory')
     : t('dashboard.activity.empty');
@@ -659,6 +952,20 @@ export function Dashboard({
       );
     }
   }, []);
+
+  if (isScopedRepositoryDashboard) {
+    return (
+      <ProjectRiverRepositoryDashboard
+        error={projectRiverDashboardQuery.error instanceof Error ? projectRiverDashboardQuery.error : null}
+        events={[]}
+        isLoading={projectRiverDashboardQuery.isLoading || repositoriesQuery.isLoading}
+        language={language}
+        riverData={projectRiverDashboardQuery.data}
+        repository={scopedRepository}
+        t={t}
+      />
+    );
+  }
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -861,19 +1168,46 @@ export function Dashboard({
           const Icon = stat.icon;
           return (
             <Card key={stat.title} className="card-github transition-all duration-300 hover:border-[var(--github-accent)]/30">
-              <CardContent className="p-5">
-                <div className="flex items-start justify-between">
+              <CardContent className="p-5 flex items-center justify-between gap-2">
+                <div className="flex-1 min-w-0">
                   <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${stat.bgColor}`}>
                     <Icon className={`h-5 w-5 ${stat.color}`} />
                   </div>
-                  <div className={`flex items-center gap-1 text-xs ${stat.trend === 'up' ? 'text-green-400' : 'text-red-400'}`}>
-                    {stat.trend === 'up' ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-                    {stat.change}
+                  <div className="mt-4">
+                    <p className="text-2xl font-bold text-white">{stat.value}</p>
+                    <p className="text-sm text-[var(--github-text-secondary)] truncate">{stat.title}</p>
                   </div>
                 </div>
-                <div className="mt-4">
-                  <p className="text-2xl font-bold text-white">{stat.value}</p>
-                  <p className="text-sm text-[var(--github-text-secondary)]">{stat.title}</p>
+
+                {/* Mini glowing sparkline on the right */}
+                <div className="h-12 w-24 shrink-0 overflow-hidden">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={
+                        stat.title.includes('仓库') || stat.title.includes('Repositories') ? sparklineData.repos :
+                        stat.title.includes('事件') || stat.title.includes('Events') ? sparklineData.events :
+                        stat.title.includes('审批') || stat.title.includes('Approvals') ? sparklineData.approvals :
+                        sparklineData.notifications
+                      }
+                      margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
+                    >
+                      <defs>
+                        <linearGradient id={`sparkline-${stat.title.replace(/\s+/g, '-')}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={stat.color.includes('green') ? '#238636' : stat.color.includes('blue') ? '#58a6ff' : stat.color.includes('red') ? '#f85149' : '#bc8cff'} stopOpacity={0.2} />
+                          <stop offset="95%" stopColor={stat.color.includes('green') ? '#238636' : stat.color.includes('blue') ? '#58a6ff' : stat.color.includes('red') ? '#f85149' : '#bc8cff'} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <Area
+                        type="monotone"
+                        dataKey="value"
+                        stroke={stat.color.includes('green') ? '#238636' : stat.color.includes('blue') ? '#58a6ff' : stat.color.includes('red') ? '#f85149' : '#bc8cff'}
+                        strokeWidth={1.5}
+                        fillOpacity={1}
+                        fill={`url(#sparkline-${stat.title.replace(/\s+/g, '-')})`}
+                        dot={false}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </div>
               </CardContent>
             </Card>
@@ -888,10 +1222,10 @@ export function Dashboard({
               <div>
                 <CardTitle className="flex items-center gap-2 text-base font-semibold text-white">
                   <Activity className="h-4 w-4 text-[var(--github-accent)]" />
-                  {t('dashboard.sections.weeklyActivity')}
+                  {language === 'zh' ? '项目代码河流图 (Code River)' : 'Project Code River'}
                 </CardTitle>
                 <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
-                  {t('dashboard.activity.window')}
+                  {language === 'zh' ? '从团队成员提交活跃趋势的交汇融合中，感知项目的生命力' : 'Read the pulse of the repository through the rhythm of its code flow'}
                 </p>
               </div>
               <Button variant="ghost" size="icon" className="h-8 w-8 text-[var(--github-text-secondary)]">
@@ -902,26 +1236,52 @@ export function Dashboard({
           <CardContent>
             <div className="relative h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={activityData}>
+                <AreaChart data={riverData.dataPoints} stackOffset="silhouette" margin={{ top: 10, right: 10, left: 10, bottom: 5 }}>
                   <defs>
-                    <linearGradient id="colorCommits" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#ff4d00" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#ff4d00" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="colorPrs" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#58a6ff" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#58a6ff" stopOpacity={0} />
-                    </linearGradient>
+                    {riverData.contributors.map((name, index) => {
+                      const colors = [
+                        ['#ff4d00', '#ff8c00'], // orange
+                        ['#38bdf8', '#0284c7'], // cyan
+                        ['#a855f7', '#7c3aed'], // purple
+                        ['#34d399', '#059669'], // emerald
+                        ['#fb7185', '#e11d48'], // rose
+                        ['#94a3b8', '#475569'], // slate/others
+                      ];
+                      const colorPair = colors[index % colors.length];
+                      return (
+                        <linearGradient key={name} id={`riverGradient-${name.replace(/\s+/g, '-')}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={colorPair[0]} stopOpacity={0.5} />
+                          <stop offset="95%" stopColor={colorPair[1]} stopOpacity={0.05} />
+                        </linearGradient>
+                      );
+                    })}
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#30363d" vertical={false} />
-                  <XAxis dataKey="name" stroke="#8b949e" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#8b949e" fontSize={12} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px', color: '#e6edf3' }} itemStyle={{ color: '#e6edf3' }} />
-                  <Area type="monotone" dataKey="commits" stroke="#ff4d00" strokeWidth={2} fillOpacity={1} fill="url(#colorCommits)" />
-                  <Area type="monotone" dataKey="prs" stroke="#58a6ff" strokeWidth={2} fillOpacity={1} fill="url(#colorPrs)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#30363d" vertical={false} opacity={0.3} />
+                  <XAxis dataKey="date" stroke="#8b949e" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis hide />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px', color: '#e6edf3' }}
+                    itemStyle={{ color: '#e6edf3' }}
+                  />
+                  {riverData.contributors.map((name, index) => {
+                    const strokeColors = ['#ff4d00', '#38bdf8', '#a855f7', '#34d399', '#fb7185', '#94a3b8'];
+                    const stroke = strokeColors[index % strokeColors.length];
+                    return (
+                      <Area
+                        key={name}
+                        type="monotone"
+                        dataKey={name}
+                        stackId="1"
+                        stroke={stroke}
+                        strokeWidth={1.5}
+                        fillOpacity={1}
+                        fill={`url(#riverGradient-${name.replace(/\s+/g, '-')})`}
+                      />
+                    );
+                  })}
                 </AreaChart>
               </ResponsiveContainer>
-              {!hasWeeklyActivity ? (
+              {riverData.dataPoints.length === 0 ? (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6">
                   <div className="max-w-md rounded-2xl border border-[var(--github-border)]/80 bg-[#161b22]/90 px-4 py-3 text-center shadow-xl backdrop-blur">
                     <p className="text-sm font-medium text-white">{t('dashboard.activity.emptyTitle')}</p>
@@ -932,6 +1292,21 @@ export function Dashboard({
                 </div>
               ) : null}
             </div>
+            {/* Contributor Legend */}
+            {riverData.contributors.length > 0 && (
+              <div className="mt-4 flex flex-wrap justify-center gap-3">
+                {riverData.contributors.map((name, index) => {
+                  const strokeColors = ['#ff4d00', '#38bdf8', '#a855f7', '#34d399', '#fb7185', '#94a3b8'];
+                  const color = strokeColors[index % strokeColors.length];
+                  return (
+                    <div key={name} className="flex items-center gap-1.5 text-xs text-[var(--github-text-secondary)]">
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+                      <span>{name}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -1142,38 +1517,60 @@ export function Dashboard({
         </Card>
           </div>
 
-          <Card className="card-github">
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base font-semibold text-white">
-            <Users className="h-4 w-4 text-[var(--github-accent)]" />
-            {t('dashboard.sections.teamContributions')}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="relative h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={activityData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#30363d" vertical={false} />
-                <XAxis dataKey="name" stroke="#8b949e" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="#8b949e" fontSize={12} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={{ backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px', color: '#e6edf3' }} itemStyle={{ color: '#e6edf3' }} />
-                <Bar dataKey="commits" fill="#ff4d00" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="issues" fill="#f85149" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-            {!hasWeeklyActivity ? (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6">
-                <div className="max-w-md rounded-2xl border border-[var(--github-border)]/80 bg-[#161b22]/90 px-4 py-3 text-center shadow-xl backdrop-blur">
-                  <p className="text-sm font-medium text-white">{t('dashboard.activity.emptyTitle')}</p>
-                  <p className="mt-1 text-xs leading-5 text-[var(--github-text-secondary)]">
-                    {weeklyActivityEmptyMessage}
-                  </p>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </CardContent>
-          </Card>
+          <section className="space-y-3">
+            <div>
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
+                <Users className="h-5 w-5 text-[var(--github-accent)]" />
+                {t('dashboard.radar.insightsTitle')}
+              </h2>
+              <p className="mt-1 text-sm text-[var(--github-text-secondary)]">
+                {t('dashboard.radar.insightsDescription')}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+              <Card className="card-github">
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base font-semibold text-white">
+                    <Users className="h-4 w-4 text-[var(--github-accent)]" />
+                    {t('dashboard.radar.contributorTitle')}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ContributorCapabilityRadar
+                    activeDaysLabel={t('dashboard.radar.activeDays')}
+                    contributorSelectLabel={t('dashboard.radar.contributorSelect')}
+                    data={contributorRadarData}
+                    emptyMessage={t('dashboard.radar.emptyContributors')}
+                    normalizedLabel={t('dashboard.radar.normalizedValue')}
+                    onContributorChange={setSelectedRadarContributor}
+                    rawValueLabel={t('dashboard.radar.rawValue')}
+                    selectedContributor={activeContributor}
+                    totalEventsLabel={t('dashboard.radar.totalEvents')}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card className="card-github">
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base font-semibold text-white">
+                    <Clock className="h-4 w-4 text-[var(--github-accent)]" />
+                    {t('dashboard.radar.hourlyTitle')}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <HourlyActivityRadialChart
+                    countLabel={t('dashboard.radar.count')}
+                    data={hourlyRadarData}
+                    emptyMessage={t('dashboard.radar.emptyHourly')}
+                    normalizedLabel={t('dashboard.radar.normalizedValue')}
+                    peakHourLabel={t('dashboard.radar.peakHour')}
+                    totalCommitsLabel={t('dashboard.radar.totalCommits')}
+                  />
+                </CardContent>
+              </Card>
+            </div>
+          </section>
 
           {(statsQuery.isError ||
             recentEventsQuery.isError ||

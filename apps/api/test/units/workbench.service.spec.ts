@@ -31,6 +31,8 @@ jest.mock('@repo-pulse/database', () => ({
     ISSUE_OPENED: 'ISSUE_OPENED',
     ISSUE_CLOSED: 'ISSUE_CLOSED',
   },
+  RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
+  Role: { ADMIN: 'ADMIN', MANAGER: 'MANAGER', MEMBER: 'MEMBER', VIEWER: 'VIEWER' },
   Platform: { GITHUB: 'GITHUB', GITLAB: 'GITLAB' },
   RepositoryAccessLevel: {
     OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN',
@@ -59,12 +61,39 @@ function makeDate(offsetMs = 0): Date {
   return new Date(1_000_000_000_000 + offsetMs);
 }
 
+function makeRepo(id: string, overrides = {}) {
+  return {
+    id,
+    name: `repo-${id}`,
+    fullName: `org/repo-${id}`,
+    url: `https://github.com/org/repo-${id}`,
+    defaultBranch: 'main',
+    platform: 'GITHUB',
+    externalId: `ext-${id}`,
+    webhookId: null,
+    webhookSecret: null,
+    isActive: true,
+    lastSyncAt: null,
+    createdAt: new Date('2025-01-01'),
+    updatedAt: new Date('2025-01-01'),
+    ...overrides,
+  };
+}
+
 describe('WorkbenchService — 私有辅助方法', () => {
   let svc: WorkbenchService;
+  let mockRepositoryService: any;
+  let mockSyncService: any;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    svc = new WorkbenchService();
+    mockRepositoryService = {
+      create: jest.fn(),
+    };
+    mockSyncService = {
+      syncUserRepositories: jest.fn(),
+    };
+    svc = new WorkbenchService(mockRepositoryService, mockSyncService);
   });
 
   // ── isUnreadMessage ───────────────────────────────────────────────────────
@@ -216,6 +245,79 @@ describe('WorkbenchService — 私有辅助方法', () => {
       expect(summary.unreadRiskLevel).toBe(RiskLevel.CRITICAL);
       (svc as any).incrementUnread(summary, RiskLevel.LOW);
       expect(summary.unreadRiskLevel).toBe(RiskLevel.CRITICAL);
+    });
+  });
+
+  describe('watch repositories', () => {
+    it('lists starred repository sources with monitoring status', async () => {
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r2']);
+      mockUserRepoFindMany.mockResolvedValue([
+        {
+          repository: {
+            ...makeRepo('r1'),
+            _count: { events: 4 },
+          },
+        },
+        {
+          repository: {
+            ...makeRepo('r2'),
+            _count: { events: 9 },
+          },
+        },
+      ]);
+
+      const result = await svc.getWatchRepositories('u1');
+
+      expect(mockUserRepoFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            userId: 'u1',
+            isStarred: true,
+            repository: { platform: 'GITHUB' },
+          }),
+        }),
+      );
+      expect(result).toEqual([
+        expect.objectContaining({
+          id: 'r1',
+          fullName: 'org/repo-r1',
+          eventCount: 4,
+          isMonitored: false,
+          canAddToMonitoring: true,
+        }),
+        expect.objectContaining({
+          id: 'r2',
+          fullName: 'org/repo-r2',
+          eventCount: 9,
+          isMonitored: true,
+          canAddToMonitoring: false,
+        }),
+      ]);
+    });
+
+    it('adds a searched repository as a read-only watch source', async () => {
+      mockRepositoryService.create.mockResolvedValue({
+        ...makeRepo('r3'),
+        _count: { events: 0 },
+      });
+
+      const dto = { platform: 'GITHUB' as const, owner: 'org', repo: 'repo-r3' };
+      const result = await svc.addWatchRepository('u1', dto);
+
+      expect(mockRepositoryService.create).toHaveBeenCalledWith('u1', dto, {
+        accessMode: 'MONITOR',
+        accessLevel: 'READ',
+        role: 'VIEWER',
+        isStarred: true,
+      });
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: 'r3',
+          fullName: 'org/repo-r3',
+          isMonitored: false,
+          canAddToMonitoring: true,
+        }),
+      );
     });
   });
 });

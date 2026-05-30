@@ -3,8 +3,11 @@ import {
   ApprovalStatus,
   EventType,
   Platform,
+  Repository,
   RepositoryAccessLevel,
+  RepositoryAccessMode,
   RiskLevel,
+  Role,
   prisma,
 } from '@repo-pulse/database';
 import {
@@ -13,7 +16,10 @@ import {
   getUserMonitoredRepositoryIds,
   isEditableRepositoryAccessLevel,
 } from '../../common/utils/repository-access';
+import { CreateRepositoryDto } from '../repository/dto/repository.dto';
+import { RepositoryService } from '../repository/repository.service';
 import { ReadConversationDto } from './dto/read-conversation.dto';
+import { SyncService } from '../sync/sync.service';
 
 type RepositoryAccessLevelApi =
   | 'owner'
@@ -65,6 +71,11 @@ interface ConversationStateSnapshot {
 
 @Injectable()
 export class WorkbenchService {
+  constructor(
+    private readonly repositoryService: RepositoryService,
+    private readonly syncService: SyncService,
+  ) {}
+
   async getChatRepositories(userId: string) {
     const [memberships, monitoredRepositoryIds] = await Promise.all([
       prisma.userRepository.findMany({
@@ -492,7 +503,7 @@ export class WorkbenchService {
       RepositoryAccessLevel.MAINTAIN,
       RepositoryAccessLevel.WRITE,
     ];
-    const memberships = await prisma.userRepository.findMany({
+    let memberships = await prisma.userRepository.findMany({
       where: {
         userId,
         isStarred: true,
@@ -504,6 +515,26 @@ export class WorkbenchService {
       },
       select: { repositoryId: true },
     });
+
+    if (memberships.length === 0) {
+      try {
+        await this.syncService.syncUserRepositories(userId);
+        memberships = await prisma.userRepository.findMany({
+          where: {
+            userId,
+            isStarred: true,
+            accessLevel: { notIn: editableAccessLevels },
+            repository: { platform: Platform.GITHUB },
+            ...(monitoredRepositoryIds.length > 0
+              ? { repositoryId: { notIn: monitoredRepositoryIds } }
+              : {}),
+          },
+          select: { repositoryId: true },
+        });
+      } catch (error) {
+        // sync failed, ignore and continue
+      }
+    }
 
     const candidateRepositoryIds = memberships.map((membership) => membership.repositoryId);
 
@@ -566,6 +597,78 @@ export class WorkbenchService {
     };
   }
 
+  async getWatchRepositories(userId: string) {
+    console.log(`[getWatchRepositories] START - userId=${userId}`);
+    const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
+    const monitoredSet = new Set(monitoredRepositoryIds);
+
+    let memberships = await prisma.userRepository.findMany({
+      where: {
+        userId,
+        isStarred: true,
+        repository: { platform: Platform.GITHUB },
+      },
+      include: {
+        repository: {
+          include: {
+            _count: {
+              select: { events: true },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    console.log(`[getWatchRepositories] DB QUERY - Found ${memberships.length} starred memberships for user ${userId}`);
+
+    if (memberships.length === 0) {
+      try {
+        console.log(`[getWatchRepositories] EMPTY - Triggering syncUserRepositories for user ${userId}`);
+        await this.syncService.syncUserRepositories(userId);
+        memberships = await prisma.userRepository.findMany({
+          where: {
+            userId,
+            isStarred: true,
+            repository: { platform: Platform.GITHUB },
+          },
+          include: {
+            repository: {
+              include: {
+                _count: {
+                  select: { events: true },
+                },
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+        console.log(`[getWatchRepositories] POST-SYNC - Found ${memberships.length} starred memberships for user ${userId}`);
+      } catch (error) {
+        console.error(`[getWatchRepositories] SYNC ERROR for user ${userId}:`, error);
+      }
+    }
+
+    const result = memberships.map(({ repository }) =>
+      this.toWatchRepositoryItem(repository, monitoredSet),
+    );
+    console.log(`[getWatchRepositories] END - Returning ${result.length} repositories for user ${userId}`);
+    return result;
+  }
+
+  async addWatchRepository(userId: string, dto: CreateRepositoryDto) {
+    const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
+    const monitoredSet = new Set(monitoredRepositoryIds);
+    const repository = await this.repositoryService.create(userId, dto, {
+      accessMode: RepositoryAccessMode.MONITOR,
+      accessLevel: RepositoryAccessLevel.READ,
+      role: Role.VIEWER,
+      isStarred: true,
+    });
+
+    return this.toWatchRepositoryItem(repository, monitoredSet);
+  }
+
   private async getConversationStateMap(
     userId: string,
     repositoryIds: string[],
@@ -595,6 +698,29 @@ export class WorkbenchService {
         },
       ]),
     );
+  }
+
+  private toWatchRepositoryItem(
+    repository: Pick<Repository, 'id' | 'name' | 'fullName' | 'platform' | 'externalId' | 'url' | 'defaultBranch' | 'isActive' | 'lastSyncAt'> & {
+      _count?: { events: number };
+    },
+    monitoredSet: Set<string>,
+  ) {
+    const isMonitored = monitoredSet.has(repository.id);
+    return {
+      id: repository.id,
+      name: repository.name,
+      fullName: repository.fullName,
+      platform: repository.platform,
+      externalId: repository.externalId,
+      url: repository.url,
+      defaultBranch: repository.defaultBranch,
+      isActive: repository.isActive,
+      lastSyncAt: repository.lastSyncAt?.toISOString() ?? null,
+      eventCount: repository._count?.events ?? 0,
+      isMonitored,
+      canAddToMonitoring: !isMonitored,
+    };
   }
 
   private toRepositoryView(

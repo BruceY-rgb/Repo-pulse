@@ -3,6 +3,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { WorkbenchService } from './workbench.service';
 import { ReadConversationDto } from './dto/read-conversation.dto';
+import { CreateRepositoryDto } from '../repository/dto/repository.dto';
 
 @Controller('workbench')
 @UseGuards(AuthGuard('jwt'))
@@ -38,11 +39,26 @@ export class WorkbenchController {
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
   ): Promise<any> {
+    console.log(`[WorkbenchController] GET watch-feed user=${JSON.stringify(user)} type=${type}`);
     return this.workbenchService.getWatchFeed(
       user.sub,
       type,
       cursor,
       limit ? parseInt(limit, 10) : undefined,
     );
+  }
+
+  @Get('watch-repositories')
+  async getWatchRepositories(@CurrentUser() user: { sub: string }): Promise<any> {
+    console.log(`[WorkbenchController] GET watch-repositories user=${JSON.stringify(user)}`);
+    return this.workbenchService.getWatchRepositories(user.sub);
+  }
+
+  @Post('watch-repositories')
+  async addWatchRepository(
+    @CurrentUser() user: { sub: string },
+    @Body() body: CreateRepositoryDto,
+  ): Promise<any> {
+    return this.workbenchService.addWatchRepository(user.sub, body);
   }
 }

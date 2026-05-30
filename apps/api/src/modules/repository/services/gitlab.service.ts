@@ -276,4 +276,20 @@ export class GitlabService {
       return null;
     }
   }
+
+  async getContributors(owner: string, repo: string): Promise<Array<{ username: string; avatarUrl: string | null }>> {
+    try {
+      const encodedPath = encodeURIComponent(`${owner}/${repo}`);
+      const response = await this.client.get<Array<{ name: string; avatar_url: string | null }>>(`/projects/${encodedPath}/repository/contributors`, {
+        params: { per_page: 100 },
+      });
+      return Array.isArray(response.data) ? response.data.map(item => ({
+        username: item.name,
+        avatarUrl: item.avatar_url,
+      })) : [];
+    } catch (error) {
+      this.logger.error(`Failed to fetch contributors for ${owner}/${repo}`, error);
+      return [];
+    }
+  }
 }
