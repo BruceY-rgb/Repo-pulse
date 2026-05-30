@@ -404,6 +404,29 @@ function getLatestWorkbenchMessageAt(messages: Array<Pick<WorkbenchConversationM
   }, null);
 }
 
+function getOldestUnreadWorkbenchMessage(messages: WorkbenchConversationMessage[]) {
+  return messages.reduce<WorkbenchConversationMessage | null>((oldest, message) => {
+    if (!message.isUnread) {
+      return oldest;
+    }
+
+    if (!oldest) {
+      return message;
+    }
+
+    const messageAt = getTimestamp(message.createdAt);
+    const oldestAt = getTimestamp(oldest.createdAt);
+    if (messageAt === null) {
+      return oldest;
+    }
+    if (oldestAt === null) {
+      return message;
+    }
+
+    return messageAt < oldestAt ? message : oldest;
+  }, null);
+}
+
 function getRepoInitial(repo: Pick<Repository, 'name' | 'fullName'>) {
   return (repo.name || repo.fullName || 'R').slice(0, 1).toUpperCase();
 }
@@ -2337,6 +2360,9 @@ function RepositoryConversation({
     hasUnreadBoundary &&
       filteredMessages.some((message) => message.id === unreadBoundary?.messageId),
   );
+  const shouldShowUnreadJump = Boolean(
+    hasUnreadBoundary && unreadBoundary && unreadBoundary.showJumpButton !== false,
+  );
 
   const handleJumpToUnread = () => {
     if (!hasUnreadBoundary) {
@@ -2359,7 +2385,7 @@ function RepositoryConversation({
     }
 
     unreadBoundaryRef.current?.scrollIntoView({
-      block: 'start',
+      block: 'end',
       behavior: 'smooth',
     });
     const frame = window.requestAnimationFrame(() => {
@@ -2400,7 +2426,7 @@ function RepositoryConversation({
               </Button>
             ))}
           </div>
-          {hasUnreadBoundary && unreadBoundary ? (
+          {shouldShowUnreadJump && unreadBoundary ? (
             <Button
               type="button"
               size="sm"
@@ -2422,18 +2448,6 @@ function RepositoryConversation({
 
               return (
                 <div key={message.id} className="contents">
-                  {shouldRenderUnreadBoundary ? (
-                    <div
-                      ref={unreadBoundaryRef}
-                      className="flex scroll-mt-6 items-center gap-3 py-1"
-                    >
-                      <div className="h-px flex-1 bg-primary/40" />
-                      <span className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary">
-                        未读消息
-                      </span>
-                      <div className="h-px flex-1 bg-primary/40" />
-                    </div>
-                  ) : null}
                   <ConversationBubble
                     message={message}
                     repository={repository}
@@ -2453,6 +2467,18 @@ function RepositoryConversation({
                       setContextMenu({ x: position.x, y: position.y, message: selectedMessage });
                     }}
                   />
+                  {shouldRenderUnreadBoundary ? (
+                    <div
+                      ref={unreadBoundaryRef}
+                      className="flex scroll-mb-6 items-center gap-3 py-1"
+                    >
+                      <div className="h-px flex-1 bg-primary/40" />
+                      <span className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary">
+                        未读消息
+                      </span>
+                      <div className="h-px flex-1 bg-primary/40" />
+                    </div>
+                  ) : null}
                 </div>
               );
             })
@@ -3664,9 +3690,9 @@ export function DesktopWorkbench() {
       return;
     }
 
-    const firstUnreadMessage = messages.find((message) => message.isUnread);
+    const oldestUnreadMessage = getOldestUnreadWorkbenchMessage(messages);
     const readUpToMessageAt = getLatestWorkbenchMessageAt(messages);
-    if (!firstUnreadMessage || !readUpToMessageAt) {
+    if (!oldestUnreadMessage || !readUpToMessageAt) {
       return;
     }
 
@@ -3684,10 +3710,11 @@ export function DesktopWorkbench() {
     autoReadRequestRef.current[repositoryId] = requestKey;
     setUnreadBoundary({
       repositoryId,
-      messageId: firstUnreadMessage.id,
+      messageId: oldestUnreadMessage.id,
       readUpToMessageAt,
       unreadCount: conversation.unreadCount,
       capturedAt: new Date().toISOString(),
+      showJumpButton: false,
     });
     setOptimisticRead(repositoryId, readUpToMessageAt);
 
