@@ -1905,7 +1905,7 @@ function WorkbenchHeader({
                 onClick={onRefresh}
                 disabled={isRefreshing}
               >
-                <RotateCcw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
+                <RotateCcw className={cn("h-4 w-4 transition-transform duration-200 active:scale-90", isRefreshing && "animate-refresh")} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>刷新动态</TooltipContent>
@@ -3332,6 +3332,7 @@ function WatchFeed({
   onIgnore,
   favoriteEventIds,
   onToggleFavorite,
+  isRefreshing,
 }: {
   items: WatchFeedItem[];
   loading?: boolean;
@@ -3344,6 +3345,7 @@ function WatchFeed({
   onIgnore: (item: WatchFeedItem) => void;
   favoriteEventIds: Set<string>;
   onToggleFavorite: (eventId: string) => void;
+  isRefreshing?: boolean;
 }) {
   const [previewItem, setPreviewItem] = useState<WatchFeedItem | null>(null);
 
@@ -3371,47 +3373,65 @@ function WatchFeed({
               </div>
             </div>
 
-            {loading ? (
-              <div className="space-y-3">
-                {[0, 1, 2].map((item) => (
-                  <div key={item} className="rounded-xl border border-border bg-card/70 p-5">
-                    <div className="flex animate-pulse gap-4">
-                      <div className="h-12 w-12 rounded-xl bg-secondary" />
-                      <div className="min-w-0 flex-1 space-y-3">
-                        <div className="h-3 w-1/3 rounded bg-secondary" />
-                        <div className="h-5 w-2/3 rounded bg-secondary" />
-                        <div className="h-3 w-full rounded bg-secondary" />
-                        <div className="h-3 w-4/5 rounded bg-secondary" />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : items.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border bg-card/60 px-6 py-14 text-center">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-background">
-                  <Star className="h-5 w-5 text-muted-foreground" />
+            <div className="relative">
+              {/* Pull-down Weibo-style Loading Spinner */}
+              <div className={cn(
+                "flex items-center justify-center transition-all duration-300 ease-in-out overflow-hidden",
+                isRefreshing ? "h-14 opacity-100" : "h-0 opacity-0"
+              )}>
+                <div className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
                 </div>
-                <p className="mt-4 text-base font-semibold text-foreground">暂无关注动态</p>
-                <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-                  添加关注源或同步 GitHub 后，会展示可加入监控的仓库事件。
-                </p>
               </div>
-            ) : (
-              <div className="space-y-3">
-                {items.map((item) => (
-                  <WatchFeedCard
-                    key={item.id}
-                    item={item}
-                    onOpenPreview={setPreviewItem}
-                    onAddToMonitoring={onAddToMonitoring}
-                    onIgnore={onIgnore}
-                    favoriteEventIds={favoriteEventIds}
-                    onToggleFavorite={onToggleFavorite}
-                  />
-                ))}
+
+              {/* Feed Card List with translation transition */}
+              <div className={cn(
+                "transition-all duration-300 ease-in-out",
+                isRefreshing ? "translate-y-2" : "translate-y-0"
+              )}>
+                {loading ? (
+                  <div className="space-y-3">
+                    {[0, 1, 2].map((item) => (
+                      <div key={item} className="rounded-xl border border-border bg-card/70 p-5">
+                        <div className="flex animate-pulse gap-4">
+                          <div className="h-12 w-12 rounded-xl bg-secondary" />
+                          <div className="min-w-0 flex-1 space-y-3">
+                            <div className="h-3 w-1/3 rounded bg-secondary" />
+                            <div className="h-5 w-2/3 rounded bg-secondary" />
+                            <div className="h-3 w-full rounded bg-secondary" />
+                            <div className="h-3 w-4/5 rounded bg-secondary" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : items.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border bg-card/60 px-6 py-14 text-center">
+                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-background">
+                      <Star className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <p className="mt-4 text-base font-semibold text-foreground">暂无关注动态</p>
+                    <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+                      添加关注源或同步 GitHub 后，会展示可加入监控的仓库事件。
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {items.map((item) => (
+                      <WatchFeedCard
+                        key={item.id}
+                        item={item}
+                        onOpenPreview={setPreviewItem}
+                        onAddToMonitoring={onAddToMonitoring}
+                        onIgnore={onIgnore}
+                        favoriteEventIds={favoriteEventIds}
+                        onToggleFavorite={onToggleFavorite}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </section>
 
           <WatchRepositoryPanel
@@ -3715,7 +3735,7 @@ export function DesktopWorkbench() {
       console.error(error);
       toast.error('刷新失败');
     } finally {
-      setTimeout(() => setIsRefreshing(false), 600);
+      setTimeout(() => setIsRefreshing(false), 800);
     }
   };
 
@@ -4335,6 +4355,7 @@ export function DesktopWorkbench() {
                 onIgnore={handleIgnoreFeedItem}
                 favoriteEventIds={favoriteEventIds}
                 onToggleFavorite={handleToggleFavoriteEvent}
+                isRefreshing={isRefreshing}
               />
             ) : null}
 
