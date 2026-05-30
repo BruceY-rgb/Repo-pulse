@@ -39,6 +39,7 @@ export class WorkbenchController {
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
   ): Promise<any> {
+    console.log(`[WorkbenchController] GET watch-feed user=${JSON.stringify(user)} type=${type}`);
     return this.workbenchService.getWatchFeed(
       user.sub,
       type,
@@ -49,6 +50,7 @@ export class WorkbenchController {
 
   @Get('watch-repositories')
   async getWatchRepositories(@CurrentUser() user: { sub: string }): Promise<any> {
+    console.log(`[WorkbenchController] GET watch-repositories user=${JSON.stringify(user)}`);
     return this.workbenchService.getWatchRepositories(user.sub);
   }
 

@@ -2,20 +2,10 @@ import { create } from 'zustand';
 
 export interface WorkbenchUnreadBoundary {
   repositoryId: string;
-  /**
-   * Anchor to the oldest unread message in a newest-first conversation.
-   * This keeps "jump to unread" moving downward to the first item the user
-   * should catch up from, instead of stopping at the newest unread message.
-   */
   messageId: string;
   readUpToMessageAt: string;
   unreadCount: number;
   capturedAt: string;
-  /**
-   * The divider can stay in the current conversation after auto-read, while
-   * the quick-jump pill follows the sidebar unread badge and disappears.
-   */
-  showJumpButton?: boolean;
 }
 
 interface WorkbenchUnreadState {

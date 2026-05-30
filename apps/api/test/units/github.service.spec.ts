@@ -258,7 +258,7 @@ describe('GithubService', () => {
       const repos = [{ id: 1, name: 'my-repo' }];
       mockClient.get.mockResolvedValue({ data: repos });
       const result = await service.getUserRepositories('user-token');
-      expect(result).toBe(repos);
+      expect(result).toEqual(repos);
     });
 
     it('returns empty array after max retries on non-auth error', async () => {
@@ -291,7 +291,7 @@ describe('GithubService', () => {
       const repos = [{ id: 2, name: 'starred' }];
       mockClient.get.mockResolvedValue({ data: repos });
       const result = await service.getStarredRepos('token');
-      expect(result).toBe(repos);
+      expect(result).toEqual(repos);
     });
 
     it('returns empty array after max retries', async () => {

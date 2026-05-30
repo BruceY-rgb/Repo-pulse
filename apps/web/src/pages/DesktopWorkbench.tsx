@@ -101,6 +101,7 @@ import { eventService } from '@/services/event.service';
 import { approvalService, type Approval } from '@/services/approval.service';
 import { repositoryService } from '@/services/repository.service';
 import { workbenchService } from '@/services/workbench.service';
+import { getApiBaseUrl } from '@/lib/desktop';
 import {
   useWorkbenchUnreadStore,
   type WorkbenchUnreadBoundary,
@@ -404,29 +405,6 @@ function getLatestWorkbenchMessageAt(messages: Array<Pick<WorkbenchConversationM
   }, null);
 }
 
-function getOldestUnreadWorkbenchMessage(messages: WorkbenchConversationMessage[]) {
-  return messages.reduce<WorkbenchConversationMessage | null>((oldest, message) => {
-    if (!message.isUnread) {
-      return oldest;
-    }
-
-    if (!oldest) {
-      return message;
-    }
-
-    const messageAt = getTimestamp(message.createdAt);
-    const oldestAt = getTimestamp(oldest.createdAt);
-    if (messageAt === null) {
-      return oldest;
-    }
-    if (oldestAt === null) {
-      return message;
-    }
-
-    return messageAt < oldestAt ? message : oldest;
-  }, null);
-}
-
 function getRepoInitial(repo: Pick<Repository, 'name' | 'fullName'>) {
   return (repo.name || repo.fullName || 'R').slice(0, 1).toUpperCase();
 }
@@ -461,6 +439,13 @@ function getRepositoryAvatarUrl(repo: Pick<Repository, 'fullName' | 'platform' |
   } catch {
     return undefined;
   }
+}
+
+/** Derive GitHub avatar URL from a WatchFeedItem's repositoryFullName (e.g. "owner/repo") */
+function getWatchFeedAvatarUrl(repositoryFullName: string) {
+  const owner = repositoryFullName.split('/')[0];
+  if (!owner) return undefined;
+  return `https://github.com/${encodeURIComponent(owner)}.png`;
 }
 
 function getAuthorAvatarUrl(message: ConversationMessage) {
@@ -1788,50 +1773,52 @@ function WorkbenchHeader({
           </h1>
         </div>
       </div>
-      <div className="desktop-no-drag flex items-center gap-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="icon" variant="outline" aria-label="搜索会话" onClick={onSearch}>
-              <Search className="h-4 w-4" />
+      {activeView !== 'watch' ? (
+        <div className="desktop-no-drag flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="icon" variant="outline" aria-label="搜索会话" onClick={onSearch}>
+                <Search className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>搜索会话</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="icon" variant="outline" asChild aria-label="看板">
+                <Link to={dashboardHref}>
+                  <LayoutDashboard className="h-4 w-4" />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{hasRepositoryContext ? '查看当前仓库看板' : '仓库看板'}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="icon" variant="outline" aria-label="分支监控" onClick={onOpenBranchMonitor}>
+                <GitBranch className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>分支监控</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="icon" variant="outline" asChild aria-label="生成报告">
+                <Link to={reportsHref}>
+                  <FileText className="h-4 w-4" />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>生成报告</TooltipContent>
+          </Tooltip>
+          {!isReadOnly ? (
+            <Button className="gap-2" onClick={onAgent}>
+              <Bot className="h-4 w-4" />
+              让 Agent 处理
             </Button>
-          </TooltipTrigger>
-          <TooltipContent>搜索会话</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="icon" variant="outline" asChild aria-label="看板">
-              <Link to={dashboardHref}>
-                <LayoutDashboard className="h-4 w-4" />
-              </Link>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{hasRepositoryContext ? '查看当前仓库看板' : '仓库看板'}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="icon" variant="outline" aria-label="分支监控" onClick={onOpenBranchMonitor}>
-              <GitBranch className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>分支监控</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="icon" variant="outline" asChild aria-label="生成报告">
-              <Link to={reportsHref}>
-                <FileText className="h-4 w-4" />
-              </Link>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>生成报告</TooltipContent>
-        </Tooltip>
-        {!isReadOnly ? (
-          <Button className="gap-2" onClick={onAgent}>
-            <Bot className="h-4 w-4" />
-            让 Agent 处理
-          </Button>
-        ) : null}
-      </div>
+          ) : null}
+        </div>
+      ) : null}
     </header>
   );
 }
@@ -2360,9 +2347,6 @@ function RepositoryConversation({
     hasUnreadBoundary &&
       filteredMessages.some((message) => message.id === unreadBoundary?.messageId),
   );
-  const shouldShowUnreadJump = Boolean(
-    hasUnreadBoundary && unreadBoundary && unreadBoundary.showJumpButton !== false,
-  );
 
   const handleJumpToUnread = () => {
     if (!hasUnreadBoundary) {
@@ -2426,7 +2410,7 @@ function RepositoryConversation({
               </Button>
             ))}
           </div>
-          {shouldShowUnreadJump && unreadBoundary ? (
+          {hasUnreadBoundary && unreadBoundary ? (
             <Button
               type="button"
               size="sm"
@@ -2761,6 +2745,17 @@ function WatchFeedCard({
   const meta = watchFeedTypeMeta[item.type];
   const TypeIcon = meta.icon;
   const preview = item.summary || item.aiInsight || item.title;
+  const githubUrl = item.externalUrl || (() => {
+    const base = `https://github.com/${item.repositoryFullName}`;
+    switch (item.type) {
+      case 'issue': return `${base}/issues`;
+      case 'pull_request': return `${base}/pulls`;
+      case 'push': return `${base}/commits`;
+      case 'release': return `${base}/releases`;
+      case 'security': return `${base}/security/advisories`;
+      default: return base;
+    }
+  })();
 
   const openPreview = () => onOpenPreview(item);
 
@@ -2782,7 +2777,7 @@ function WatchFeedCard({
         <div className="flex gap-4">
           <div className="relative shrink-0">
             <Avatar className="h-12 w-12 rounded-xl border border-border bg-background">
-              <AvatarImage src={item.repositoryAvatar} alt={item.repositoryFullName} />
+              <AvatarImage src={item.repositoryAvatar || getWatchFeedAvatarUrl(item.repositoryFullName)} alt={item.repositoryFullName} />
               <AvatarFallback className="rounded-xl bg-secondary text-sm font-semibold">
                 {item.repositoryFullName.slice(0, 1).toUpperCase()}
               </AvatarFallback>
@@ -2808,6 +2803,16 @@ function WatchFeedCard({
                   可监控
                 </Badge>
               ) : null}
+              <a
+                href={githubUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-primary"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <ExternalLink className="h-3 w-3" />
+                GitHub
+              </a>
             </div>
 
             <div className="mt-3 flex gap-3">
@@ -2834,16 +2839,58 @@ function WatchFeedCard({
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 border-t border-border/70 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-          <Eye className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">Markdown 预览</span>
+      <div className="flex items-center justify-between border-t border-border/70 px-5 py-2.5">
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', meta.dotClass)} />
+          <span className="truncate">{item.repositoryFullName}</span>
+          <span>·</span>
+          <span>{formatRelativeTime(item.occurredAt)}</span>
         </div>
-        <WatchFeedActionBar
-          item={item}
-          onAddToMonitoring={onAddToMonitoring}
-          onIgnore={onIgnore}
-        />
+        <div className="flex items-center gap-1">
+          {item.canAddToMonitoring ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  onClick={(event) => { event.stopPropagation(); void onAddToMonitoring(item); }}
+                  aria-label="加入监控"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>加入监控</TooltipContent>
+            </Tooltip>
+          ) : null}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <a
+                href={githubUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                onClick={(event) => event.stopPropagation()}
+                aria-label="在 GitHub 中查看"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </TooltipTrigger>
+            <TooltipContent>在 GitHub 中查看</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                onClick={(event) => { event.stopPropagation(); onIgnore(item); }}
+                aria-label="忽略"
+              >
+                <EyeOff className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>忽略</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
     </article>
   );
@@ -2874,7 +2921,7 @@ function WatchFeedPreviewDialog({
           <DialogHeader className="border-b border-border bg-card/80 px-6 py-5 pr-12 text-left">
             <div className="flex items-start gap-4">
               <Avatar className="h-12 w-12 rounded-xl border border-border bg-background">
-                <AvatarImage src={item.repositoryAvatar} alt={item.repositoryFullName} />
+                <AvatarImage src={item.repositoryAvatar || getWatchFeedAvatarUrl(item.repositoryFullName)} alt={item.repositoryFullName} />
                 <AvatarFallback className="rounded-xl bg-secondary text-sm font-semibold">
                   {item.repositoryFullName.slice(0, 1).toUpperCase()}
                 </AvatarFallback>
@@ -2969,7 +3016,7 @@ function WatchRepositoryPanel({
   onAddRepositoryToMonitoring: (repository: WatchRepositoryItem) => void | Promise<void>;
 }) {
   return (
-    <aside className="min-w-0 space-y-4 xl:sticky xl:top-6 xl:self-start">
+    <aside className="min-w-0 space-y-4 lg:sticky lg:top-6 lg:self-start">
       <section className="rounded-xl border border-border bg-card/80 p-4">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -2981,80 +3028,77 @@ function WatchRepositoryPanel({
           </Badge>
         </div>
 
-        <ScrollArea className="mt-4 max-h-[320px] pr-3">
-          <div className="space-y-2">
-            {loading ? (
-              [0, 1, 2].map((item) => (
-                <div key={item} className="flex animate-pulse items-center gap-3 rounded-lg border border-border bg-background/50 p-3">
-                  <div className="h-9 w-9 rounded-lg bg-secondary" />
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="h-3 w-2/3 rounded bg-secondary" />
-                    <div className="h-3 w-1/2 rounded bg-secondary" />
-                  </div>
+        <div className="mt-4 max-h-[320px] overflow-y-auto scrollbar-thin pr-1.5 space-y-2">
+          {loading ? (
+            [0, 1, 2].map((item) => (
+              <div key={item} className="flex animate-pulse items-center gap-3 rounded-lg border border-border bg-background/50 p-3">
+                <div className="h-9 w-9 rounded-lg bg-secondary" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="h-3 w-2/3 rounded bg-secondary" />
+                  <div className="h-3 w-1/2 rounded bg-secondary" />
                 </div>
-              ))
-            ) : repositories.length > 0 ? (
-              repositories.map((repository) => {
-                const avatarUrl = getRepositoryAvatarUrl(repository);
-                return (
-                  <div
-                    key={repository.id}
-                    className="flex items-center gap-3 rounded-lg border border-border bg-background/45 p-3"
-                  >
-                    <Avatar className="h-9 w-9 shrink-0 rounded-lg border border-border">
-                      <AvatarImage src={avatarUrl} alt={repository.fullName} className="object-cover" />
-                      <AvatarFallback className="rounded-lg bg-secondary text-xs font-semibold">
-                        {getRepoInitial(repository)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-foreground" title={repository.fullName}>
-                        {repository.fullName}
-                      </p>
-                      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                        <GitBranch className="h-3 w-3 shrink-0" />
-                        <span className="truncate">{repository.defaultBranch}</span>
-                        <span>{repository.eventCount} 条事件</span>
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            'rounded-md px-1.5 py-0 text-[10px]',
-                            repository.isMonitored
-                              ? 'border-success/40 text-success-foreground'
-                              : 'border-muted-foreground/30 text-muted-foreground',
-                          )}
-                        >
-                          {repository.isMonitored ? '已监控' : '关注中'}
-                        </Badge>
-                      </div>
-                    </div>
-                    {repository.canAddToMonitoring ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            type="button"
-                            size="icon-sm"
-                            variant="ghost"
-                            className="text-muted-foreground hover:text-foreground"
-                            onClick={() => void onAddRepositoryToMonitoring(repository)}
-                            aria-label={`将 ${repository.fullName} 加入监控`}
-                          >
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>加入监控</TooltipContent>
-                      </Tooltip>
-                    ) : null}
-                  </div>
-                );
-              })
-            ) : (
-              <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-                还没有关注源。可以从下方搜索仓库添加。
               </div>
-            )}
-          </div>
-        </ScrollArea>
+            ))
+          ) : repositories.length > 0 ? (
+            repositories.map((repository) => {
+              const avatarUrl = getRepositoryAvatarUrl(repository);
+              return (
+                <div
+                  key={repository.id}
+                  className="flex items-center gap-3 rounded-lg border border-border bg-background/45 p-3 hover:bg-secondary/45 transition-colors cursor-pointer group"
+                  onClick={() => window.open(repository.url, '_blank', 'noopener,noreferrer')}
+                >
+                  <Avatar className="h-9 w-9 shrink-0 rounded-lg border border-border">
+                    <AvatarImage src={avatarUrl} alt={repository.fullName} className="object-cover" />
+                    <AvatarFallback className="rounded-lg bg-secondary text-xs font-semibold">
+                      {getRepoInitial(repository)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <p className="truncate text-sm font-medium text-foreground group-hover:text-primary transition-colors" title={repository.fullName}>
+                          {repository.fullName}
+                        </p>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" align="start" className="max-w-[280px] break-all bg-popover/95 border border-border text-foreground p-2 text-xs shadow-xl">
+                        {repository.fullName}
+                      </TooltipContent>
+                    </Tooltip>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      {repository.eventCount} 条事件
+                      {repository.isMonitored ? ' · 已监控' : ' · 关注中'}
+                    </p>
+                  </div>
+                  {repository.canAddToMonitoring ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="ghost"
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void onAddRepositoryToMonitoring(repository);
+                          }}
+                          aria-label={`将 ${repository.fullName} 加入监控`}
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>加入监控</TooltipContent>
+                    </Tooltip>
+                  ) : null}
+                </div>
+              );
+            })
+          ) : (
+            <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+              还没有关注源。可以从下方搜索仓库添加。
+            </div>
+          )}
+        </div>
       </section>
 
       <section className="rounded-xl border border-border bg-card/80 p-4">
@@ -3187,33 +3231,24 @@ function WatchFeed({
   return (
     <>
       <ScrollArea className="h-full">
-        <div className="mx-auto grid max-w-7xl gap-5 p-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="mx-auto grid max-w-7xl gap-5 p-6 lg:grid-cols-[minmax(0,1fr)_340px]">
           <section className="min-w-0 space-y-4">
             <div className="sticky top-0 z-10 rounded-xl border border-border bg-background/95 p-3 backdrop-blur">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <Badge variant="outline" className="rounded-md border-border bg-card/80">
-                    {items.length} 条动态
-                  </Badge>
-                  <span>{watchRepositories.length} 个关注源</span>
-                  <span>未加入监控的变化会优先出现在这里</span>
-                </div>
-                <div className="flex flex-wrap gap-1.5 rounded-lg border border-border bg-card/80 p-1" aria-label="关注动态筛选">
-                  {watchFeedEventTypes.map(({ key, label }) => (
-                    <button
-                      key={key}
-                      type="button"
-                      aria-pressed={activeType === key}
-                      className={cn(
-                        'rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground',
-                        activeType === key && 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground',
-                      )}
-                      onClick={() => onTypeChange(key)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex flex-wrap gap-1.5 rounded-lg border border-border bg-card/80 p-1" aria-label="关注动态筛选">
+                {watchFeedEventTypes.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={activeType === key}
+                    className={cn(
+                      'rounded-md px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground',
+                      activeType === key && 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground',
+                    )}
+                    onClick={() => onTypeChange(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -3384,7 +3419,6 @@ export function DesktopWorkbench() {
   const unreadBoundaries = useWorkbenchUnreadStore((state) => state.boundaries);
   const setOptimisticRead = useWorkbenchUnreadStore((state) => state.setOptimisticRead);
   const clearOptimisticRead = useWorkbenchUnreadStore((state) => state.clearOptimisticRead);
-  const setUnreadBoundary = useWorkbenchUnreadStore((state) => state.setBoundary);
   const clearUnreadBoundary = useWorkbenchUnreadStore((state) => state.clearBoundary);
   const [addingWatchRepositoryKey, setAddingWatchRepositoryKey] = useState<string>();
 
@@ -3687,18 +3721,20 @@ export function DesktopWorkbench() {
 
     const { conversation, messages } = conversationMessagesQuery.data;
     if (conversation.unreadCount <= 0) {
+      clearUnreadBoundary(repositoryId);
       return;
     }
 
-    const oldestUnreadMessage = getOldestUnreadWorkbenchMessage(messages);
+    const hasUnreadMessage = messages.some((message) => message.isUnread);
     const readUpToMessageAt = getLatestWorkbenchMessageAt(messages);
-    if (!oldestUnreadMessage || !readUpToMessageAt) {
+    if (!hasUnreadMessage || !readUpToMessageAt) {
       return;
     }
 
     const optimisticReadAt =
       useWorkbenchUnreadStore.getState().optimisticReadAtByRepository[repositoryId];
     if (isMessageCoveredByRead(readUpToMessageAt, optimisticReadAt)) {
+      clearUnreadBoundary(repositoryId);
       return;
     }
 
@@ -3708,15 +3744,8 @@ export function DesktopWorkbench() {
     }
 
     autoReadRequestRef.current[repositoryId] = requestKey;
-    setUnreadBoundary({
-      repositoryId,
-      messageId: oldestUnreadMessage.id,
-      readUpToMessageAt,
-      unreadCount: conversation.unreadCount,
-      capturedAt: new Date().toISOString(),
-      showJumpButton: false,
-    });
     setOptimisticRead(repositoryId, readUpToMessageAt);
+    clearUnreadBoundary(repositoryId);
 
     void workbenchService
       .markConversationRead(repositoryId, { upToMessageAt: readUpToMessageAt })
@@ -3739,11 +3768,11 @@ export function DesktopWorkbench() {
   }, [
     activeView,
     chatReposQuery,
+    clearUnreadBoundary,
     clearOptimisticRead,
     conversationMessagesQuery,
     selectedRepository?.id,
     setOptimisticRead,
-    setUnreadBoundary,
   ]);
 
   useEffect(() => {
