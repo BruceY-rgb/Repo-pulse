@@ -6,14 +6,63 @@ import { useQueryClient } from '@tanstack/react-query';
 import { dashboardQueryKeys } from '@/hooks/queries/use-dashboard-queries';
 import { notificationQueryKeys } from '@/hooks/queries/use-notification-queries';
 import { repositoryQueryKeys } from '@/hooks/queries/use-repository-queries';
+import { workbenchQueryKeys } from '@/hooks/queries/use-workbench-queries';
 import { analysisQueryKeys } from '@/hooks/use-analysis';
 import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
 import { getSocketUrl } from '@/lib/desktop';
+import { useWorkbenchUnreadStore } from '@/stores/workbench-unread.store';
 
 export const REALTIME_INVALIDATION_BUDGET_MS = 50;
 
 type RealtimeEventName = 'event:new' | 'events:new' | 'analysis:completed';
 type RealtimeQueryClient = Pick<QueryClient, 'invalidateQueries'>;
+
+interface RepositoryRealtimePayload {
+  repositoryId?: string;
+  data?: unknown;
+  timestamp?: string;
+}
+
+function getCandidateMessageAt(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const record = value as {
+    occurredAt?: unknown;
+    createdAt?: unknown;
+    timestamp?: unknown;
+  };
+  const candidate = record.occurredAt ?? record.createdAt ?? record.timestamp;
+  return typeof candidate === 'string' ? candidate : null;
+}
+
+function pickLatestMessageAt(left: string | null, right: string | null) {
+  if (!left) return right;
+  if (!right) return left;
+
+  const leftAt = new Date(left).getTime();
+  const rightAt = new Date(right).getTime();
+  if (!Number.isFinite(leftAt)) return right;
+  if (!Number.isFinite(rightAt)) return left;
+
+  return rightAt > leftAt ? right : left;
+}
+
+function getRealtimeMessageAt(payload?: RepositoryRealtimePayload) {
+  if (!payload) {
+    return null;
+  }
+
+  if (Array.isArray(payload.data)) {
+    return payload.data.reduce<string | null>(
+      (latest, item) => pickLatestMessageAt(latest, getCandidateMessageAt(item)),
+      null,
+    ) ?? payload.timestamp ?? null;
+  }
+
+  return getCandidateMessageAt(payload.data) ?? payload.timestamp ?? null;
+}
 
 function emitRealtimeMetric(eventName: RealtimeEventName, startedAt: number): number {
   const scheduleMs = performance.now() - startedAt;
@@ -37,14 +86,29 @@ function emitRealtimeMetric(eventName: RealtimeEventName, startedAt: number): nu
 export function invalidateRepositoryRealtimeQueries(
   queryClient: RealtimeQueryClient,
   eventName: 'event:new' | 'events:new',
+  payload?: RepositoryRealtimePayload,
 ): number {
   const startedAt = performance.now();
+  const repositoryId = payload?.repositoryId;
+  const messageAt = getRealtimeMessageAt(payload);
 
   queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
   queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
+  queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.chatRepositories() });
+  queryClient.invalidateQueries({
+    queryKey: repositoryId
+      ? workbenchQueryKeys.conversationMessages(repositoryId)
+      : workbenchQueryKeys.conversationMessagesRoot(),
+  });
   queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
   queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
   queryClient.invalidateQueries({ queryKey: notificationQueryKeys.preferences() });
+
+  if (repositoryId) {
+    useWorkbenchUnreadStore
+      .getState()
+      .clearOptimisticReadIfMessageAfterRead(repositoryId, messageAt);
+  }
 
   return emitRealtimeMetric(eventName, startedAt);
 }
@@ -134,12 +198,12 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
         }
       });
 
-      socket.on('event:new', () => {
-        invalidateRepositoryRealtimeQueries(queryClient, 'event:new');
+      socket.on('event:new', (payload: RepositoryRealtimePayload) => {
+        invalidateRepositoryRealtimeQueries(queryClient, 'event:new', payload);
       });
 
-      socket.on('events:new', () => {
-        invalidateRepositoryRealtimeQueries(queryClient, 'events:new');
+      socket.on('events:new', (payload: RepositoryRealtimePayload) => {
+        invalidateRepositoryRealtimeQueries(queryClient, 'events:new', payload);
       });
 
       socket.on('analysis:completed', () => {

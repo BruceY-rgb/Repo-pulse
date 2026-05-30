@@ -307,6 +307,21 @@ export interface SearchResult {
   platform: Platform;
 }
 
+export interface WatchRepositoryItem {
+  id: string;
+  name: string;
+  fullName: string;
+  platform: Platform;
+  externalId: string;
+  url: string;
+  defaultBranch: string;
+  isActive: boolean;
+  lastSyncAt: string | null;
+  eventCount: number;
+  isMonitored: boolean;
+  canAddToMonitoring: boolean;
+}
+
 export interface RepositoryBranchScopeOption {
   name: string;
   isDefault: boolean;

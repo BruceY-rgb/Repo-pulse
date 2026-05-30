@@ -3,8 +3,11 @@ import {
   ApprovalStatus,
   EventType,
   Platform,
+  Repository,
   RepositoryAccessLevel,
+  RepositoryAccessMode,
   RiskLevel,
+  Role,
   prisma,
 } from '@repo-pulse/database';
 import {
@@ -13,6 +16,8 @@ import {
   getUserMonitoredRepositoryIds,
   isEditableRepositoryAccessLevel,
 } from '../../common/utils/repository-access';
+import { CreateRepositoryDto } from '../repository/dto/repository.dto';
+import { RepositoryService } from '../repository/repository.service';
 import { ReadConversationDto } from './dto/read-conversation.dto';
 
 type RepositoryAccessLevelApi =
@@ -65,6 +70,8 @@ interface ConversationStateSnapshot {
 
 @Injectable()
 export class WorkbenchService {
+  constructor(private readonly repositoryService: RepositoryService) {}
+
   async getChatRepositories(userId: string) {
     const [memberships, monitoredRepositoryIds] = await Promise.all([
       prisma.userRepository.findMany({
@@ -566,6 +573,46 @@ export class WorkbenchService {
     };
   }
 
+  async getWatchRepositories(userId: string) {
+    const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
+    const monitoredSet = new Set(monitoredRepositoryIds);
+
+    const memberships = await prisma.userRepository.findMany({
+      where: {
+        userId,
+        isStarred: true,
+        repository: { platform: Platform.GITHUB },
+      },
+      include: {
+        repository: {
+          include: {
+            _count: {
+              select: { events: true },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return memberships.map(({ repository }) =>
+      this.toWatchRepositoryItem(repository, monitoredSet),
+    );
+  }
+
+  async addWatchRepository(userId: string, dto: CreateRepositoryDto) {
+    const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
+    const monitoredSet = new Set(monitoredRepositoryIds);
+    const repository = await this.repositoryService.create(userId, dto, {
+      accessMode: RepositoryAccessMode.MONITOR,
+      accessLevel: RepositoryAccessLevel.READ,
+      role: Role.VIEWER,
+      isStarred: true,
+    });
+
+    return this.toWatchRepositoryItem(repository, monitoredSet);
+  }
+
   private async getConversationStateMap(
     userId: string,
     repositoryIds: string[],
@@ -595,6 +642,29 @@ export class WorkbenchService {
         },
       ]),
     );
+  }
+
+  private toWatchRepositoryItem(
+    repository: Pick<Repository, 'id' | 'name' | 'fullName' | 'platform' | 'externalId' | 'url' | 'defaultBranch' | 'isActive' | 'lastSyncAt'> & {
+      _count?: { events: number };
+    },
+    monitoredSet: Set<string>,
+  ) {
+    const isMonitored = monitoredSet.has(repository.id);
+    return {
+      id: repository.id,
+      name: repository.name,
+      fullName: repository.fullName,
+      platform: repository.platform,
+      externalId: repository.externalId,
+      url: repository.url,
+      defaultBranch: repository.defaultBranch,
+      isActive: repository.isActive,
+      lastSyncAt: repository.lastSyncAt?.toISOString() ?? null,
+      eventCount: repository._count?.events ?? 0,
+      isMonitored,
+      canAddToMonitoring: !isMonitored,
+    };
   }
 
   private toRepositoryView(

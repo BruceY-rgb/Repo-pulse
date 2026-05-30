@@ -3,8 +3,10 @@ import type {
   ApiResponse,
   ChatRepositoriesResponse,
   ConversationMessagesResponse,
+  CreateRepositoryDto,
   MarkConversationReadDto,
   WatchFeedResponse,
+  WatchRepositoryItem,
 } from '@/types/api';
 
 export interface WatchFeedParams {
@@ -48,6 +50,23 @@ export const workbenchService = {
     const { data } = await apiClient.get<ApiResponse<WatchFeedResponse>>(
       '/workbench/watch-feed',
       { params },
+    );
+    return data.data;
+  },
+
+  /** 获取 Watch Feed 的关注仓库源 */
+  async getWatchRepositories(): Promise<WatchRepositoryItem[]> {
+    const { data } = await apiClient.get<ApiResponse<WatchRepositoryItem[]>>(
+      '/workbench/watch-repositories',
+    );
+    return data.data;
+  },
+
+  /** 添加仓库到 Watch Feed 关注源 */
+  async addWatchRepository(dto: CreateRepositoryDto): Promise<WatchRepositoryItem> {
+    const { data } = await apiClient.post<ApiResponse<WatchRepositoryItem>>(
+      '/workbench/watch-repositories',
+      dto,
     );
     return data.data;
   },

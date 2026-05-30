@@ -12,6 +12,7 @@ const mockPrismaUserFindUnique = jest.fn();
 const mockPrismaConversationStateFindMany = jest.fn();
 const mockPrismaConversationStateFindUnique = jest.fn();
 const mockPrismaConversationStateUpsert = jest.fn();
+const mockRepositoryCreate = jest.fn();
 
 const mockGetUserMonitoredRepositoryIds = jest.fn();
 const mockAssertUserCanAccessRepository = jest.fn();
@@ -55,6 +56,7 @@ jest.mock('@repo-pulse/database', () => ({
     NONE: 'NONE',
   },
   RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
+  Role: { ADMIN: 'ADMIN', MANAGER: 'MANAGER', MEMBER: 'MEMBER', VIEWER: 'VIEWER' },
   RiskLevel: { LOW: 'LOW', MEDIUM: 'MEDIUM', HIGH: 'HIGH', CRITICAL: 'CRITICAL' },
   Platform: { GITHUB: 'GITHUB', GITLAB: 'GITLAB' },
   NotificationChannel: { IN_APP: 'IN_APP', EMAIL: 'EMAIL' },
@@ -204,7 +206,10 @@ describe('WorkbenchService', () => {
       createdAt: new Date('2025-06-01'),
       updatedAt: new Date('2025-06-01'),
     });
-    service = new WorkbenchService();
+    mockRepositoryCreate.mockResolvedValue(makeRepo('r1'));
+    service = new WorkbenchService({
+      create: mockRepositoryCreate,
+    } as never);
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -683,6 +688,79 @@ describe('WorkbenchService', () => {
       const result = await service.getWatchFeed('u1');
 
       expect(result.items[0].aiInsight).toBe('This PR may affect authentication module');
+    });
+  });
+
+  describe('watch repositories', () => {
+    it('lists starred repository sources with monitoring status', async () => {
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r2']);
+      mockPrismaUserRepoFindMany.mockResolvedValue([
+        {
+          repository: {
+            ...makeRepo('r1'),
+            _count: { events: 4 },
+          },
+        },
+        {
+          repository: {
+            ...makeRepo('r2'),
+            _count: { events: 9 },
+          },
+        },
+      ]);
+
+      const result = await service.getWatchRepositories('u1');
+
+      expect(mockPrismaUserRepoFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            userId: 'u1',
+            isStarred: true,
+            repository: { platform: 'GITHUB' },
+          }),
+        }),
+      );
+      expect(result).toEqual([
+        expect.objectContaining({
+          id: 'r1',
+          fullName: 'org/repo-r1',
+          eventCount: 4,
+          isMonitored: false,
+          canAddToMonitoring: true,
+        }),
+        expect.objectContaining({
+          id: 'r2',
+          fullName: 'org/repo-r2',
+          eventCount: 9,
+          isMonitored: true,
+          canAddToMonitoring: false,
+        }),
+      ]);
+    });
+
+    it('adds a searched repository as a read-only watch source', async () => {
+      mockRepositoryCreate.mockResolvedValue({
+        ...makeRepo('r3'),
+        _count: { events: 0 },
+      });
+
+      const dto = { platform: 'GITHUB' as const, owner: 'org', repo: 'repo-r3' };
+      const result = await service.addWatchRepository('u1', dto);
+
+      expect(mockRepositoryCreate).toHaveBeenCalledWith('u1', dto, {
+        accessMode: 'MONITOR',
+        accessLevel: 'READ',
+        role: 'VIEWER',
+        isStarred: true,
+      });
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: 'r3',
+          fullName: 'org/repo-r3',
+          isMonitored: false,
+          canAddToMonitoring: true,
+        }),
+      );
     });
   });
 });
