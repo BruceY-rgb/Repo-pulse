@@ -1113,6 +1113,7 @@ function RepositorySidebar({
   onUnpinRepository,
   onMarkRead,
   onFilterByType,
+  newlyMonitoredRepoIds,
 }: {
   editableRepos: ChatRepositoryItem[];
   monitoredRepos: ChatRepositoryItem[];
@@ -1130,6 +1131,7 @@ function RepositorySidebar({
   onUnpinRepository: (repository: Repository) => void;
   onMarkRead: (repository: Repository) => void;
   onFilterByType: (repository: Repository, type: string) => void;
+  newlyMonitoredRepoIds?: Set<string>;
 }) {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_REPOSITORY_SIDEBAR_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
@@ -1147,8 +1149,14 @@ function RepositorySidebar({
   const filterBySearch = (items: ChatRepositoryItem[]) =>
     items.filter((item) => {
       if (!normalizedRepositorySearch) {
-        // 展示所有已编辑或监控的仓库，避免新加/无历史消息的仓库在列表中被隐藏
-        return true;
+        // 没有搜索词时，隐藏尚无可渲染消息的仓库。
+        // 但如果是当前选中的、置顶的，或者刚刚加入监控的仓库，则强制展示，避免新加入侧边栏找不到。
+        return (
+          !!item.latestMessagePreview ||
+          item.repository.id === selectedRepositoryId ||
+          pinnedRepoIds.has(item.repository.id) ||
+          newlyMonitoredRepoIds?.has(item.repository.id)
+        );
       }
       return [
         item.repository.name,
@@ -3519,6 +3527,7 @@ export function DesktopWorkbench() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isBranchMonitorOpen, setIsBranchMonitorOpen] = useState(false);
   const [syncingRepoIds, setSyncingRepoIds] = useState<Set<string>>(() => new Set());
+  const [newlyMonitoredRepoIds, setNewlyMonitoredRepoIds] = useState<Set<string>>(() => new Set());
   const [watchFeedType, setWatchFeedType] = useState('');
   const [ignoredFeedIds, setIgnoredFeedIds] = useState<Set<string>>(() => new Set());
   const [feedSearchKeyword, setFeedSearchKeyword] = useState('');
@@ -3759,6 +3768,11 @@ export function DesktopWorkbench() {
         repositoryIds: nextRepositoryIds,
         branchNames: [],
         repositoryBranchScopes: monitoringScope.repositoryBranchScopes ?? {},
+      });
+      setNewlyMonitoredRepoIds((current) => {
+        const next = new Set(current);
+        next.add(repository.id);
+        return next;
       });
       toast.success(`${repository.fullName} 已加入监控`);
       await Promise.all([
@@ -4255,6 +4269,7 @@ export function DesktopWorkbench() {
             }
             syncingRepoIds={syncingRepoIds}
             pinnedRepoIds={pinnedRepoIds}
+            newlyMonitoredRepoIds={newlyMonitoredRepoIds}
             collapsed={isRepositorySidebarCollapsed}
             onToggleCollapsed={() => setIsRepositorySidebarCollapsed((current) => !current)}
             onRemoveFromMonitoring={removeRepositoryFromMonitoring}
