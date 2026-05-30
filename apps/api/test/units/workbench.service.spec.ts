@@ -207,9 +207,10 @@ describe('WorkbenchService', () => {
       updatedAt: new Date('2025-06-01'),
     });
     mockRepositoryCreate.mockResolvedValue(makeRepo('r1'));
-    service = new WorkbenchService({
-      create: mockRepositoryCreate,
-    } as never);
+    service = new WorkbenchService(
+      { create: mockRepositoryCreate } as never,
+      {} as never,
+    );
   });
 
   // ═══════════════════════════════════════════════════════════════════════════

@@ -525,4 +525,17 @@ export class GithubService {
     this.logger.warn('GitHub OAuth 不支持 token 刷新，请引导用户重新授权');
     throw new Error('GitHub OAuth 不支持 token 刷新，请重新登录授权');
   }
+
+  async getContributors(owner: string, repo: string, userToken?: string): Promise<Array<{ login: string; avatar_url: string; html_url: string }>> {
+    try {
+      const client = this.createUserClient(userToken);
+      const response = await client.get<Array<{ login: string; avatar_url: string; html_url: string }>>(`/repos/${owner}/${repo}/contributors`, {
+        params: { per_page: 100 },
+      });
+      return Array.isArray(response.data) ? response.data : [];
+    } catch (error) {
+      this.logger.error(`Failed to fetch contributors for ${owner}/${repo}`, this.formatErrorForLog(error));
+      return [];
+    }
+  }
 }

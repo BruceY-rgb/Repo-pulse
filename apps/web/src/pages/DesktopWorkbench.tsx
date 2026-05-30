@@ -48,6 +48,7 @@ import {
   Trash2,
   VolumeX,
   XCircle,
+  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -1724,6 +1725,7 @@ function WorkbenchHeader({
   onRefresh,
   onMarkAllRead,
   onAddRepositoryClick,
+  onOpenContributors,
 }: {
   activeView: WorkbenchView;
   repository?: Repository;
@@ -1747,6 +1749,7 @@ function WorkbenchHeader({
   onRefresh?: () => void;
   onMarkAllRead?: () => void;
   onAddRepositoryClick?: () => void;
+  onOpenContributors?: () => void;
 }) {
   const [searchParams] = useSearchParams();
   const repositoryIdParam = searchParams.get('repositoryId');
@@ -1939,6 +1942,16 @@ function WorkbenchHeader({
         </div>
       ) : activeView !== 'watch' ? (
         <div className="desktop-no-drag flex items-center gap-2">
+          {activeView === 'repository' && onOpenContributors ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button size="icon" variant="outline" aria-label="查看贡献者" onClick={onOpenContributors}>
+                  <Users className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>查看项目贡献者</TooltipContent>
+            </Tooltip>
+          ) : null}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button size="icon" variant="outline" aria-label="搜索会话" onClick={onSearch}>
@@ -1976,10 +1989,14 @@ function WorkbenchHeader({
             <TooltipContent>生成报告</TooltipContent>
           </Tooltip>
           {!isReadOnly ? (
-            <Button className="gap-2" onClick={onAgent}>
-              <Bot className="h-4 w-4" />
-              让 Agent 处理
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button size="icon" variant="outline" aria-label="让 Agent 处理" onClick={onAgent}>
+                  <Bot className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>让 Agent 处理</TooltipContent>
+            </Tooltip>
           ) : null}
         </div>
       ) : null}
@@ -2014,6 +2031,17 @@ function ConversationBubble({
         ? Bell
         : Github;
   const authorAvatarUrl = getAuthorAvatarUrl(message) ?? getRepositoryAvatarUrl(repository);
+
+  const isRealUser = Boolean(message.author && !['system', 'agent', 'bot', 'ai'].some(kw => message.author.toLowerCase().includes(kw)));
+
+  const handleAvatarClick = (e: MouseEvent) => {
+    if (!isRealUser) return;
+    e.stopPropagation();
+    const userUrl = repository.platform === 'GITLAB' 
+      ? `https://gitlab.com/${message.author}` 
+      : `https://github.com/${message.author}`;
+    window.open(userUrl, '_blank', 'noopener,noreferrer');
+  };
 
   // Filter actions: hide requiresPermission actions when repositoryCanOperate is false
   const visibleActions = (message.actions ?? []).filter(
@@ -2126,7 +2154,13 @@ function ConversationBubble({
       }}
       onContextMenu={(event) => onContextMenu(event, message)}
     >
-      <Avatar className="mt-1 h-10 w-10 shrink-0 rounded-xl border border-border">
+      <Avatar 
+        onClick={handleAvatarClick} 
+        className={cn(
+          "mt-1 h-10 w-10 shrink-0 rounded-xl border border-border",
+          isRealUser && "cursor-pointer hover:opacity-80 transition-opacity"
+        )}
+      >
         <AvatarImage src={authorAvatarUrl} alt={message.author} className="object-cover" />
         <AvatarFallback className="rounded-xl bg-secondary text-sm font-semibold">
           {getMessageAvatarFallback(message, repository)}
@@ -3376,18 +3410,20 @@ function WatchFeed({
             <div className="relative">
               {/* Pull-down Weibo-style Loading Spinner */}
               <div className={cn(
-                "flex items-center justify-center transition-all duration-300 ease-in-out overflow-hidden",
-                isRefreshing ? "h-14 opacity-100" : "h-0 opacity-0"
+                "absolute left-1/2 -translate-x-1/2 z-0 refresh-transition",
+                isRefreshing 
+                  ? "top-4 opacity-100 scale-100 pointer-events-auto" 
+                  : "-top-12 opacity-0 scale-50 pointer-events-none"
               )}>
-                <div className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card shadow-lg ring-1 ring-black/5 dark:ring-white/10">
                   <Loader2 className="h-5 w-5 animate-spin text-primary" />
                 </div>
               </div>
 
               {/* Feed Card List with translation transition */}
               <div className={cn(
-                "transition-all duration-300 ease-in-out",
-                isRefreshing ? "translate-y-2" : "translate-y-0"
+                "refresh-transition",
+                isRefreshing ? "translate-y-16" : "translate-y-0"
               )}>
                 {loading ? (
                   <div className="space-y-3">
@@ -3546,6 +3582,7 @@ export function DesktopWorkbench() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isBranchMonitorOpen, setIsBranchMonitorOpen] = useState(false);
+  const [isContributorsOpen, setIsContributorsOpen] = useState(false);
   const [syncingRepoIds, setSyncingRepoIds] = useState<Set<string>>(() => new Set());
   const [newlyMonitoredRepoIds, setNewlyMonitoredRepoIds] = useState<Set<string>>(() => new Set());
   const [watchFeedType, setWatchFeedType] = useState('');
@@ -3962,6 +3999,53 @@ export function DesktopWorkbench() {
     // 降级：使用前端拼接的消息
     return getRepoMessages(selectedRepository.id, allMessages);
   }, [conversationMessagesQuery.data, selectedRepository, allMessages]);
+
+  // 通过后端 API 接口查询该仓库的完整贡献者列表（集成后端缓存与鉴权支持）
+  const contributorsQuery = useApiQuery({
+    queryKey: ['repository', selectedRepository?.id, 'contributors'],
+    queryFn: () => repositoryService.getContributors(selectedRepository!.id),
+    enabled: Boolean(selectedRepository?.id && activeView === 'repository'),
+    staleTime: 5 * 60 * 1000, // 5分钟前端缓存
+  });
+
+  // 融合计算活跃贡献者列表：优先使用官方完整 API，若加载中或为空则降级为会话消息提取
+  const contributors = useMemo(() => {
+    // 1. 如果官方 API 数据加载成功且有数据，优先展示
+    if (contributorsQuery.data && contributorsQuery.data.length > 0) {
+      return contributorsQuery.data.map((c) => ({
+        username: c.username,
+        avatarUrl: c.avatarUrl || `https://github.com/${encodeURIComponent(c.username)}.png`,
+      }));
+    }
+
+    // 2. 降级：从当前已加载的会话消息中实时提取
+    if (!selectedMessages || selectedMessages.length === 0) return [];
+    const map = new Map<string, { username: string; avatarUrl?: string | null }>();
+    
+    selectedMessages.forEach((msg) => {
+      if (!msg.author) return;
+      const authorLower = msg.author.toLowerCase();
+      const isBot = ['system', 'agent', 'bot', 'ai analysis', 'feishu'].some((kw) =>
+        authorLower.includes(kw)
+      );
+      if (isBot) return;
+
+      if (!map.has(msg.author)) {
+        map.set(msg.author, {
+          username: msg.author,
+          avatarUrl: getAuthorAvatarUrl(msg),
+        });
+      } else {
+        const existing = map.get(msg.author)!;
+        if (!existing.avatarUrl) {
+          existing.avatarUrl = getAuthorAvatarUrl(msg);
+        }
+      }
+    });
+    
+    return Array.from(map.values());
+  }, [contributorsQuery.data, selectedMessages]);
+
   const selectedUnreadBoundary = selectedRepository
     ? unreadBoundaries[selectedRepository.id] ?? null
     : null;
@@ -4319,6 +4403,7 @@ export function DesktopWorkbench() {
             onRefresh={handleRefreshFeed}
             onMarkAllRead={handleIgnoreAllVisibleFeedItems}
             onAddRepositoryClick={() => setIsAddRepositoryOpen(true)}
+            onOpenContributors={() => setIsContributorsOpen(true)}
           />
           <main className="min-h-0 flex-1 overflow-hidden">
             {activeView === 'repository' && selectedRepository ? (
@@ -4488,6 +4573,73 @@ export function DesktopWorkbench() {
                 </div>
               )}
             </div>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={isContributorsOpen} onOpenChange={setIsContributorsOpen}>
+          <DialogContent className="max-w-md bg-card border-border text-foreground">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-lg">
+                <Users className="h-5 w-5 text-primary" />
+                项目贡献者
+              </DialogTitle>
+              <DialogDescription>
+                以下是当前监控会话中活跃的项目贡献者（点击头像跳转 GitHub 主页）。
+              </DialogDescription>
+            </DialogHeader>
+
+            <ScrollArea className="mt-4 max-h-[320px] pr-3">
+              {contributors.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+                  暂无活跃贡献者事件记录。
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-3 py-2 justify-center sm:justify-start">
+                  {contributors.map((contrib) => {
+                    const profileUrl = selectedRepository?.platform === 'GITLAB'
+                      ? `https://gitlab.com/${contrib.username}`
+                      : `https://github.com/${contrib.username}`;
+                    
+                    return (
+                      <Tooltip key={contrib.username}>
+                        <TooltipTrigger asChild>
+                          <a
+                            href={profileUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="group relative transition-all duration-200 hover:scale-110 active:scale-95"
+                          >
+                            <Avatar className="h-12 w-12 rounded-full border-2 border-border group-hover:border-primary transition-colors shadow-sm">
+                              <AvatarImage 
+                                src={contrib.avatarUrl ?? undefined} 
+                                alt={contrib.username} 
+                                className="object-cover" 
+                              />
+                              <AvatarFallback className="rounded-full bg-secondary text-sm font-semibold uppercase text-muted-foreground">
+                                {contrib.username.slice(0, 2)}
+                              </AvatarFallback>
+                            </Avatar>
+                          </a>
+                        </TooltipTrigger>
+                        <TooltipContent className="bg-popover text-foreground border border-border px-2 py-1 text-xs">
+                          {contrib.username}
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  })}
+                </div>
+              )}
+            </ScrollArea>
+            
+            <DialogFooter className="mt-4 border-t border-border pt-4">
+              <Button 
+                type="button" 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setIsContributorsOpen(false)}
+              >
+                关闭
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>

@@ -74,6 +74,7 @@ type RepositoryMembershipView = {
 export class RepositoryService {
   private readonly logger = new Logger(RepositoryService.name);
   private prisma: PrismaClient;
+  private readonly contributorsCache = new Map<string, { data: any[]; expiry: number }>();
 
   constructor(
     private readonly configService: ConfigService,
@@ -1273,5 +1274,42 @@ export class RepositoryService {
 
   private generateWebhookSecret(): string {
     return randomBytes(32).toString('hex');
+  }
+
+  async getContributors(id: string, userOAuthToken?: string): Promise<any[]> {
+    const cacheKey = `${id}:${userOAuthToken || 'default'}`;
+    const cached = this.contributorsCache.get(cacheKey);
+    if (cached && cached.expiry > Date.now()) {
+      return cached.data;
+    }
+
+    const repository = await this.prisma.repository.findUnique({
+      where: { id },
+    });
+    if (!repository) {
+      throw new NotFoundException('Repository not found');
+    }
+
+    let contributors: any[] = [];
+    const parts = repository.fullName.split('/');
+    const owner = parts[0];
+    const repo = parts[1];
+
+    if (repository.platform === Platform.GITHUB) {
+      const gitContributors = await this.githubService.getContributors(owner, repo, userOAuthToken);
+      contributors = gitContributors.map(item => ({
+        username: item.login,
+        avatarUrl: item.avatar_url,
+      }));
+    } else if (repository.platform === Platform.GITLAB) {
+      contributors = await this.gitlabService.getContributors(owner, repo);
+    }
+
+    this.contributorsCache.set(cacheKey, {
+      data: contributors,
+      expiry: Date.now() + 60 * 60 * 1000, // 1 hour TTL
+    });
+
+    return contributors;
   }
 }
