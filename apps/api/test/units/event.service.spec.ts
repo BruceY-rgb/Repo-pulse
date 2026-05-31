@@ -15,6 +15,10 @@ const flushAsync = async () => {
 };
 
 describe('EventService - 后置编排韧性 (unit)', () => {
+  const originalAIAnalysisEnabled = process.env.AI_ANALYSIS_ENABLED;
+  const originalAIAutoAnalysisEnabled = process.env.AI_AUTO_ANALYSIS_ENABLED;
+  const originalAIAutoAnalysisAccessModes = process.env.AI_AUTO_ANALYSIS_ACCESS_MODES;
+
   let service: EventService;
   let prismaMock: {
     event: { create: jest.Mock; findUnique: jest.Mock };
@@ -49,6 +53,10 @@ describe('EventService - 后置编排韧性 (unit)', () => {
   };
 
   beforeEach(async () => {
+    process.env.AI_ANALYSIS_ENABLED = 'true';
+    delete process.env.AI_AUTO_ANALYSIS_ENABLED;
+    delete process.env.AI_AUTO_ANALYSIS_ACCESS_MODES;
+
     prismaMock = {
       event: {
         create: jest.fn().mockResolvedValue(CREATED_EVENT),
@@ -120,7 +128,18 @@ describe('EventService - 后置编排韧性 (unit)', () => {
     (service as unknown as { prisma: typeof prismaMock }).prisma = prismaMock;
   });
 
-  it('正常路径：事件创建后 broadcast / notify / AI 全部触发', async () => {
+  afterEach(() => {
+    if (originalAIAnalysisEnabled === undefined) delete process.env.AI_ANALYSIS_ENABLED;
+    else process.env.AI_ANALYSIS_ENABLED = originalAIAnalysisEnabled;
+
+    if (originalAIAutoAnalysisEnabled === undefined) delete process.env.AI_AUTO_ANALYSIS_ENABLED;
+    else process.env.AI_AUTO_ANALYSIS_ENABLED = originalAIAutoAnalysisEnabled;
+
+    if (originalAIAutoAnalysisAccessModes === undefined) delete process.env.AI_AUTO_ANALYSIS_ACCESS_MODES;
+    else process.env.AI_AUTO_ANALYSIS_ACCESS_MODES = originalAIAutoAnalysisAccessModes;
+  });
+
+  it('默认路径：事件创建后 broadcast / notify，但不自动触发 AI', async () => {
     const result = await service.create({
       repositoryId: REPO_ID,
       type: EventType.PUSH,
@@ -153,7 +172,24 @@ describe('EventService - 后置编排韧性 (unit)', () => {
         eventType: EventType.PUSH,
       }),
     );
-    expect(aiService.triggerAnalysis).toHaveBeenCalledWith('evt-1');
+    expect(aiService.triggerAnalysis).not.toHaveBeenCalled();
+  });
+
+  it('显式开启自动分析时，事件创建后会触发 AI 入队', async () => {
+    process.env.AI_AUTO_ANALYSIS_ENABLED = 'true';
+
+    await service.create({
+      repositoryId: REPO_ID,
+      type: EventType.PUSH,
+      action: 'push',
+      title: 'auto ai opt-in',
+      author: 'orch-bot',
+      externalId: 'orch-evt-auto-ai',
+    });
+
+    await flushAsync();
+
+    expect(aiService.triggerAnalysis).toHaveBeenCalledWith('evt-1', false, { source: 'auto' });
   });
 
   it('自动从 branch/sourceBranch/targetBranch 推导多分支归属', async () => {
@@ -207,6 +243,7 @@ describe('EventService - 后置编排韧性 (unit)', () => {
   });
 
   it('broadcast 抛错时，事件主记录仍正常返回，且 notify / AI 流程继续', async () => {
+    process.env.AI_AUTO_ANALYSIS_ENABLED = 'true';
     gateway.broadcastNewEvent.mockImplementation(() => {
       throw new Error('socket gateway down');
     });
@@ -228,10 +265,11 @@ describe('EventService - 后置编排韧性 (unit)', () => {
 
     // broadcast 失败被 EventService.broadcastEvent 内部 try/catch 兜住，下游应继续执行
     expect(notificationService.send).toHaveBeenCalledTimes(1);
-    expect(aiService.triggerAnalysis).toHaveBeenCalledWith('evt-1');
+    expect(aiService.triggerAnalysis).toHaveBeenCalledWith('evt-1', false, { source: 'auto' });
   });
 
   it('NotificationService.send 抛错时，事件主记录仍正常返回，AI 入队仍执行', async () => {
+    process.env.AI_AUTO_ANALYSIS_ENABLED = 'true';
     notificationService.send.mockRejectedValue(new Error('notification provider exploded'));
 
     const result = await service.create({
@@ -248,10 +286,11 @@ describe('EventService - 后置编排韧性 (unit)', () => {
     await flushAsync();
 
     // notify 内有 try/catch，AI 入队不应被阻断
-    expect(aiService.triggerAnalysis).toHaveBeenCalledWith('evt-1');
+    expect(aiService.triggerAnalysis).toHaveBeenCalledWith('evt-1', false, { source: 'auto' });
   });
 
   it('FilterService.applyRules 抛错时，事件主记录仍正常返回，AI 入队仍执行', async () => {
+    process.env.AI_AUTO_ANALYSIS_ENABLED = 'true';
     filterService.applyRules.mockRejectedValue(new Error('filter rule misconfigured'));
 
     const result = await service.create({
@@ -268,10 +307,11 @@ describe('EventService - 后置编排韧性 (unit)', () => {
     await flushAsync();
 
     expect(notificationService.send).not.toHaveBeenCalled();
-    expect(aiService.triggerAnalysis).toHaveBeenCalledWith('evt-1');
+    expect(aiService.triggerAnalysis).toHaveBeenCalledWith('evt-1', false, { source: 'auto' });
   });
 
   it('AIService.triggerAnalysis 抛错时，事件主记录仍正常返回，无异常抛出', async () => {
+    process.env.AI_AUTO_ANALYSIS_ENABLED = 'true';
     aiService.triggerAnalysis.mockRejectedValue(new Error('ai queue connection refused'));
 
     let result: any;
@@ -294,6 +334,6 @@ describe('EventService - 后置编排韧性 (unit)', () => {
     await flushAsync();
 
     expect(notificationService.send).toHaveBeenCalledTimes(1);
-    expect(aiService.triggerAnalysis).toHaveBeenCalledWith('evt-1');
+    expect(aiService.triggerAnalysis).toHaveBeenCalledWith('evt-1', false, { source: 'auto' });
   });
 });

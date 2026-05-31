@@ -14,6 +14,7 @@ import {
 } from '@repo-pulse/ai-sdk';
 import type { AIProvider as ProviderType } from '@repo-pulse/shared';
 import { AIEventNormalizer } from './ai-event-normalizer';
+import { readBooleanEnv } from '../../common/utils/env-flags';
 
 const PROMPT_VERSION = 'v2.0.0';
 
@@ -32,13 +33,22 @@ export class AIService {
   async triggerAnalysis(
     eventId: string,
     force = false,
+    options?: { source?: 'auto' | 'manual' },
   ): Promise<void> {
-    this.logger.log(`Triggering AI analysis for event: ${eventId}, force=${force}`);
+    if (!readBooleanEnv('AI_ANALYSIS_ENABLED', true)) {
+      this.logger.log(`AI analysis job skipped for event: ${eventId}, reason=system_disabled`);
+      return;
+    }
+
+    const source = options?.source ?? 'manual';
+
+    this.logger.log(`Triggering AI analysis for event: ${eventId}, force=${force}, source=${source}`);
 
     await this.aiQueue.add(
       'analyze-event',
-      { eventId, force },
+      { eventId, force, source },
       {
+        jobId: force ? undefined : `analyze-event:${source}:${eventId}`,
         attempts: parseInt(process.env.AI_MAX_RETRY || '2', 10) + 1,
         backoff: { type: 'exponential', delay: 5000 },
       },

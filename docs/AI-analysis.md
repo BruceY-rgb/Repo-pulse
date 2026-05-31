@@ -350,6 +350,8 @@ event.body
 | `event.type` 不在 `[PUSH, PR_OPENED, ISSUE_OPENED]` | `unsupported_event_type`  | ❌ 不可              |
 | `body` 为空且 `title` 长度 < 10                     | `empty_content`           | ❌ 不可              |
 | 系统 `AI_ANALYSIS_ENABLED=false`                    | `system_disabled`         | ❌ 不可              |
+| 自动分析 `AI_AUTO_ANALYSIS_ENABLED` 未显式开启      | `auto_disabled`           | ❌ 不可              |
+| 仓库没有符合自动分析 access mode 的用户关联         | `auto_no_eligible_repository_user` | ❌ 不可      |
 | 仓库 `aiAnalysisEnabled=false`                      | `repository_disabled`     | ✅ 可                |
 | 当日仓库分析数 ≥ `AI_MAX_DAILY_EVENTS_PER_REPO`     | `quota_exceeded`          | ✅ 可                |
 | 缺少有效 provider/apiKey                            | `provider_not_configured` | ❌ 不可              |
@@ -648,7 +650,9 @@ sanitizeAnalysisOutput(data: AnalysisOutput): AnalysisOutput
 
 | ENV                            | 默认                          | 说明                                          |
 | :----------------------------- | :---------------------------- | :-------------------------------------------- |
-| `AI_ANALYSIS_ENABLED`          | `true`                        | 系统级总开关                                  |
+| `AI_ANALYSIS_ENABLED`          | `true`                        | 系统级总开关；关闭后手动和自动入队都会跳过    |
+| `AI_AUTO_ANALYSIS_ENABLED`     | `false`                       | 事件创建后的自动分析开关；必须显式开启        |
+| `AI_AUTO_ANALYSIS_ACCESS_MODES`| `EDITABLE`                    | 允许自动分析的仓库访问模式；默认不覆盖 MONITOR |
 | `AI_MAX_BODY_CHARS`            | `4000`                        | body 截断阈值                                 |
 | `AI_MAX_DAILY_EVENTS_PER_REPO` | `200`                         | 每仓库每日上限                                |
 | `AI_MAX_RETRY`                 | `2`                           | provider 调用重试上限（含 schema retry 1 次） |
@@ -656,6 +660,8 @@ sanitizeAnalysisOutput(data: AnalysisOutput): AnalysisOutput
 | `DEV_USE_MOCK_AI`              | `false`                       | 强制使用 MockProvider                         |
 
 **配额实现**：基于 Redis `INCR ai:quota:{repoId}:{YYYYMMDD}` + `EXPIRE 86400`，命中即 SKIPPED。
+
+**执行层保护**：`AIProcessor` 在调用 provider 前也会检查开关。历史 Redis 队列中没有 `source` 字段且 `force=false` 的旧 job 按自动分析处理，因此在 `AI_AUTO_ANALYSIS_ENABLED=false` 时会被跳过，不会继续消耗模型 token。
 
 ---
 

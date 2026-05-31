@@ -29,6 +29,9 @@ jest.mock('../../src/modules/event/event.gateway', () => ({
 import { AIProcessor } from '../../src/modules/ai/ai-analysis.processor';
 
 describe('AIProcessor', () => {
+  const originalAIAnalysisEnabled = process.env.AI_ANALYSIS_ENABLED;
+  const originalAIAutoAnalysisEnabled = process.env.AI_AUTO_ANALYSIS_ENABLED;
+
   let processor: AIProcessor;
   let mockAIService: { analyzeEvent: jest.Mock };
   let mockApprovalService: { createFromAIAnalysis: jest.Mock };
@@ -38,6 +41,8 @@ describe('AIProcessor', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    delete process.env.AI_ANALYSIS_ENABLED;
+    process.env.AI_AUTO_ANALYSIS_ENABLED = 'true';
     mockAIService = { analyzeEvent: jest.fn().mockResolvedValue({ summary: 'All good' }) };
     mockApprovalService = { createFromAIAnalysis: jest.fn().mockResolvedValue(null) };
     mockNotificationService = {
@@ -56,6 +61,14 @@ describe('AIProcessor', () => {
     );
   });
 
+  afterEach(() => {
+    if (originalAIAnalysisEnabled === undefined) delete process.env.AI_ANALYSIS_ENABLED;
+    else process.env.AI_ANALYSIS_ENABLED = originalAIAnalysisEnabled;
+
+    if (originalAIAutoAnalysisEnabled === undefined) delete process.env.AI_AUTO_ANALYSIS_ENABLED;
+    else process.env.AI_AUTO_ANALYSIS_ENABLED = originalAIAutoAnalysisEnabled;
+  });
+
   // ── process ───────────────────────────────────────────────────────────────
   describe('process', () => {
     const makeJob = (data: object) => ({ data }) as any;
@@ -68,6 +81,24 @@ describe('AIProcessor', () => {
     it('defaults force to false when not provided', async () => {
       await processor.process(makeJob({ eventId: 'e1' }));
       expect(mockAIService.analyzeEvent).toHaveBeenCalledWith('e1', false);
+    });
+
+    it('skips existing queued auto jobs when auto analysis is disabled', async () => {
+      delete process.env.AI_AUTO_ANALYSIS_ENABLED;
+
+      await processor.process(makeJob({ eventId: 'e1', force: false }));
+
+      expect(mockAIService.analyzeEvent).not.toHaveBeenCalled();
+      expect(mockEventGateway.broadcastAnalysisCompleted).not.toHaveBeenCalled();
+    });
+
+    it('skips every queued job when AI analysis is globally disabled', async () => {
+      process.env.AI_ANALYSIS_ENABLED = 'false';
+
+      await processor.process(makeJob({ eventId: 'e1', force: true, source: 'manual' }));
+
+      expect(mockAIService.analyzeEvent).not.toHaveBeenCalled();
+      expect(mockEventGateway.broadcastAnalysisCompleted).not.toHaveBeenCalled();
     });
 
     it('retries notifications after analysis', async () => {

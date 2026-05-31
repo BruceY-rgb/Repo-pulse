@@ -8,10 +8,12 @@ import { ApprovalService } from '../approval/approval.service';
 import { NotificationService } from '../notification/notification.service';
 import { EventService } from '../event/event.service';
 import { EventGateway } from '../event/event.gateway';
+import { readBooleanEnv } from '../../common/utils/env-flags';
 
 interface AIAnalysisJob {
   eventId: string;
   force?: boolean;
+  source?: 'auto' | 'manual';
 }
 
 @Processor('ai-analysis')
@@ -31,8 +33,19 @@ export class AIProcessor extends WorkerHost {
 
   async process(job: Job<AIAnalysisJob>): Promise<void> {
     const { eventId, force } = job.data;
+    const source = job.data.source ?? (force ? 'manual' : 'auto');
 
-    this.logger.log(`Processing AI analysis for event: ${eventId}, force=${force ?? false}`);
+    this.logger.log(`Processing AI analysis for event: ${eventId}, force=${force ?? false}, source=${source}`);
+
+    if (!readBooleanEnv('AI_ANALYSIS_ENABLED', true)) {
+      this.logger.log(`Skipping AI analysis job for event: ${eventId}, reason=system_disabled`);
+      return;
+    }
+
+    if (source === 'auto' && !readBooleanEnv('AI_AUTO_ANALYSIS_ENABLED', false)) {
+      this.logger.log(`Skipping AI analysis job for event: ${eventId}, reason=auto_disabled`);
+      return;
+    }
 
     try {
       const analysis = await this.aiService.analyzeEvent(eventId, force ?? false);

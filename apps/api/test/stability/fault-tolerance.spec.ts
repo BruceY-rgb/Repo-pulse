@@ -105,7 +105,17 @@ async function makeService(overrides: {
 }
 
 describe('稳定性测试 — 服务故障降级 (Fault Tolerance)', () => {
-  beforeEach(() => jest.clearAllMocks());
+  const originalAIAutoAnalysisEnabled = process.env.AI_AUTO_ANALYSIS_ENABLED;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.AI_AUTO_ANALYSIS_ENABLED = 'true';
+  });
+
+  afterEach(() => {
+    if (originalAIAutoAnalysisEnabled === undefined) delete process.env.AI_AUTO_ANALYSIS_ENABLED;
+    else process.env.AI_AUTO_ANALYSIS_ENABLED = originalAIAutoAnalysisEnabled;
+  });
 
   // ── WebSocket 广播失败 ────────────────────────────────────────────────────
   describe('WebSocket Gateway 故障', () => {

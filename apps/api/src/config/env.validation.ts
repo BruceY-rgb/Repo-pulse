@@ -34,6 +34,16 @@ export const envValidationSchema = Joi.object({
     .default('openai'),
   AI_DEFAULT_MODEL: Joi.string().default('gpt-4o-mini'),
   AI_FALLBACK_CHAIN: Joi.string().default('openai,anthropic,ollama'),
+  AI_ANALYSIS_ENABLED: Joi.boolean()
+    .truthy('true').truthy('1').truthy('yes').truthy('on')
+    .falsy('false').falsy('0').falsy('no').falsy('off')
+    .default(true),
+  AI_AUTO_ANALYSIS_ENABLED: Joi.boolean()
+    .truthy('true').truthy('1').truthy('yes').truthy('on')
+    .falsy('false').falsy('0').falsy('no').falsy('off')
+    .default(false),
+  AI_AUTO_ANALYSIS_ACCESS_MODES: Joi.string().default('EDITABLE'),
+  AI_MAX_RETRY: Joi.number().integer().min(0).default(2),
 
   // App
   APP_HOST: Joi.string().hostname().default('127.0.0.1'),

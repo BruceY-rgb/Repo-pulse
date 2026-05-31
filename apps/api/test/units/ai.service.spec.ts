@@ -87,12 +87,15 @@ function makeAnalysis(overrides: object = {}) {
 }
 
 describe('AIService', () => {
+  const originalAIAnalysisEnabled = process.env.AI_ANALYSIS_ENABLED;
+
   let service: AIService;
   let mockQueue: { add: jest.Mock };
   let mockNormalizer: { shouldAnalyze: jest.Mock; buildAnalysisInput: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
+    delete process.env.AI_ANALYSIS_ENABLED;
     mockQueue = { add: jest.fn().mockResolvedValue(undefined) };
     mockNormalizer = {
       shouldAnalyze: jest.fn().mockReturnValue({ should: true }),
@@ -101,13 +104,18 @@ describe('AIService', () => {
     service = new AIService(mockQueue as any, mockNormalizer as any);
   });
 
+  afterEach(() => {
+    if (originalAIAnalysisEnabled === undefined) delete process.env.AI_ANALYSIS_ENABLED;
+    else process.env.AI_ANALYSIS_ENABLED = originalAIAnalysisEnabled;
+  });
+
   // ── triggerAnalysis ───────────────────────────────────────────────────────
   describe('triggerAnalysis', () => {
     it('adds job to ai-analysis queue', async () => {
       await service.triggerAnalysis('e1');
       expect(mockQueue.add).toHaveBeenCalledWith(
         'analyze-event',
-        { eventId: 'e1', force: false },
+        { eventId: 'e1', force: false, source: 'manual' },
         expect.objectContaining({ attempts: expect.any(Number) }),
       );
     });
@@ -116,9 +124,17 @@ describe('AIService', () => {
       await service.triggerAnalysis('e1', true);
       expect(mockQueue.add).toHaveBeenCalledWith(
         'analyze-event',
-        { eventId: 'e1', force: true },
+        { eventId: 'e1', force: true, source: 'manual' },
         expect.any(Object),
       );
+    });
+
+    it('does not add a job when AI analysis is globally disabled', async () => {
+      process.env.AI_ANALYSIS_ENABLED = 'false';
+
+      await service.triggerAnalysis('e1');
+
+      expect(mockQueue.add).not.toHaveBeenCalled();
     });
   });
 
