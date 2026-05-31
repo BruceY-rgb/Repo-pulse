@@ -22,7 +22,7 @@ contextBridge.exposeInMainWorld('repoPulseDesktop', {
       sdkSessionId?: string | null;
     }) => ipcRenderer.invoke('agent:start-session', params),
     stopSession: () => ipcRenderer.invoke('agent:stop-session'),
-    resolvePermission: (params: { toolUseID: string; approve: boolean }) =>
+    resolvePermission: (params: { toolUseID: string; approve: boolean; message?: string }) =>
       ipcRenderer.invoke('agent:resolve-permission', params),
     onMessage: (callback: (message: any) => void) => {
       const subscription = (_event: any, message: any) => callback(message);
@@ -38,5 +38,9 @@ contextBridge.exposeInMainWorld('repoPulseDesktop', {
         ipcRenderer.removeListener('agent:permission-request', subscription);
       };
     },
+  },
+  git: {
+    getStatus: (params: { cwd: string }) => ipcRenderer.invoke('git:get-status', params),
+    selectDirectory: (params: { repositoryUrl: string }) => ipcRenderer.invoke('git:select-directory', params),
   },
 });

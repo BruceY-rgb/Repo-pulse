@@ -20,9 +20,39 @@ type RepoPulseDesktopBridge = {
       sdkSessionId?: string | null;
     }) => Promise<any>;
     stopSession: () => Promise<any>;
-    resolvePermission: (params: { toolUseID: string; approve: boolean }) => Promise<any>;
+    resolvePermission: (params: { toolUseID: string; approve: boolean; message?: string }) => Promise<any>;
     onMessage: (callback: (message: any) => void) => () => void;
     onPermissionRequest: (callback: (request: any) => void) => () => void;
+  };
+  git?: {
+    getStatus: (params: { cwd: string }) => Promise<{
+      isGitRepo: boolean;
+      branch: string;
+      cwd: string;
+      changes: Array<{
+        path: string;
+        status: 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
+        staged: boolean;
+      }>;
+      commits: Array<{
+        hash: string;
+        parents: string[];
+        author: string;
+        age: string;
+        message: string;
+        refs?: Array<{
+          name: string;
+          type: 'head' | 'local' | 'remote' | 'tag';
+        }>;
+      }>;
+    }>;
+    selectDirectory: (params: { repositoryUrl: string }) => Promise<{
+      canceled?: boolean;
+      success?: boolean;
+      error?: string;
+      cwd?: string;
+      branch?: string;
+    }>;
   };
 };
 

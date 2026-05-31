@@ -3,6 +3,7 @@ import path from 'node:path';
 import { URL } from 'node:url';
 import { AgentWorkspaceManager } from './lib/agent-workspace-manager';
 import { AgentOrchestrator } from './lib/agent-orchestrator';
+import { GitManager } from './lib/git-manager';
 
 const isDev = !app.isPackaged;
 const devServerUrl = process.env.VITE_DEV_SERVER_URL ?? 'http://127.0.0.1:5173';
@@ -145,11 +146,42 @@ function registerIpcHandlers() {
     return { success: true };
   });
 
-  ipcMain.handle('agent:resolve-permission', async (_event, params: { toolUseID: string; approve: boolean }) => {
+  ipcMain.handle('agent:resolve-permission', async (_event, params: { toolUseID: string; approve: boolean; message?: string }) => {
     if (agentOrchestrator) {
-      agentOrchestrator.resolvePermission(params.toolUseID, params.approve);
+      agentOrchestrator.resolvePermission(params.toolUseID, params.approve, params.message);
     }
     return { success: true };
+  });
+
+  ipcMain.handle('git:get-status', async (_event, params: { cwd: string }) => {
+    const gitManager = new GitManager();
+    return gitManager.getStatus(params.cwd);
+  });
+
+  ipcMain.handle('git:select-directory', async (_event, params: { repositoryUrl: string }) => {
+    const { dialog } = require('electron');
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openDirectory'],
+      title: '选择本地 Git 仓库工作区',
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true };
+    }
+
+    const pickedPath = result.filePaths[0];
+    const gitManager = new GitManager();
+    const verification = await gitManager.verifyRepository(pickedPath, params.repositoryUrl);
+
+    if (!verification.success) {
+      return { success: false, error: verification.error };
+    }
+
+    return {
+      success: true,
+      cwd: verification.gitRoot,
+      branch: verification.branch,
+    };
   });
 }
 

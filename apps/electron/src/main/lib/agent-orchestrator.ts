@@ -3,6 +3,13 @@ import { BrowserWindow } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+const REPO_PULSE_AGENT_SYSTEM_PROMPT = `
+Repo-Pulse Agent commit policy:
+- When creating Git commits for the user, write commit messages as Repo-Pulse Agent.
+- If a co-author trailer is appropriate, use exactly: Co-Authored-By: Repo-Pulse Agent <noreply@repo-pulse.local>
+- Do not add Claude, Anthropic, or model-provider co-author trailers to commit messages.
+`;
+
 export class AgentOrchestrator {
   private activeQuery: any = null;
   private pendingPermissions = new Map<string, {
@@ -122,7 +129,11 @@ export class AgentOrchestrator {
           toolUseID,
           toolName,
           command,
-          title: options.title || `Claude 申请执行命令: ${command}`,
+          input,
+          displayName: options.displayName,
+          blockedPath: options.blockedPath,
+          decisionReason: options.decisionReason,
+          title: options.title || (command ? `Claude 申请执行命令: ${command}` : `Claude 申请使用 ${toolName}`),
           description: options.description || '当前配置为：在执行任何操作前，均需获得您的授权。',
         });
       });
@@ -136,6 +147,11 @@ export class AgentOrchestrator {
           canUseTool,
           model: model || 'claude-3-5-sonnet-latest',
           resume: sdkSessionId || undefined,
+          systemPrompt: {
+            type: 'preset',
+            preset: 'claude_code',
+            append: REPO_PULSE_AGENT_SYSTEM_PROMPT,
+          },
           env: {
             ...process.env,
             ANTHROPIC_API_KEY: apiKey,
@@ -303,13 +319,13 @@ export class AgentOrchestrator {
   /**
    * 解决挂起的权限请求
    */
-  resolvePermission(toolUseID: string, approve: boolean): void {
+  resolvePermission(toolUseID: string, approve: boolean, message?: string): void {
     const pending = this.pendingPermissions.get(toolUseID);
     if (pending) {
       if (approve) {
         pending.resolve({ behavior: 'allow', updatedInput: pending.input });
       } else {
-        pending.resolve({ behavior: 'deny', message: 'User rejected command execution.' });
+        pending.resolve({ behavior: 'deny', message: message?.trim() || 'User rejected command execution.' });
       }
       this.pendingPermissions.delete(toolUseID);
     }

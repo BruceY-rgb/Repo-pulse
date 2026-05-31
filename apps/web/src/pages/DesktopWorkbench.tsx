@@ -25,6 +25,7 @@ import {
   ChevronUp,
   CircleDot,
   Command,
+  CornerDownLeft,
   ExternalLink,
   Eye,
   EyeOff,
@@ -125,6 +126,7 @@ import { workbenchService } from '@/services/workbench.service';
 import { settingsService, PROVIDER_LABELS, type AIProvider } from '@/services/settings.service';
 import { getApiBaseUrl } from '@/lib/desktop';
 import { getProviderLogo } from '@/lib/provider-logo';
+import { GitTreePanel } from '@/components/shared/GitTreePanel';
 import {
   useWorkbenchUnreadStore,
   type WorkbenchUnreadBoundary,
@@ -323,7 +325,7 @@ function MarkdownContent({
 }) {
   return (
     <div className={cn(
-      'prose prose-sm prose-invert max-w-none text-muted-foreground',
+      'prose prose-sm prose-invert max-w-none text-muted-foreground break-words overflow-hidden w-full',
       'prose-headings:text-foreground prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1',
       'prose-a:text-info-foreground prose-strong:text-foreground prose-hr:border-border',
       className,
@@ -2154,7 +2156,7 @@ function ConversationBubble({
 
   return (
     <div
-      className="group flex cursor-pointer gap-3"
+      className="group flex cursor-pointer gap-3 w-full min-w-0"
       role="button"
       tabIndex={0}
       onClick={() => onOpenDetail(message)}
@@ -2543,7 +2545,57 @@ function RepositoryConversation({
   const [selectedMessage, setSelectedMessage] = useState<ConversationMessage | null>(null);
   const [activeFilter, setActiveFilter] = useState<MessageFilterKey>('all');
   const [pendingUnreadJump, setPendingUnreadJump] = useState(false);
+  const [isGitTreeOpen, setIsGitTreeOpen] = useState(() => {
+    return localStorage.getItem('repo-pulse:repo-git-tree-open') === 'true';
+  });
   const unreadBoundaryRef = useRef<HTMLDivElement | null>(null);
+
+  const [gitTreeWidth, setGitTreeWidth] = useState(() => {
+    return Number(localStorage.getItem('repo-pulse:git-tree-sidebar-width')) || 320;
+  });
+  const [isGitTreeResizing, setIsGitTreeResizing] = useState(false);
+  const gitTreeResizeStartRef = useRef({ clientX: 0, width: 320 });
+
+  useEffect(() => {
+    if (!isGitTreeResizing) {
+      return;
+    }
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+
+    function handlePointerMove(event: globalThis.PointerEvent) {
+      const delta = event.clientX - gitTreeResizeStartRef.current.clientX;
+      const newWidth = Math.min(600, Math.max(280, gitTreeResizeStartRef.current.width - delta));
+      setGitTreeWidth(newWidth);
+      localStorage.setItem('repo-pulse:git-tree-sidebar-width', String(newWidth));
+    }
+
+    function handlePointerUp() {
+      setIsGitTreeResizing(false);
+    }
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+
+    return () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [isGitTreeResizing]);
+
+  const handleGitTreeResizePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    gitTreeResizeStartRef.current = {
+      clientX: event.clientX,
+      width: gitTreeWidth,
+    };
+    setIsGitTreeResizing(true);
+  };
   const filteredMessages = useMemo(
     () => messages.filter((message) => doesMessageMatchFilter(message, activeFilter)),
     [activeFilter, messages],
@@ -2603,7 +2655,8 @@ function RepositoryConversation({
   }, [contextMenu]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex w-full h-full min-h-0 overflow-hidden bg-background">
+      <div className="flex-1 min-w-0 flex flex-col h-full min-h-0">
       <div className="border-b border-border bg-background px-6 py-3">
         <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -2631,9 +2684,25 @@ function RepositoryConversation({
               跳到未读 · {unreadBoundary.unreadCount}
             </Button>
           ) : null}
+          <Button
+            type="button"
+            size="sm"
+            variant={isGitTreeOpen ? "secondary" : "outline"}
+            className={cn("h-8 rounded-full gap-1.5 text-xs font-semibold select-none", !hasUnreadBoundary && "ml-auto")}
+            onClick={() => {
+              setIsGitTreeOpen(prev => {
+                const next = !prev;
+                localStorage.setItem('repo-pulse:repo-git-tree-open', String(next));
+                return next;
+              });
+            }}
+          >
+            <GitBranch className={cn("h-4 w-4", isGitTreeOpen && "text-primary")} />
+            <span>Git 状态</span>
+          </Button>
         </div>
       </div>
-      <ScrollArea className="min-h-0 flex-1">
+      <ScrollArea className="min-h-0 flex-1 min-w-0">
         <div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 py-6">
           {filteredMessages.length > 0 ? (
             filteredMessages.map((message) => {
@@ -2754,6 +2823,35 @@ function RepositoryConversation({
         onRejectMessage={onRejectMessage}
         approvalActionId={approvalActionId}
       />
+      </div>
+
+      {isGitTreeOpen && (
+        <div
+          className="border-l border-border bg-card flex flex-col h-full shrink-0 relative animate-in slide-in-from-right duration-250"
+          style={{ width: gitTreeWidth }}
+        >
+          {/* Resize separator handle on the left edge */}
+          <div
+            className="desktop-no-drag group absolute bottom-0 left-[-4px] top-0 z-40 w-2 cursor-col-resize outline-none"
+            role="separator"
+            tabIndex={0}
+            onPointerDown={handleGitTreeResizePointerDown}
+            onDoubleClick={() => {
+              setGitTreeWidth(320);
+              localStorage.setItem('repo-pulse:git-tree-sidebar-width', '320');
+            }}
+          >
+            <span className="absolute left-[3px] top-0 h-full w-px bg-transparent transition-colors group-hover:bg-primary/50 group-focus-visible:bg-primary" />
+          </div>
+
+          <GitTreePanel
+            repositoryId={repository.id}
+            repositoryUrl={repository.url}
+            localCwd={getAgentWorkspaceMemory(repository.id)?.cwd}
+            onAskAgent={onOpenAgent}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -3572,7 +3670,19 @@ interface AgentSession {
   createdAt: string;
   sdkSessionId?: string | null;
   sdkSessionUpdatedAt?: string | null;
-  pendingPermission?: any | null;
+  pendingPermission?: AgentPendingPermission | null;
+}
+
+interface AgentPendingPermission {
+  toolUseID: string;
+  toolName?: string;
+  command?: string;
+  input?: unknown;
+  title?: string;
+  description?: string;
+  displayName?: string;
+  blockedPath?: string;
+  decisionReason?: string;
 }
 
 const createAgentId = () => Math.random().toString(36).substring(2, 9);
@@ -3722,6 +3832,29 @@ function getToolDisplayName(name?: string, input?: unknown): string {
   if (name === 'Write' || name === 'Edit' || name === 'MultiEdit') return '修改文件';
   if (typeof record?._displayName === 'string') return record._displayName;
   return name ? `调用 ${name}` : '调用工具';
+}
+
+function getPermissionCommand(request?: AgentPendingPermission | null): string {
+  if (!request) return '';
+  if (typeof request.command === 'string' && request.command.trim()) {
+    return request.command.trim();
+  }
+
+  const extracted = extractToolCommand(request.input);
+  if (extracted && extracted !== '{}') return extracted;
+  return '';
+}
+
+function getPermissionDisplayText(request?: AgentPendingPermission | null): string {
+  const command = getPermissionCommand(request);
+  if (command) return request?.toolName === 'Bash' ? `$ ${command}` : command;
+
+  const record = safeRecord(request?.input);
+  if (record && Object.keys(record).length > 0) {
+    return JSON.stringify(record, null, 2);
+  }
+
+  return request?.title || request?.description || request?.displayName || '等待工具输入...';
 }
 
 function extractWorkflowTasks(input: unknown): AgentWorkflowTask[] | undefined {
@@ -4121,6 +4254,188 @@ function AgentChoiceRequestCard({
   );
 }
 
+function AgentToolCallCard({
+  item,
+}: {
+  item: Extract<AgentMessage, { type: 'tool_call' }>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasResult = Boolean(item.output || item.error);
+  const toggleExpanded = () => {
+    if (hasResult) setExpanded(prev => !prev);
+  };
+
+  return (
+    <div
+      role={hasResult ? 'button' : undefined}
+      tabIndex={hasResult ? 0 : undefined}
+      aria-expanded={hasResult ? expanded : undefined}
+      onClick={toggleExpanded}
+      onKeyDown={(event) => {
+        if (!hasResult) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          toggleExpanded();
+        }
+      }}
+      className={cn(
+        'ml-10 rounded-xl border border-border bg-slate-950 p-4 text-xs text-muted-foreground shadow-inner transition-colors',
+        hasResult && 'cursor-pointer hover:border-slate-600',
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          <Terminal className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-400" />
+          <span className="min-w-0 whitespace-pre-wrap break-words font-mono font-bold leading-5 text-cyan-400">
+            {item.command && item.command !== '{}' ? `$ ${item.command}` : getToolDisplayName(item.name)}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Badge variant="outline" className={cn(
+            'rounded-full px-2 py-0 text-[9px]',
+            item.status === 'success' ? 'border-green-500/30 text-green-400 bg-green-500/5' :
+            item.status === 'failed' ? 'border-red-500/30 text-red-400 bg-red-500/5' :
+            'border-cyan-500/30 text-cyan-400 animate-pulse bg-cyan-500/5',
+          )}>
+            {item.status === 'success' ? 'SUCCESS' : item.status === 'failed' ? 'FAILED' : 'RUNNING'}
+          </Badge>
+          {hasResult ? (
+            <ChevronDown className={cn(
+              'h-4 w-4 text-slate-400 transition-transform',
+              expanded && 'rotate-180',
+            )} />
+          ) : null}
+        </div>
+      </div>
+
+      {hasResult && expanded ? (
+        <div className="mt-3 max-h-[340px] min-h-[112px] overflow-auto border-t border-slate-800 pt-3 sm:max-h-[380px]">
+          {item.output ? (
+            <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-slate-300">
+              {item.output}
+            </pre>
+          ) : null}
+
+          {item.error ? (
+            <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-red-400">
+              {item.error}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AgentPermissionRequestCard({
+  request,
+  onResolve,
+}: {
+  request: AgentPendingPermission;
+  onResolve: (approve: boolean, message?: string) => void;
+}) {
+  const [choice, setChoice] = useState<'allow' | 'deny'>('allow');
+  const [denyMessage, setDenyMessage] = useState('');
+  const displayText = getPermissionDisplayText(request);
+  const toolLabel = request.displayName || getToolDisplayName(request.toolName, request.input);
+  const title = request.toolName === 'Bash' ? 'Allow running this command?' : 'Allow using this tool?';
+  const description = request.description || request.title || 'Agent 需要你的确认后才会继续执行。';
+  const submit = () => {
+    onResolve(choice === 'allow', choice === 'deny' ? denyMessage : undefined);
+  };
+
+  return (
+    <div className="ml-10 rounded-xl border border-border bg-card p-3.5 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-250">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <p className="truncate text-sm font-semibold text-foreground">{title}</p>
+        </div>
+        <Badge variant="outline" className="shrink-0 rounded-md border-border bg-background/60 px-2 py-0 text-[10px] text-muted-foreground">
+          {toolLabel}
+        </Badge>
+      </div>
+
+      <pre className="max-h-[148px] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-background/70 px-3 py-2.5 font-mono text-xs leading-5 text-foreground">
+        {displayText}
+      </pre>
+
+      {description && description !== title ? (
+        <p className="mt-2 text-[11px] leading-5 text-muted-foreground">{description}</p>
+      ) : null}
+
+      {request.blockedPath ? (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          访问路径：<span className="font-mono text-foreground">{request.blockedPath}</span>
+        </p>
+      ) : null}
+
+      <div className="mt-3 space-y-1.5">
+        <button
+          type="button"
+          onClick={() => setChoice('allow')}
+          className={cn(
+            'flex min-h-9 w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-sm transition-colors',
+            choice === 'allow'
+              ? 'border-border bg-secondary text-foreground'
+              : 'border-transparent text-muted-foreground hover:bg-secondary/45 hover:text-foreground',
+          )}
+        >
+          <span className="flex h-5 min-w-5 items-center justify-center rounded bg-muted text-xs font-semibold text-muted-foreground">1</span>
+          <span className="min-w-0 flex-1">Yes, allow this time</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setChoice('deny')}
+          className={cn(
+            'flex min-h-9 w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-sm transition-colors',
+            choice === 'deny'
+              ? 'border-border bg-secondary text-foreground'
+              : 'border-transparent text-muted-foreground hover:bg-secondary/45 hover:text-foreground',
+          )}
+        >
+          <span className="flex h-5 min-w-5 items-center justify-center rounded bg-muted text-xs font-semibold text-muted-foreground">2</span>
+          <span className="min-w-0 flex-1">No, tell the agent what to do instead</span>
+        </button>
+      </div>
+
+      {choice === 'deny' ? (
+        <Textarea
+          value={denyMessage}
+          onChange={(event) => setDenyMessage(event.target.value)}
+          placeholder="告诉 Agent 应该如何调整..."
+          className="mt-3 min-h-20 resize-y rounded-lg bg-background/70 text-sm"
+        />
+      ) : null}
+
+      <div className="mt-3 flex items-center justify-end gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setChoice('deny');
+            onResolve(false);
+          }}
+          className="h-8 rounded-lg px-3 text-xs font-semibold text-muted-foreground"
+        >
+          Skip
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          onClick={submit}
+          className="h-8 gap-1.5 rounded-lg px-3 text-xs font-semibold"
+        >
+          Submit
+          <CornerDownLeft className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function AgentRunView({
   repository: initialRepository,
   prompt: initialPrompt,
@@ -4164,6 +4479,57 @@ function AgentRunView({
 
   const [isAddProjectOpen, setIsAddProjectOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
+  const [isGitTreeOpen, setIsGitTreeOpen] = useState(() => {
+    return localStorage.getItem('repo-pulse:agent-git-tree-open') !== 'false';
+  });
+  const [gitRefreshTrigger, setGitRefreshTrigger] = useState(0);
+
+  const [gitTreeWidth, setGitTreeWidth] = useState(() => {
+    return Number(localStorage.getItem('repo-pulse:agent-git-tree-sidebar-width')) || 320;
+  });
+  const [isGitTreeResizing, setIsGitTreeResizing] = useState(false);
+  const gitTreeResizeStartRef = useRef({ clientX: 0, width: 320 });
+
+  useEffect(() => {
+    if (!isGitTreeResizing) {
+      return;
+    }
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+
+    function handlePointerMove(event: globalThis.PointerEvent) {
+      const delta = event.clientX - gitTreeResizeStartRef.current.clientX;
+      const newWidth = Math.min(600, Math.max(280, gitTreeResizeStartRef.current.width - delta));
+      setGitTreeWidth(newWidth);
+      localStorage.setItem('repo-pulse:agent-git-tree-sidebar-width', String(newWidth));
+    }
+
+    function handlePointerUp() {
+      setIsGitTreeResizing(false);
+    }
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+
+    return () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [isGitTreeResizing]);
+
+  const handleGitTreeResizePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    gitTreeResizeStartRef.current = {
+      clientX: event.clientX,
+      width: gitTreeWidth,
+    };
+    setIsGitTreeResizing(true);
+  };
 
   const messageEndRef = useRef<HTMLDivElement>(null);
   const processedInitialPromptRef = useRef<string | null>(null);
@@ -4330,11 +4696,6 @@ function AgentRunView({
             type: 'user',
             content: initialPrompt,
           },
-          {
-            id: createAgentId(),
-            type: 'system',
-            content: '正在准备本地 Git 工作区...',
-          },
         ],
         workflowActivities: [
           createWorkflowActivity({
@@ -4368,6 +4729,9 @@ function AgentRunView({
     if (!window.repoPulseDesktop?.agent) return;
 
     const unsubscribeMessage = window.repoPulseDesktop.agent.onMessage((msg: any) => {
+      if (msg && ['finished', 'error', 'tool_result'].includes(msg.type)) {
+        setGitRefreshTrigger(prev => prev + 1);
+      }
       const runningTarget = runningAgentTargetRef.current;
       const activeId = runningTarget?.sessionId || activeSessionIdRef.current;
       const activeRepo = runningTarget?.repoId || activeRepoIdRef.current;
@@ -4454,7 +4818,6 @@ function AgentRunView({
           } else if (!isLocal) {
             localStorage.removeItem(agentWorkspaceMemoryKey(activeRepo));
           }
-          updatedMessages = appendSystemMessage(updatedMessages, `${title}${branchText}`);
           updatedWorkflow = upsertWorkflowActivity(updatedWorkflow, createWorkflowActivity({
             id: `workspace-ready:${msg.cwd || activeRepo}`,
             type: 'system',
@@ -4465,7 +4828,6 @@ function AgentRunView({
         } else if (msg.type === 'session_state' && typeof msg.sessionId === 'string' && msg.sessionId.trim()) {
           const alreadyBound = currentActive.sdkSessionId === msg.sessionId;
           const title = msg.resumed || alreadyBound ? '已恢复 SDK 会话记忆' : '已绑定 SDK 会话记忆';
-          updatedMessages = appendSystemMessage(updatedMessages, title);
           updatedWorkflow = upsertWorkflowActivity(updatedWorkflow, createWorkflowActivity({
             id: `sdk-session:${msg.sessionId}`,
             type: 'system',
@@ -4597,6 +4959,8 @@ function AgentRunView({
       const activeId = runningTarget?.sessionId || activeSessionIdRef.current;
       const activeRepo = runningTarget?.repoId || activeRepoIdRef.current;
       if (!activeRepo || !activeId) return;
+      const pendingPermission = req as AgentPendingPermission;
+      const command = getPermissionCommand(pendingPermission);
 
       updateRepoSessions(activeRepo, (prevSessions) => {
         return prevSessions.map(s => {
@@ -4604,16 +4968,16 @@ function AgentRunView({
           return {
             ...s,
             status: 'waiting_permission' as const,
-            pendingPermission: req,
+            pendingPermission,
             workflowActivities: upsertWorkflowActivity(s.workflowActivities, createWorkflowActivity({
-              id: `permission:${req.toolUseID}`,
+              id: `permission:${pendingPermission.toolUseID}`,
               type: 'permission',
               title: '等待命令授权',
-              detail: req.description || req.title,
-              command: req.command,
+              detail: pendingPermission.description || pendingPermission.title,
+              command,
               status: 'waiting',
-              toolUseID: req.toolUseID,
-              toolName: req.toolName,
+              toolUseID: pendingPermission.toolUseID,
+              toolName: pendingPermission.toolName,
             })),
           };
         });
@@ -4742,10 +5106,7 @@ function AgentRunView({
           status: 'running',
           error: null,
           pendingPermission: null,
-          messages: appendSystemMessage(
-            s.messages,
-            hasWorkspaceMemory ? '正在复用本地 Git 工作区授权...' : '正在准备本地 Git 工作区...',
-          ),
+          messages: s.messages,
           workflowActivities: upsertWorkflowActivity(
             sdkSessionId
               ? upsertWorkflowActivity(s.workflowActivities, createWorkflowActivity({
@@ -4860,7 +5221,7 @@ function AgentRunView({
     }
   };
 
-  const resolvePermission = async (approve: boolean) => {
+  const resolvePermission = async (approve: boolean, message?: string) => {
     const activeRepo = activeRepoIdRef.current;
     const activeId = activeSessionIdRef.current;
     if (!activeRepo || !activeId) return;
@@ -4869,13 +5230,15 @@ function AgentRunView({
     const activeSession = repoSessions.find(s => s.id === activeId);
     if (!activeSession || !activeSession.pendingPermission) return;
     
-    const toolUseID = activeSession.pendingPermission.toolUseID;
-    const command = activeSession.pendingPermission.command;
+    const pendingPermission = activeSession.pendingPermission as AgentPendingPermission;
+    const toolUseID = pendingPermission.toolUseID;
+    const command = getPermissionCommand(pendingPermission) || getToolDisplayName(pendingPermission.toolName, pendingPermission.input);
 
     try {
       await window.repoPulseDesktop!.agent!.resolvePermission({
         toolUseID,
         approve,
+        message,
       });
 
       updateRepoSessions(activeRepo, prev => {
@@ -5321,6 +5684,26 @@ function AgentRunView({
               )}
             </div>
           </div>
+          {activeSession && activeRepository && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant={isGitTreeOpen ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => {
+                  setIsGitTreeOpen(prev => {
+                    const next = !prev;
+                    localStorage.setItem('repo-pulse:agent-git-tree-open', String(next));
+                    return next;
+                  });
+                }}
+                className="gap-1.5 h-8 font-semibold text-xs rounded-lg text-muted-foreground hover:text-foreground"
+                title={isGitTreeOpen ? "收起 Git 状态" : "展开 Git 状态"}
+              >
+                <GitBranch className={cn("h-4 w-4", isGitTreeOpen && "text-primary")} />
+                <span>Git 状态</span>
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Timeline Content */}
@@ -5460,46 +5843,7 @@ function AgentRunView({
                   )}
 
                   {item.type === 'tool_call' && (
-                    <div className="ml-10 rounded-xl border border-border bg-slate-950 p-4 text-xs text-muted-foreground space-y-3 shadow-inner">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex min-w-0 flex-1 items-start gap-2">
-                          <Terminal className="h-3.5 w-3.5 text-cyan-400" />
-                          <span className="min-w-0 whitespace-pre-wrap break-words font-mono font-bold leading-5 text-cyan-400">
-                            {item.command && item.command !== '{}' ? `$ ${item.command}` : getToolDisplayName(item.name)}
-                          </span>
-                        </div>
-                        <Badge variant="outline" className={cn(
-                          "rounded-full text-[9px] px-2 py-0",
-                          item.status === 'success' ? "border-green-500/30 text-green-400 bg-green-500/5" :
-                          item.status === 'failed' ? "border-red-500/30 text-red-400 bg-red-500/5" :
-                          "border-cyan-500/30 text-cyan-400 animate-pulse bg-cyan-500/5"
-                        )}>
-                          {item.status === 'success' ? 'SUCCESS' : item.status === 'failed' ? 'FAILED' : 'RUNNING'}
-                        </Badge>
-                      </div>
-
-                      {(item.output || item.error) && (
-                        <details className="group rounded-lg border border-slate-700/70 bg-black/30">
-                          <summary className="flex cursor-pointer select-none items-center justify-between gap-3 px-3 py-2 text-[11px] font-medium text-slate-300 hover:text-slate-100">
-                            <span>{item.error ? '查看错误输出' : '查看执行结果'}</span>
-                            <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
-                          </summary>
-                          <div className="max-h-[320px] min-h-[112px] overflow-auto border-t border-slate-700/70 p-3 sm:max-h-[360px]">
-                            {item.output ? (
-                              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-slate-300">
-                                {item.output}
-                              </pre>
-                            ) : null}
-
-                            {item.error ? (
-                              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-red-400">
-                                {item.error}
-                              </pre>
-                            ) : null}
-                          </div>
-                        </details>
-                      )}
-                    </div>
+                    <AgentToolCallCard item={item} />
                   )}
 
                   {item.type === 'error' && (
@@ -5515,44 +5859,10 @@ function AgentRunView({
               ))}
 
               {activeSession.pendingPermission && (
-                <div className="ml-10 rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 space-y-4 shadow-md animate-in fade-in slide-in-from-bottom-2 duration-300">
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 rounded-lg bg-amber-500/20 text-amber-500 mt-0.5 shrink-0">
-                      <Shield className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-semibold text-foreground">
-                        安全拦截：命令执行授权请求
-                      </h4>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Claude Agent 申请在您的本地工作区执行以下写入命令。
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg bg-black p-3.5 font-mono text-xs text-amber-500 border border-amber-500/20 flex items-center justify-between">
-                    <span>$ {activeSession.pendingPermission.command}</span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button
-                      onClick={() => resolvePermission(true)}
-                      size="sm"
-                      className="bg-amber-600 hover:bg-amber-700 text-white font-semibold gap-1.5"
-                    >
-                      <CheckCheck className="h-4 w-4" />
-                      同意执行
-                    </Button>
-                    <Button
-                      onClick={() => resolvePermission(false)}
-                      variant="outline"
-                      size="sm"
-                      className="border-border text-muted-foreground hover:bg-secondary"
-                    >
-                      拒绝授权
-                    </Button>
-                  </div>
-                </div>
+                <AgentPermissionRequestCard
+                  request={activeSession.pendingPermission}
+                  onResolve={resolvePermission}
+                />
               )}
 
               <div ref={messageEndRef} />
@@ -5618,6 +5928,37 @@ function AgentRunView({
           </div>
         )}
       </div>
+
+      {isGitTreeOpen && activeRepository && activeSession && (
+        <div
+          className="border-l border-border bg-card flex flex-col h-full shrink-0 relative animate-in slide-in-from-right duration-250"
+          style={{ width: gitTreeWidth }}
+        >
+          {/* Resize separator handle on the left edge */}
+          <div
+            className="desktop-no-drag group absolute bottom-0 left-[-4px] top-0 z-40 w-2 cursor-col-resize outline-none"
+            role="separator"
+            tabIndex={0}
+            onPointerDown={handleGitTreeResizePointerDown}
+            onDoubleClick={() => {
+              setGitTreeWidth(320);
+              localStorage.setItem('repo-pulse:agent-git-tree-sidebar-width', '320');
+            }}
+          >
+            <span className="absolute left-[3px] top-0 h-full w-px bg-transparent transition-colors group-hover:bg-primary/50 group-focus-visible:bg-primary" />
+          </div>
+
+          <GitTreePanel
+            repositoryId={activeRepository.id}
+            repositoryUrl={activeRepository.url}
+            localCwd={getAgentWorkspaceMemory(activeRepository.id)?.cwd}
+            refreshTrigger={gitRefreshTrigger}
+            onAskAgent={(prompt) => {
+              setChatInput(prompt);
+            }}
+          />
+        </div>
+      )}
 
       {/* Add Project Dialog */}
       <Dialog open={isAddProjectOpen} onOpenChange={setIsAddProjectOpen}>
