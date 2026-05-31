@@ -15,6 +15,7 @@ type RepoPulseDesktopBridge = {
       prompt: string;
       apiKey: string;
       model?: string;
+      baseUrl?: string;
     }) => Promise<any>;
     stopSession: () => Promise<any>;
     resolvePermission: (params: { toolUseID: string; approve: boolean }) => Promise<any>;

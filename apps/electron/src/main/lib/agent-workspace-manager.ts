@@ -49,22 +49,15 @@ export class AgentWorkspaceManager {
       // 执行 git clone
       await execAsync(`git clone "${gitUrl}" "${workspacePath}"`);
     } else {
-      // 已存在，尝试更新
+      // 已存在且为有效 git 仓库，仅更新远程引用，保留本地工作产物
       try {
-        // 清理本地未提交修改并强行重置
-        await execAsync('git clean -fd && git reset --hard', { cwd: workspacePath });
-        
         // 更新 remote url，防止之前的 token 过期
         await execAsync(`git remote set-url origin "${gitUrl}"`, { cwd: workspacePath });
         
-        // 拉取最新
+        // 仅拉取远程最新引用，不修改本地工作树
         await execAsync('git fetch origin', { cwd: workspacePath });
-        
-        // 强行对齐默认分支
-        await execAsync(`git checkout "${defaultBranch}"`, { cwd: workspacePath });
-        await execAsync(`git reset --hard "origin/${defaultBranch}"`, { cwd: workspacePath });
       } catch (err) {
-        // 如果更新失败，说明本地仓库损坏，直接删掉重新克隆
+        // 如果 fetch 失败，说明本地仓库损坏，直接删掉重新克隆
         await fs.rm(workspacePath, { recursive: true, force: true });
         await fs.mkdir(workspacePath, { recursive: true });
         await execAsync(`git clone "${gitUrl}" "${workspacePath}"`);

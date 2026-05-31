@@ -49,6 +49,7 @@ import {
   Send,
   Settings,
   Settings2,
+  Shield,
   ShieldAlert,
   SlidersHorizontal,
   Sparkles,
@@ -1949,7 +1950,7 @@ function WorkbenchHeader({
             添加仓库
           </Button>
         </div>
-      ) : activeView !== 'watch' ? (
+      ) : (
         <div className="desktop-no-drag flex items-center gap-2">
           {activeView === 'repository' && onOpenContributors ? (
             <Tooltip>
@@ -2008,7 +2009,7 @@ function WorkbenchHeader({
             </Tooltip>
           ) : null}
         </div>
-      ) : null}
+      )}
     </header>
   );
 }
@@ -3499,16 +3500,415 @@ function WatchFeed({
   );
 }
 
+type AgentSessionStatus = 'ready' | 'running' | 'waiting_permission' | 'error' | 'finished';
+type AgentToolStatus = 'running' | 'success' | 'failed';
+type AgentWorkflowStatus = 'pending' | 'running' | 'waiting' | 'success' | 'error';
+type AgentWorkflowType = 'system' | 'thought' | 'tool' | 'permission' | 'result';
+
+type AgentMessage =
+  | { id: string; type: 'user' | 'assistant' | 'thought' | 'system' | 'error'; content: string }
+  | {
+      id: string;
+      type: 'tool_call';
+      toolUseID?: string;
+      name?: string;
+      command?: string;
+      status: AgentToolStatus;
+      output?: string;
+      error?: string;
+      permissionResolved?: 'approved' | 'rejected';
+    };
+
+interface AgentWorkflowTask {
+  id: string;
+  subject: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'deleted';
+  activeForm?: string;
+}
+
+interface AgentWorkflowActivity {
+  id: string;
+  type: AgentWorkflowType;
+  title: string;
+  status: AgentWorkflowStatus;
+  timestamp: string;
+  detail?: string;
+  command?: string;
+  toolUseID?: string;
+  toolName?: string;
+  output?: string;
+  error?: string;
+  tasks?: AgentWorkflowTask[];
+  permissionResolved?: 'approved' | 'rejected';
+}
+
 interface AgentSession {
   id: string;
   title: string;
   prompt: string;
-  status: 'ready' | 'running' | 'waiting_permission' | 'error' | 'finished';
-  messages: any[];
-  terminalLogs: Array<{ line: string; timestamp: string }>;
+  status: AgentSessionStatus;
+  messages: AgentMessage[];
+  workflowActivities: AgentWorkflowActivity[];
   error: string | null;
   createdAt: string;
   pendingPermission?: any | null;
+}
+
+const createAgentId = () => Math.random().toString(36).substring(2, 9);
+
+function createDefaultAgentSession(title = '默认会话'): AgentSession {
+  return {
+    id: createAgentId(),
+    title,
+    prompt: '',
+    status: 'ready',
+    messages: [],
+    workflowActivities: [],
+    error: null,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function safeRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : null;
+}
+
+function stringifyCompact(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value == null) return '';
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function extractToolCommand(input: unknown): string {
+  const record = safeRecord(input);
+  if (!record) return stringifyCompact(input);
+
+  const command = record.command ?? record.description ?? record.path ?? record.file_path ?? record.pattern;
+  if (typeof command === 'string' && command.trim()) return command.trim();
+
+  return stringifyCompact(input);
+}
+
+function getToolDisplayName(name?: string, input?: unknown): string {
+  const record = safeRecord(input);
+  if (name === 'Bash') return '执行命令';
+  if (name === 'TodoWrite') return '更新任务列表';
+  if (name === 'TaskCreate') return '创建任务';
+  if (name === 'TaskUpdate') return '更新任务';
+  if (name === 'Read') return '读取文件';
+  if (name === 'Write' || name === 'Edit' || name === 'MultiEdit') return '修改文件';
+  if (typeof record?._displayName === 'string') return record._displayName;
+  return name ? `调用 ${name}` : '调用工具';
+}
+
+function extractWorkflowTasks(input: unknown): AgentWorkflowTask[] | undefined {
+  const record = safeRecord(input);
+  if (!record) return undefined;
+
+  if (Array.isArray(record.todos)) {
+    return record.todos
+      .map((todo, index) => {
+        const item = safeRecord(todo);
+        if (!item) return null;
+        const status = item.status === 'in_progress' || item.status === 'completed' || item.status === 'deleted'
+          ? item.status
+          : 'pending';
+        return {
+          id: String(item.id ?? `todo-${index}`),
+          subject: String(item.subject ?? item.content ?? '未命名任务'),
+          status,
+          activeForm: typeof item.activeForm === 'string' ? item.activeForm : undefined,
+        };
+      })
+      .filter(Boolean) as AgentWorkflowTask[];
+  }
+
+  const subject = record.subject ?? record.description;
+  if (typeof subject === 'string' && subject.trim()) {
+    return [{
+      id: String(record.taskId ?? record.task_id ?? record.id ?? subject),
+      subject,
+      status: record.status === 'in_progress' || record.status === 'completed' || record.status === 'deleted'
+        ? record.status
+        : 'pending',
+      activeForm: typeof record.activeForm === 'string' ? record.activeForm : undefined,
+    }];
+  }
+
+  return undefined;
+}
+
+function createWorkflowActivity(params: Omit<AgentWorkflowActivity, 'id' | 'timestamp'> & { id?: string; timestamp?: string }): AgentWorkflowActivity {
+  return {
+    ...params,
+    id: params.id ?? createAgentId(),
+    timestamp: params.timestamp ?? new Date().toISOString(),
+  };
+}
+
+function upsertWorkflowActivity(
+  activities: AgentWorkflowActivity[],
+  next: AgentWorkflowActivity,
+): AgentWorkflowActivity[] {
+  const index = activities.findIndex((item) => {
+    if (next.toolUseID && item.toolUseID === next.toolUseID && item.type === next.type) return true;
+    return item.id === next.id;
+  });
+
+  if (index === -1) return [...activities, next];
+
+  const updated = [...activities];
+  updated[index] = {
+    ...updated[index],
+    ...next,
+    timestamp: updated[index].timestamp,
+  };
+  return updated;
+}
+
+function finalizeWorkflowActivities(activities: AgentWorkflowActivity[], status: AgentWorkflowStatus) {
+  return activities.map((item) => {
+    if (item.status !== 'running' && item.status !== 'waiting') return item;
+    return { ...item, status };
+  });
+}
+
+function appendSystemMessage(messages: AgentMessage[], content: string): AgentMessage[] {
+  const lastMessage = messages[messages.length - 1];
+  if (lastMessage?.type === 'system' && lastMessage.content === content) return messages;
+  return [...messages, { id: createAgentId(), type: 'system', content }];
+}
+
+function buildWorkflowFromMessages(messages: AgentMessage[]): AgentWorkflowActivity[] {
+  return messages.flatMap((message) => {
+    if (message.type === 'system') {
+      return [createWorkflowActivity({
+        type: 'system',
+        title: message.content,
+        status: 'success',
+      })];
+    }
+
+    if (message.type === 'thought') {
+      return [createWorkflowActivity({
+        type: 'thought',
+        title: '思考规划',
+        detail: message.content,
+        status: 'success',
+      })];
+    }
+
+    if (message.type === 'tool_call') {
+      return [createWorkflowActivity({
+        type: 'tool',
+        title: getToolDisplayName(message.name),
+        detail: message.command,
+        command: message.command,
+        status: message.status === 'failed' ? 'error' : message.status === 'success' ? 'success' : 'running',
+        toolUseID: message.toolUseID,
+        toolName: message.name,
+        output: message.output,
+        error: message.error,
+      })];
+    }
+
+    if (message.type === 'error') {
+      return [createWorkflowActivity({
+        type: 'result',
+        title: '执行未成功完成',
+        detail: message.content,
+        status: 'error',
+      })];
+    }
+
+    return [];
+  });
+}
+
+function normalizeAgentSession(raw: any): AgentSession {
+  const messages = Array.isArray(raw?.messages) ? raw.messages as AgentMessage[] : [];
+  const workflowActivities = Array.isArray(raw?.workflowActivities) && raw.workflowActivities.length > 0
+    ? raw.workflowActivities as AgentWorkflowActivity[]
+    : buildWorkflowFromMessages(messages);
+
+  return {
+    id: typeof raw?.id === 'string' ? raw.id : createAgentId(),
+    title: typeof raw?.title === 'string' ? raw.title : '新会话',
+    prompt: typeof raw?.prompt === 'string' ? raw.prompt : '',
+    status: ['ready', 'running', 'waiting_permission', 'error', 'finished'].includes(raw?.status) ? raw.status : 'ready',
+    messages,
+    workflowActivities,
+    error: typeof raw?.error === 'string' ? raw.error : null,
+    createdAt: typeof raw?.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
+    pendingPermission: raw?.pendingPermission ?? null,
+  };
+}
+
+function AgentWorkflowStatusIcon({ activity }: { activity: AgentWorkflowActivity }) {
+  if (activity.status === 'running') {
+    return <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />;
+  }
+  if (activity.status === 'waiting') {
+    return <Shield className="h-3.5 w-3.5 text-amber-500" />;
+  }
+  if (activity.status === 'error') {
+    return <XCircle className="h-3.5 w-3.5 text-destructive" />;
+  }
+  if (activity.type === 'tool') {
+    return <Terminal className="h-3.5 w-3.5 text-muted-foreground" />;
+  }
+  return <CheckCheck className="h-3.5 w-3.5 text-emerald-500" />;
+}
+
+function AgentWorkflowCard({ session }: { session: AgentSession }) {
+  const [expanded, setExpanded] = useState(true);
+  const activities = useMemo(() => {
+    return session.workflowActivities.length > 0
+      ? session.workflowActivities
+      : buildWorkflowFromMessages(session.messages);
+  }, [session.messages, session.workflowActivities]);
+
+  useEffect(() => {
+    if (session.status === 'running' || session.status === 'waiting_permission') {
+      setExpanded(true);
+    }
+  }, [session.status]);
+
+  if (activities.length === 0) return null;
+
+  const runningCount = activities.filter((activity) => activity.status === 'running' || activity.status === 'waiting').length;
+  const completedCount = activities.filter((activity) => activity.status === 'success' || activity.status === 'error').length;
+  const visibleActivities = expanded ? activities : activities.slice(-4);
+
+  return (
+    <div className="rounded-xl border border-border bg-card/90 shadow-sm overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded(prev => !prev)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-secondary/35"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            {runningCount > 0 ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckSquare className="h-4 w-4" />
+            )}
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-foreground">Agent 工作流</p>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {completedCount}/{activities.length} 已完成
+              {runningCount > 0 ? ` · ${runningCount} 项进行中` : ''}
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Badge
+            variant="outline"
+            className={cn(
+              'rounded-full px-2 py-0 text-[10px] font-medium',
+              runningCount > 0
+                ? 'border-primary/30 bg-primary/5 text-primary'
+                : session.status === 'error'
+                  ? 'border-destructive/30 bg-destructive/5 text-destructive'
+                  : 'border-emerald-500/30 bg-emerald-500/5 text-emerald-500',
+            )}
+          >
+            {runningCount > 0 ? 'RUNNING' : session.status === 'error' ? 'ERROR' : 'READY'}
+          </Badge>
+          {expanded ? (
+            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          )}
+        </div>
+      </button>
+
+      <div className={cn(
+        'grid transition-[grid-template-rows] duration-300 ease-out',
+        expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+      )}>
+        <div className="overflow-hidden">
+          <div className="space-y-2 px-4 pb-4">
+            {visibleActivities.map((activity) => {
+              const resultText = activity.error || activity.output;
+              return (
+                <div key={activity.id} className="rounded-lg border border-border/60 bg-background/60 px-3 py-2.5">
+                  <div className="flex items-start gap-2.5">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-secondary">
+                      <AgentWorkflowStatusIcon activity={activity} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="text-xs font-medium text-foreground">{activity.title}</span>
+                        {activity.toolName ? (
+                          <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            {activity.toolName}
+                          </span>
+                        ) : null}
+                      </div>
+                      {activity.command || activity.detail ? (
+                        <p className={cn(
+                          'mt-1 line-clamp-2 text-[11px] leading-5 text-muted-foreground',
+                          activity.command && 'font-mono',
+                        )}>
+                          {activity.command || activity.detail}
+                        </p>
+                      ) : null}
+
+                      {activity.tasks && activity.tasks.length > 0 ? (
+                        <div className="mt-2 space-y-1 rounded-md bg-secondary/35 px-2 py-1.5">
+                          {activity.tasks.map((task) => (
+                            <div key={task.id} className="flex items-center gap-1.5 text-[11px]">
+                              {task.status === 'completed' ? (
+                                <CheckCheck className="h-3 w-3 text-emerald-500" />
+                              ) : task.status === 'in_progress' ? (
+                                <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                              ) : (
+                                <CircleDot className="h-3 w-3 text-muted-foreground/60" />
+                              )}
+                              <span className={cn(
+                                'min-w-0 flex-1 truncate',
+                                task.status === 'completed' && 'text-muted-foreground line-through',
+                              )}>
+                                {task.status === 'in_progress' && task.activeForm ? task.activeForm : task.subject}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {resultText ? (
+                        <pre className={cn(
+                          'mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap break-words rounded-md px-2 py-1.5 text-[11px]',
+                          activity.error
+                            ? 'bg-destructive/10 text-destructive'
+                            : 'bg-secondary/45 text-muted-foreground',
+                        )}>
+                          {resultText}
+                        </pre>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {!expanded && activities.length > visibleActivities.length ? (
+              <p className="text-center text-[11px] text-muted-foreground">
+                已收起 {activities.length - visibleActivities.length} 条更早流程
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function AgentRunView({
@@ -3523,7 +3923,6 @@ function AgentRunView({
   const { data: currentUser } = useCurrentUserQuery();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [isTerminalExpanded, setIsTerminalExpanded] = useState(true);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState('');
 
@@ -3555,7 +3954,6 @@ function AgentRunView({
   const [isAddProjectOpen, setIsAddProjectOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
 
-  const terminalEndRef = useRef<HTMLDivElement>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
   const processedInitialPromptRef = useRef<string | null>(null);
   const activeSessionIdRef = useRef(activeSessionId);
@@ -3616,17 +4014,10 @@ function AgentRunView({
         parsedSessions = [];
       }
 
+      parsedSessions = parsedSessions.map(normalizeAgentSession);
+
       if (parsedSessions.length === 0) {
-        const defaultSession: AgentSession = {
-          id: Math.random().toString(36).substring(2, 9),
-          title: '默认会话',
-          prompt: '',
-          status: 'ready',
-          messages: [],
-          terminalLogs: [],
-          error: null,
-          createdAt: new Date().toISOString(),
-        };
+        const defaultSession = createDefaultAgentSession();
         parsedSessions = [defaultSession];
         localStorage.setItem(`repo-pulse:agent-sessions:${repoId}`, JSON.stringify(parsedSessions));
       }
@@ -3677,17 +4068,10 @@ function AgentRunView({
     ? sessionsByRepo[activeRepoId].find(s => s.id === activeSessionId)
     : null;
 
-  // Scroll to bottom of terminal
-  useEffect(() => {
-    if (isTerminalExpanded) {
-      terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [activeSession?.terminalLogs, isTerminalExpanded]);
-
   // Scroll to bottom of messages
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeSession?.messages]);
+  }, [activeSession?.messages, activeSession?.workflowActivities]);
 
   const updateRepoSessions = (repoId: string, updater: (prev: AgentSession[]) => AgentSession[]) => {
     setSessionsByRepo(prev => {
@@ -3721,12 +4105,30 @@ function AgentRunView({
       setActiveRepoId(targetRepo.id);
 
       const newSession: AgentSession = {
-        id: Math.random().toString(36).substring(2, 9),
+        id: createAgentId(),
         title: initialPrompt.length > 20 ? initialPrompt.slice(0, 20) + '...' : initialPrompt,
         prompt: initialPrompt,
         status: 'running',
-        messages: [],
-        terminalLogs: [{ line: `[SYSTEM] 正在连接本地 Git 工作区并拉取最新分支...`, timestamp: new Date().toISOString() }],
+        messages: [
+          {
+            id: createAgentId(),
+            type: 'user',
+            content: initialPrompt,
+          },
+          {
+            id: createAgentId(),
+            type: 'system',
+            content: '正在连接本地 Git 工作区...',
+          },
+        ],
+        workflowActivities: [
+          createWorkflowActivity({
+            type: 'system',
+            title: '正在连接本地 Git 工作区',
+            status: 'running',
+            detail: initialRepository?.fullName || activeRepository?.fullName,
+          }),
+        ],
         error: null,
         createdAt: new Date().toISOString(),
       };
@@ -3754,49 +4156,59 @@ function AgentRunView({
       const activeId = activeSessionIdRef.current;
       const activeRepo = activeRepoIdRef.current;
       if (!activeRepo || !activeId) return;
-      const now = new Date();
       
       updateRepoSessions(activeRepo, (prevSessions) => {
         const currentActive = prevSessions.find(s => s.id === activeId);
         if (!currentActive) return prevSessions;
 
         let updatedMessages = [...currentActive.messages];
+        let updatedWorkflow = [...currentActive.workflowActivities];
         const lastMsg = updatedMessages[updatedMessages.length - 1];
 
         // 1. Handle message status updates
         if (msg.type === 'finished') {
+          updatedMessages = appendSystemMessage(updatedMessages, 'Agent 执行完毕。');
+          updatedWorkflow = finalizeWorkflowActivities(updatedWorkflow, 'success');
+          updatedWorkflow = upsertWorkflowActivity(updatedWorkflow, createWorkflowActivity({
+            id: 'session-finished',
+            type: 'result',
+            title: 'Agent 执行完毕',
+            status: 'success',
+          }));
           return prevSessions.map(s => {
             if (s.id !== activeId) return s;
             return {
               ...s,
               status: 'finished' as const,
-              terminalLogs: [
-                ...s.terminalLogs,
-                { line: `[SYSTEM] Agent 执行完毕。`, timestamp: now.toISOString() }
-              ]
+              messages: updatedMessages,
+              workflowActivities: updatedWorkflow,
             };
           });
         }
 
         if (msg.type === 'error') {
+          const errorMessage = msg.message || String(msg);
+          updatedMessages.push({
+            id: createAgentId(),
+            type: 'error',
+            content: errorMessage,
+          });
+          updatedWorkflow = finalizeWorkflowActivities(updatedWorkflow, 'error');
+          updatedWorkflow = upsertWorkflowActivity(updatedWorkflow, createWorkflowActivity({
+            id: `session-error:${errorMessage}`,
+            type: 'result',
+            title: '执行未成功完成',
+            detail: errorMessage,
+            status: 'error',
+          }));
           return prevSessions.map(s => {
             if (s.id !== activeId) return s;
             return {
               ...s,
               status: 'error' as const,
-              error: msg.message || String(msg),
-              messages: [
-                ...s.messages,
-                {
-                  id: Math.random().toString(),
-                  type: 'error',
-                  content: msg.message || String(msg),
-                }
-              ],
-              terminalLogs: [
-                ...s.terminalLogs,
-                { line: `[ERROR] 执行终止: ${msg.message || String(msg)}`, timestamp: now.toISOString() }
-              ]
+              error: errorMessage,
+              messages: updatedMessages,
+              workflowActivities: updatedWorkflow,
             };
           });
         }
@@ -3810,7 +4222,7 @@ function AgentRunView({
             };
           } else {
             updatedMessages.push({
-              id: Math.random().toString(),
+              id: createAgentId(),
               type: 'assistant',
               content: msg.text,
             });
@@ -3823,20 +4235,50 @@ function AgentRunView({
             };
           } else {
             updatedMessages.push({
-              id: Math.random().toString(),
+              id: createAgentId(),
               type: 'thought',
               content: msg.text,
             });
           }
+          updatedWorkflow = upsertWorkflowActivity(updatedWorkflow, createWorkflowActivity({
+            id: 'agent-thinking',
+            type: 'thought',
+            title: '思考规划',
+            detail: msg.text,
+            status: currentActive.status === 'finished' ? 'success' : 'running',
+          }));
         } else if (msg.type === 'tool_use') {
-          updatedMessages.push({
-            id: msg.toolUseID || Math.random().toString(),
+          const command = extractToolCommand(msg.input);
+          const existingIndex = updatedMessages.findIndex((item) => item.type === 'tool_call' && item.toolUseID === msg.toolUseID);
+          const nextToolMessage: AgentMessage = {
+            id: msg.toolUseID || createAgentId(),
             type: 'tool_call',
             toolUseID: msg.toolUseID,
             name: msg.name,
-            command: msg.input?.command || JSON.stringify(msg.input),
+            command,
             status: 'running',
-          });
+          };
+
+          if (existingIndex >= 0) {
+            updatedMessages[existingIndex] = {
+              ...updatedMessages[existingIndex],
+              ...nextToolMessage,
+            } as AgentMessage;
+          } else {
+            updatedMessages.push(nextToolMessage);
+          }
+
+          updatedWorkflow = upsertWorkflowActivity(updatedWorkflow, createWorkflowActivity({
+            id: msg.toolUseID || createAgentId(),
+            type: 'tool',
+            title: getToolDisplayName(msg.name, msg.input),
+            detail: command,
+            command,
+            status: 'running',
+            toolUseID: msg.toolUseID,
+            toolName: msg.name,
+            tasks: extractWorkflowTasks(msg.input),
+          }));
         } else if (msg.type === 'tool_result' && msg.toolUseID) {
           updatedMessages = updatedMessages.map((item) => {
             if (item.type === 'tool_call' && item.toolUseID === msg.toolUseID) {
@@ -3849,43 +4291,14 @@ function AgentRunView({
             }
             return item;
           });
-        }
-
-        // 3. Handle terminal logs
-        let logLine = '';
-        let isStreamLog = false;
-        let logPrefix = '';
-
-        if (msg.type === 'text') {
-          logLine = `[AI] ${msg.text}`;
-          isStreamLog = true;
-          logPrefix = '[AI]';
-        } else if (msg.type === 'thought') {
-          logLine = `[THINKING] ${msg.text}`;
-          isStreamLog = true;
-          logPrefix = '[THINKING]';
-        } else if (msg.type === 'tool_use') {
-          logLine = `[TOOL CALL] Running ${msg.name} with command: ${msg.input?.command || JSON.stringify(msg.input)}`;
-        } else if (msg.type === 'tool_result') {
-          logLine = `[TOOL RESULT] ${msg.output ? `Stdout: ${msg.output}` : ''} ${msg.error ? `Error: ${msg.error}` : ''}`;
-        } else if (typeof msg === 'string') {
-          logLine = msg;
-        } else {
-          logLine = `[INFO] ${JSON.stringify(msg)}`;
-        }
-
-        let updatedLogs = [...currentActive.terminalLogs];
-        const lastLog = updatedLogs[updatedLogs.length - 1];
-
-        if (isStreamLog && lastLog && lastLog.line.startsWith(logPrefix)) {
-          updatedLogs[updatedLogs.length - 1] = {
-            line: logLine,
-            timestamp: now.toISOString(),
-          };
-        } else {
-          updatedLogs.push({
-            line: logLine,
-            timestamp: now.toISOString(),
+          updatedWorkflow = updatedWorkflow.map((activity) => {
+            if (activity.type !== 'tool' || activity.toolUseID !== msg.toolUseID) return activity;
+            return {
+              ...activity,
+              status: msg.error ? 'error' : 'success',
+              output: msg.output,
+              error: msg.error,
+            };
           });
         }
 
@@ -3894,7 +4307,7 @@ function AgentRunView({
           return {
             ...s,
             messages: updatedMessages,
-            terminalLogs: updatedLogs,
+            workflowActivities: updatedWorkflow,
           };
         });
       });
@@ -3912,6 +4325,16 @@ function AgentRunView({
             ...s,
             status: 'waiting_permission' as const,
             pendingPermission: req,
+            workflowActivities: upsertWorkflowActivity(s.workflowActivities, createWorkflowActivity({
+              id: `permission:${req.toolUseID}`,
+              type: 'permission',
+              title: '等待命令授权',
+              detail: req.description || req.title,
+              command: req.command,
+              status: 'waiting',
+              toolUseID: req.toolUseID,
+              toolName: req.toolName,
+            })),
           };
         });
       });
@@ -3924,16 +4347,7 @@ function AgentRunView({
   }, []);
 
   const handleCreateSessionInRepo = (repoId: string) => {
-    const newSession: AgentSession = {
-      id: Math.random().toString(36).substring(2, 9),
-      title: '新会话',
-      prompt: '',
-      status: 'ready',
-      messages: [],
-      terminalLogs: [],
-      error: null,
-      createdAt: new Date().toISOString(),
-    };
+    const newSession = createDefaultAgentSession('新会话');
     updateRepoSessions(repoId, prev => [newSession, ...prev]);
     setActiveRepoId(repoId);
     setActiveSessionId(newSession.id);
@@ -3947,16 +4361,7 @@ function AgentRunView({
     const remaining = repoSessions.filter(s => s.id !== sessionId);
 
     if (remaining.length === 0) {
-      const defaultSession: AgentSession = {
-        id: Math.random().toString(36).substring(2, 9),
-        title: '默认会话',
-        prompt: '',
-        status: 'ready',
-        messages: [],
-        terminalLogs: [],
-        error: null,
-        createdAt: new Date().toISOString(),
-      };
+      const defaultSession = createDefaultAgentSession();
       updateRepoSessions(repoId, () => [defaultSession]);
       if (isDeletingActive) {
         setActiveSessionId(defaultSession.id);
@@ -3982,15 +4387,22 @@ function AgentRunView({
   };
 
   const startSessionOnSession = async (session: AgentSession, customPrompt?: string, targetRepo?: Repository) => {
+    console.log('[AgentRunView] startSessionOnSession called:', {
+      sessionId: session.id,
+      customPrompt,
+      targetRepoId: targetRepo?.id,
+    });
     const promptToUse = customPrompt || session.prompt;
     if (!promptToUse.trim()) {
       toast.error('请输入执行指令');
+      console.warn('[AgentRunView] startSessionOnSession: prompt is empty.');
       return;
     }
 
     if (!activeApiKey) {
       const errorMsg = '未检测到有效的 Anthropic API Key，无法启动会话。请先前往【设置】页面配置您的 AI 渠道。';
       toast.error('启动失败：未配置 API 密钥');
+      console.warn('[AgentRunView] startSessionOnSession: activeApiKey is empty.');
       
       const repoId = targetRepo?.id || activeRepoId;
       if (repoId) {
@@ -4004,15 +4416,18 @@ function AgentRunView({
               messages: [
                 ...s.messages,
                 {
-                  id: Math.random().toString(),
+                  id: createAgentId(),
                   type: 'error',
                   content: errorMsg,
                 }
               ],
-              terminalLogs: [
-                ...s.terminalLogs,
-                { line: `[ERROR] 启动失败: ${errorMsg}`, timestamp: new Date().toISOString() }
-              ]
+              workflowActivities: upsertWorkflowActivity(s.workflowActivities, createWorkflowActivity({
+                id: 'missing-api-key',
+                type: 'result',
+                title: '启动失败',
+                detail: errorMsg,
+                status: 'error',
+              })),
             };
           });
         });
@@ -4021,11 +4436,14 @@ function AgentRunView({
     }
 
     const repo = targetRepo || activeRepository;
+    console.log('[AgentRunView] startSessionOnSession: resolved repository:', repo);
     if (!repo) {
       toast.error('未选择有效的仓库');
+      console.warn('[AgentRunView] startSessionOnSession: repo is undefined.');
       return;
     }
 
+    console.log('[AgentRunView] startSessionOnSession: updating status to running for repo:', repo.id);
     updateRepoSessions(repo.id, prev => {
       return prev.map(s => {
         if (s.id !== session.id) return s;
@@ -4034,8 +4452,14 @@ function AgentRunView({
           status: 'running',
           error: null,
           pendingPermission: null,
-          terminalLogs: [{ line: `[SYSTEM] 正在连接本地 Git 工作区并拉取最新分支...`, timestamp: new Date().toISOString() }],
-          messages: [],
+          messages: appendSystemMessage(s.messages, '正在连接本地 Git 工作区并拉取最新分支...'),
+          workflowActivities: upsertWorkflowActivity(s.workflowActivities, createWorkflowActivity({
+            id: `workspace:${repo.id}:${session.id}`,
+            type: 'system',
+            title: '准备本地工作区',
+            detail: repo.fullName,
+            status: 'running',
+          })),
         };
       });
     });
@@ -4047,7 +4471,8 @@ function AgentRunView({
     }
 
     try {
-      await window.repoPulseDesktop.agent.startSession({
+      console.log('[AgentRunView] startSessionOnSession: invoking agent.startSession via desktop IPC.');
+      await window.repoPulseDesktop!.agent!.startSession({
         repositoryId: repo.id,
         gitUrl,
         defaultBranch: repo.defaultBranch,
@@ -4057,8 +4482,10 @@ function AgentRunView({
         baseUrl: activeBaseUrl || undefined,
       });
       toast.success('Agent 会话已启动');
+      console.log('[AgentRunView] startSessionOnSession: agent.startSession resolved successfully.');
     } catch (err: any) {
       const errorMsg = err.message || String(err);
+      console.error('[AgentRunView] startSessionOnSession: agent.startSession rejected with error:', err);
       updateRepoSessions(repo.id, prev => {
         return prev.map(s => {
           if (s.id !== session.id) return s;
@@ -4066,10 +4493,24 @@ function AgentRunView({
             ...s,
             status: 'error',
             error: errorMsg,
-            terminalLogs: [
-              ...s.terminalLogs,
-              { line: `[ERROR] 启动失败: ${errorMsg}`, timestamp: new Date().toISOString() }
-            ]
+            messages: [
+              ...s.messages,
+              {
+                id: createAgentId(),
+                type: 'error',
+                content: `启动失败: ${errorMsg}`,
+              }
+            ],
+            workflowActivities: upsertWorkflowActivity(
+              finalizeWorkflowActivities(s.workflowActivities, 'error'),
+              createWorkflowActivity({
+                id: `session-error:${errorMsg}`,
+                type: 'result',
+                title: '启动失败',
+                detail: errorMsg,
+                status: 'error',
+              }),
+            ),
           };
         });
       });
@@ -4079,17 +4520,30 @@ function AgentRunView({
   const stopSessionOnSession = async (session: AgentSession) => {
     if (!activeRepoId) return;
     try {
-      await window.repoPulseDesktop.agent.stopSession();
+      await window.repoPulseDesktop!.agent!.stopSession();
       updateRepoSessions(activeRepoId, prev => {
         return prev.map(s => {
           if (s.id !== session.id) return s;
           return {
             ...s,
             status: 'ready',
-            terminalLogs: [
-              ...s.terminalLogs,
-              { line: `[SYSTEM] 用户已终止会话。`, timestamp: new Date().toISOString() }
-            ]
+            messages: [
+              ...s.messages,
+              {
+                id: createAgentId(),
+                type: 'system',
+                content: '用户已终止会话。',
+              }
+            ],
+            workflowActivities: upsertWorkflowActivity(
+              finalizeWorkflowActivities(s.workflowActivities, 'error'),
+              createWorkflowActivity({
+                id: `session-stopped:${session.id}`,
+                type: 'result',
+                title: '用户已终止会话',
+                status: 'error',
+              }),
+            ),
           };
         });
       });
@@ -4112,7 +4566,7 @@ function AgentRunView({
     const command = activeSession.pendingPermission.command;
 
     try {
-      await window.repoPulseDesktop.agent.resolvePermission({
+      await window.repoPulseDesktop!.agent!.resolvePermission({
         toolUseID,
         approve,
       });
@@ -4121,11 +4575,11 @@ function AgentRunView({
         return prev.map(s => {
           if (s.id !== activeSession.id) return s;
           
-          const updatedMessages = s.messages.map((item) => {
+          const updatedMessages: AgentMessage[] = s.messages.map((item): AgentMessage => {
             if (item.type === 'tool_call' && item.toolUseID === toolUseID) {
               return {
                 ...item,
-                permissionResolved: approve ? 'approved' : 'rejected',
+                permissionResolved: approve ? 'approved' as const : 'rejected' as const,
               };
             }
             return item;
@@ -4135,11 +4589,25 @@ function AgentRunView({
             ...s,
             pendingPermission: null,
             status: 'running',
-            messages: updatedMessages,
-            terminalLogs: [
-              ...s.terminalLogs,
-              { line: `[SYSTEM] 用户已${approve ? '批准' : '拒绝'}命令执行: ${command}`, timestamp: new Date().toISOString() }
-            ]
+            messages: appendSystemMessage(updatedMessages, `用户已${approve ? '批准' : '拒绝'}命令执行: ${command}`),
+            workflowActivities: s.workflowActivities.map((activity) => {
+              if (activity.toolUseID !== toolUseID) return activity;
+              if (activity.type === 'permission') {
+                return {
+                  ...activity,
+                  status: approve ? 'success' : 'error',
+                  permissionResolved: approve ? 'approved' : 'rejected',
+                };
+              }
+              if (activity.type === 'tool') {
+                return {
+                  ...activity,
+                  status: approve ? activity.status : 'error',
+                  permissionResolved: approve ? 'approved' : 'rejected',
+                };
+              }
+              return activity;
+            }),
           };
         });
       });
@@ -4178,33 +4646,58 @@ function AgentRunView({
     setEditingSessionId(null);
   };
 
-  const handleSendChat = () => {
-    if (!activeSession || !activeRepoId) return;
-    const nextPrompt = chatInput.trim() || activeSession.prompt;
-    if (!nextPrompt) return;
+  const handleSendChat = async (overridePrompt?: string) => {
+    console.log('[AgentRunView] handleSendChat called.');
+    if (!activeSession || !activeRepoId) {
+      console.warn('[AgentRunView] handleSendChat: activeSession or activeRepoId is missing.');
+      return;
+    }
+    const userPrompt = (overridePrompt ?? chatInput).trim();
+    const nextPrompt = userPrompt || activeSession.prompt;
+    if (!nextPrompt) {
+      console.warn('[AgentRunView] handleSendChat: prompt is empty.');
+      return;
+    }
 
     setChatInput('');
     
+    console.log('[AgentRunView] handleSendChat: updating session details (prompt and title).');
+    let freshActiveSession = { ...activeSession };
+    
     updateRepoSessions(activeRepoId, prev => prev.map(s => {
       if (s.id === activeSession.id) {
-        return {
+        const msgs = [...s.messages];
+        if (userPrompt) {
+          msgs.push({
+            id: createAgentId(),
+            type: 'user',
+            content: userPrompt,
+          });
+        }
+        freshActiveSession = {
           ...s,
           prompt: nextPrompt,
-          title: chatInput.trim() ? (chatInput.trim().length > 20 ? chatInput.trim().slice(0, 20) + '...' : chatInput.trim()) : s.title,
+          title: userPrompt ? (userPrompt.length > 20 ? userPrompt.slice(0, 20) + '...' : userPrompt) : s.title,
+          messages: msgs,
         };
+        return freshActiveSession;
       }
       return s;
     }));
 
-    void window.repoPulseDesktop.agent.stopSession().then(() => {
-      setTimeout(() => {
-        const freshActiveSession = {
-          ...activeSession,
-          prompt: nextPrompt,
-        };
-        startSessionOnSession(freshActiveSession, nextPrompt);
-      }, 500);
-    });
+    // Ensure we stop any running agent session first. Wrap in try-catch to avoid blocking errors.
+    try {
+      if (window.repoPulseDesktop?.agent?.stopSession) {
+        console.log('[AgentRunView] handleSendChat: stopping active agent session...');
+        await window.repoPulseDesktop!.agent!.stopSession();
+        console.log('[AgentRunView] handleSendChat: stopSession completed.');
+      }
+    } catch (err) {
+      console.error('[AgentRunView] handleSendChat: error stopping session:', err);
+    }
+    
+    console.log('[AgentRunView] handleSendChat: starting session with prompt:', nextPrompt);
+    void startSessionOnSession(freshActiveSession, nextPrompt);
   };
 
   if (loading) {
@@ -4366,7 +4859,7 @@ function AgentRunView({
                             </div>
 
                             {editingSessionId !== session.id && (
-                              <div className="flex items-center gap-0.5 opacity-0 group-session/session:opacity-100 transition-opacity shrink-0">
+                              <div className="flex items-center gap-0.5 opacity-0 group-hover/session:opacity-100 focus-within:opacity-100 transition-opacity shrink-0">
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -4533,8 +5026,7 @@ function AgentRunView({
               <button
                 onClick={() => {
                   const cmd = '帮我检查当前分支状态并进行合并';
-                  setChatInput(cmd);
-                  handleSendChat();
+                  void handleSendChat(cmd);
                 }}
                 className="p-3 text-left rounded-xl border border-border bg-card hover:bg-secondary/40 hover:border-primary/20 transition-all text-xs space-y-1"
               >
@@ -4544,8 +5036,7 @@ function AgentRunView({
               <button
                 onClick={() => {
                   const cmd = '同步上游分支最新修改，评估潜在冲突';
-                  setChatInput(cmd);
-                  handleSendChat();
+                  void handleSendChat(cmd);
                 }}
                 className="p-3 text-left rounded-xl border border-border bg-card hover:bg-secondary/40 hover:border-primary/20 transition-all text-xs space-y-1"
               >
@@ -4556,13 +5047,6 @@ function AgentRunView({
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 scrollbar-thin">
-            {activeSession.prompt && (
-              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-1">
-                <span className="text-[10px] uppercase font-bold tracking-wider text-primary">当前目标</span>
-                <h4 className="text-sm font-semibold text-foreground">{activeSession.prompt}</h4>
-              </div>
-            )}
-
             {activeSession.error && (
               <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-4 flex gap-3 text-destructive-foreground text-sm animate-in fade-in-50 duration-200">
                 <AlertTriangle className="h-5 w-5 shrink-0 text-destructive" />
@@ -4573,12 +5057,36 @@ function AgentRunView({
               </div>
             )}
 
+            <AgentWorkflowCard session={activeSession} />
+
             <div className="space-y-4">
               {activeSession.messages.map((item, index) => (
                 <div key={item.id || index} className="space-y-2 animate-in fade-in-50 duration-200">
+                  {item.type === 'user' && (
+                    <div className="flex gap-3 justify-end">
+                      <div className="max-w-[85%] rounded-xl bg-secondary/80 border border-border p-3.5 text-sm text-foreground shadow-sm">
+                        <p className="whitespace-pre-wrap leading-relaxed">{item.content}</p>
+                      </div>
+                      <Avatar className="h-7 w-7 rounded-lg border border-border mt-0.5 shrink-0">
+                        <AvatarImage src={currentUser?.avatar || undefined} />
+                        <AvatarFallback className="bg-secondary text-muted-foreground text-xs font-bold">
+                          U
+                        </AvatarFallback>
+                      </Avatar>
+                    </div>
+                  )}
+
+                  {item.type === 'system' && (
+                    <div className="flex justify-center my-2">
+                      <span className="text-[11px] text-muted-foreground bg-secondary/40 px-3 py-1 rounded-full border border-border/50">
+                        {item.content}
+                      </span>
+                    </div>
+                  )}
+
                   {item.type === 'assistant' && (
                     <div className="flex gap-3">
-                      <Avatar className="h-7 w-7 rounded-lg border border-border mt-0.5 mt-0.5 shrink-0">
+                      <Avatar className="h-7 w-7 rounded-lg border border-border mt-0.5 shrink-0">
                         <AvatarFallback className="bg-primary/10 text-primary text-xs font-bold">
                           AI
                         </AvatarFallback>
@@ -4605,7 +5113,9 @@ function AgentRunView({
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <Terminal className="h-3.5 w-3.5 text-cyan-400" />
-                          <span className="text-cyan-400 font-bold">$ {item.command}</span>
+                          <span className="text-cyan-400 font-bold">
+                            {item.command && item.command !== '{}' ? `$ ${item.command}` : `${item.name || '工具调用'} 正在准备输入...`}
+                          </span>
                         </div>
                         <Badge variant="outline" className={cn(
                           "rounded-full text-[9px] px-2 py-0",
@@ -4726,7 +5236,7 @@ function AgentRunView({
                     </Button>
                   ) : (
                     <Button
-                      onClick={handleSendChat}
+                      onClick={() => handleSendChat()}
                       disabled={(!chatInput.trim() && !activeSession.prompt) || !activeApiKey}
                       size="sm"
                       className="h-8 gap-1.5 font-semibold text-xs rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground"
@@ -4744,59 +5254,6 @@ function AgentRunView({
                 </p>
               )}
             </div>
-          </div>
-        )}
-
-        {/* Collapsible Live Terminal Logs */}
-        {activeSession && activeRepository && (
-          <div className="border-t border-border bg-slate-950">
-            <button
-              onClick={() => setIsTerminalExpanded(!isTerminalExpanded)}
-              type="button"
-              className="w-full flex items-center justify-between px-6 py-2.5 bg-slate-900 text-slate-400 font-mono text-[10px] tracking-wider uppercase cursor-pointer select-none hover:bg-slate-900/80 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Terminal className="h-3.5 w-3.5 text-emerald-400" />
-                <span className="font-semibold">实时控制台输出</span>
-                {activeSession.status === 'running' && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
-                )}
-              </div>
-              <div className="flex items-center gap-1.5">
-                {isTerminalExpanded ? (
-                  <>
-                    <span>折叠</span>
-                    <ChevronDown className="h-3 w-3" />
-                  </>
-                ) : (
-                  <>
-                    <span>展开</span>
-                    <ChevronUp className="h-3 w-3" />
-                  </>
-                )}
-              </div>
-            </button>
-
-            {isTerminalExpanded && (
-              <div className="h-48 overflow-y-auto px-6 py-4 font-mono text-[11px] text-emerald-400 space-y-1 bg-black scrollbar-thin">
-                {activeSession.terminalLogs.length === 0 ? (
-                  <p className="text-slate-600">等待 Agent 启动...</p>
-                ) : (
-                  activeSession.terminalLogs.map((log, idx) => {
-                    const dateStr = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '';
-                    return (
-                      <div key={idx} className="flex gap-2 leading-relaxed">
-                        <span className="text-slate-600 select-none">
-                          [{dateStr}]
-                        </span>
-                        <span className="break-all whitespace-pre-wrap">{log.line}</span>
-                      </div>
-                    );
-                  })
-                )}
-                <div ref={terminalEndRef} />
-              </div>
-            )}
           </div>
         )}
       </div>
