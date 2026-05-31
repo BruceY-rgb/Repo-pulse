@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { ResizeHandle } from './ResizeHandle';
@@ -110,42 +110,28 @@ export function ProjectLayout({
     return () => observer.disconnect();
   }, []);
 
-  // Initialize panelH on first layout size evaluation
-  useEffect(() => {
-    if (layoutHeight > 0 && panelH === 0) {
+  // Derive panelH with initialization and clamping from layout size
+  const activePanelH = useMemo(() => {
+    if (layoutHeight <= 0) return panelH;
+    if (panelH === 0) {
       const defaultH = Math.min(
         Math.floor((layoutHeight * 2) / 3),
-        layoutHeight - CHART_MIN
+        layoutHeight - CHART_MIN,
       );
-      setPanelH(Math.max(PANEL_MIN_H, defaultH));
+      return Math.max(PANEL_MIN_H, defaultH);
     }
+    const maxH = layoutHeight - CHART_MIN;
+    if (maxH <= PANEL_MIN_H) return PANEL_MIN_H;
+    return Math.min(panelH, maxH);
   }, [layoutHeight, panelH]);
 
-  // Clamp panelH when container layout size changes
-  useEffect(() => {
-    if (layoutHeight > 0) {
-      setPanelH((prev) => {
-        const maxH = layoutHeight - CHART_MIN;
-        if (maxH <= PANEL_MIN_H) {
-          return PANEL_MIN_H;
-        }
-        return Math.max(PANEL_MIN_H, Math.min(prev, maxH));
-      });
-    }
-  }, [layoutHeight]);
-
-  // Clamp panelW when container layout size changes
-  useEffect(() => {
-    if (layoutWidth > 0) {
-      setPanelW((prev) => {
-        const maxW = layoutWidth - CHART_MIN;
-        if (maxW <= PANEL_MIN_V) {
-          return PANEL_MIN_V;
-        }
-        return Math.max(PANEL_MIN_V, Math.min(prev, maxW));
-      });
-    }
-  }, [layoutWidth]);
+  // Derive panelW with clamping from layout size
+  const activePanelW = useMemo(() => {
+    if (layoutWidth <= 0) return panelW;
+    const maxW = layoutWidth - CHART_MIN;
+    if (maxW <= PANEL_MIN_V) return PANEL_MIN_V;
+    return Math.min(panelW, maxW);
+  }, [layoutWidth, panelW]);
 
   const handleResizeMove = (delta: number) => {
     if (!dockedEdge) return;
@@ -198,20 +184,20 @@ export function ProjectLayout({
 
   const chartStyle = () => {
     if (dockedEdge === 'top' || dockedEdge === 'bottom') {
-      return { width: '100%', height: `${layoutHeight - panelH}px` };
+      return { width: '100%', height: `${layoutHeight - activePanelH}px` };
     }
     if (dockedEdge === 'left' || dockedEdge === 'right') {
-      return { width: `${layoutWidth - panelW}px`, height: '100%' };
+      return { width: `${layoutWidth - activePanelW}px`, height: '100%' };
     }
     return { width: '100%', height: '100%' };
   };
 
   const panelStyle = () => {
     if (dockedEdge === 'top' || dockedEdge === 'bottom') {
-      return { width: '100%', height: `${panelH}px` };
+      return { width: '100%', height: `${activePanelH}px` };
     }
     if (dockedEdge === 'left' || dockedEdge === 'right') {
-      return { width: `${panelW}px`, height: '100%' };
+      return { width: `${activePanelW}px`, height: '100%' };
     }
     return {};
   };
@@ -319,7 +305,7 @@ export function ProjectLayout({
         >
           <div
             className="flex flex-col max-h-[70vh] bg-card/95 backdrop-blur shadow-2xl rounded-r-xl overflow-hidden"
-            style={{ width: `${panelW}px` }}
+            style={{ width: `${activePanelW}px` }}
           >
             {/* Header Dock trigger */}
             <div className="flex shrink-0 items-center justify-between border-b border-border bg-accent/40 px-3 py-2">

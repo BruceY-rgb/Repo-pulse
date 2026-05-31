@@ -18,11 +18,11 @@ type RepoPulseDesktopBridge = {
       baseUrl?: string;
       authorizedLocalCwd?: string;
       sdkSessionId?: string | null;
-    }) => Promise<any>;
-    stopSession: () => Promise<any>;
-    resolvePermission: (params: { toolUseID: string; approve: boolean; message?: string }) => Promise<any>;
-    onMessage: (callback: (message: any) => void) => () => void;
-    onPermissionRequest: (callback: (request: any) => void) => () => void;
+    }) => Promise<unknown>;
+    stopSession: () => Promise<unknown>;
+    resolvePermission: (params: { toolUseID: string; approve: boolean; message?: string }) => Promise<unknown>;
+    onMessage: (callback: (message: Record<string, unknown>) => void) => () => void;
+    onPermissionRequest: (callback: (request: Record<string, unknown>) => void) => () => void;
   };
   git?: {
     getStatus: (params: { cwd: string }) => Promise<{

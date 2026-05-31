@@ -54,7 +54,7 @@ const computeCommitBranchInfo = (commits: GitCommit[], activeBranch: string) => 
   const branchHeads: { name: string; hash: string }[] = [];
   commits.forEach(c => {
     if (c.refs) {
-      c.refs.forEach((ref: any) => {
+      c.refs.forEach((ref) => {
         if (ref.type === 'local' || ref.type === 'remote' || ref.type === 'head') {
           const name = ref.name.replace(/^origin\//, '');
           if (!branchHeads.some(b => b.name === name)) {
@@ -241,7 +241,7 @@ export function GitTreePanel({
       } else {
         setGitStatus(null);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Failed to fetch git status via IPC:', err);
       toast.error('获取本地 Git 状态失败');
     } finally {
@@ -287,8 +287,9 @@ export function GitTreePanel({
       } else {
         toast.error(result.error || '关联本地工作区失败，仓库不匹配或无效。');
       }
-    } catch (err: any) {
-      toast.error('选择目录出错：' + err.message);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error('选择目录出错：' + message);
     } finally {
       setLoading(false);
     }
@@ -548,7 +549,7 @@ export function GitTreePanel({
               {graphCommits.map((item, idx) => {
                 const { commit, primaryBranch, baseBranch } = item;
                 const isMerge = commit.parents && commit.parents.length > 1;
-                const isHead = commit.refs && commit.refs.some((r: any) => r.type === 'head');
+                const isHead = commit.refs && commit.refs.some((r) => r.type === 'head');
                 const mergeInfo = parseMergeMessage(commit.message);
 
                 return (
@@ -602,7 +603,7 @@ export function GitTreePanel({
                           {baseBranch ? `${primaryBranch} ➔ ${baseBranch}` : `${primaryBranch}`}
                         </span>
 
-                        {commit.refs && commit.refs.map((ref: any) => {
+                        {commit.refs && commit.refs.map((ref) => {
                           const name = ref.name.replace(/^origin\//, '');
                           if (name === primaryBranch) return null;
                           return (

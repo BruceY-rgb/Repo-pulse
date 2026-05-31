@@ -3768,6 +3768,23 @@ interface AgentPendingPermission {
   decisionReason?: string;
 }
 
+interface AgentIpcMessage extends Record<string, unknown> {
+  type?: string;
+  text?: string;
+  message?: string;
+  source?: string;
+  remembered?: boolean;
+  resumed?: boolean;
+  cwd?: string;
+  branch?: string;
+  sessionId?: string;
+  toolUseID?: string;
+  name?: string;
+  input?: unknown;
+  output?: string;
+  error?: string;
+}
+
 const createAgentId = () => Math.random().toString(36).substring(2, 9);
 
 interface AgentWorkspaceMemory {
@@ -3818,6 +3835,10 @@ function createDefaultAgentSession(title = '默认会话'): AgentSession {
 
 function safeRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null ? value as Record<string, unknown> : null;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function stringifyCompact(value: unknown): string {
@@ -4064,24 +4085,28 @@ function buildWorkflowFromMessages(messages: AgentMessage[]): AgentWorkflowActiv
   });
 }
 
-function normalizeAgentSession(raw: any): AgentSession {
-  const messages = Array.isArray(raw?.messages) ? raw.messages as AgentMessage[] : [];
-  const workflowActivities = Array.isArray(raw?.workflowActivities) && raw.workflowActivities.length > 0
-    ? raw.workflowActivities as AgentWorkflowActivity[]
+function normalizeAgentSession(raw: unknown): AgentSession {
+  const record = safeRecord(raw);
+  const messages = Array.isArray(record?.messages) ? record.messages as AgentMessage[] : [];
+  const workflowActivities = Array.isArray(record?.workflowActivities) && record.workflowActivities.length > 0
+    ? record.workflowActivities as AgentWorkflowActivity[]
     : buildWorkflowFromMessages(messages);
+  const status = typeof record?.status === 'string' && ['ready', 'running', 'waiting_permission', 'error', 'finished'].includes(record.status)
+    ? record.status as AgentSessionStatus
+    : 'ready';
 
   return {
-    id: typeof raw?.id === 'string' ? raw.id : createAgentId(),
-    title: typeof raw?.title === 'string' ? raw.title : '新会话',
-    prompt: typeof raw?.prompt === 'string' ? raw.prompt : '',
-    status: ['ready', 'running', 'waiting_permission', 'error', 'finished'].includes(raw?.status) ? raw.status : 'ready',
+    id: typeof record?.id === 'string' ? record.id : createAgentId(),
+    title: typeof record?.title === 'string' ? record.title : '新会话',
+    prompt: typeof record?.prompt === 'string' ? record.prompt : '',
+    status,
     messages,
     workflowActivities,
-    error: typeof raw?.error === 'string' ? raw.error : null,
-    createdAt: typeof raw?.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
-    sdkSessionId: typeof raw?.sdkSessionId === 'string' ? raw.sdkSessionId : null,
-    sdkSessionUpdatedAt: typeof raw?.sdkSessionUpdatedAt === 'string' ? raw.sdkSessionUpdatedAt : null,
-    pendingPermission: raw?.pendingPermission ?? null,
+    error: typeof record?.error === 'string' ? record.error : null,
+    createdAt: typeof record?.createdAt === 'string' ? record.createdAt : new Date().toISOString(),
+    sdkSessionId: typeof record?.sdkSessionId === 'string' ? record.sdkSessionId : null,
+    sdkSessionUpdatedAt: typeof record?.sdkSessionUpdatedAt === 'string' ? record.sdkSessionUpdatedAt : null,
+    pendingPermission: safeRecord(record?.pendingPermission) as AgentPendingPermission | null,
   };
 }
 
@@ -4109,17 +4134,13 @@ function AgentWorkflowCard({ session }: { session: AgentSession }) {
       : buildWorkflowFromMessages(session.messages);
   }, [session.messages, session.workflowActivities]);
 
-  useEffect(() => {
-    if (session.status === 'running' || session.status === 'waiting_permission') {
-      setExpanded(true);
-    }
-  }, [session.status]);
-
   if (activities.length === 0) return null;
 
+  const isForceExpanded = session.status === 'running' || session.status === 'waiting_permission';
+  const isExpanded = expanded || isForceExpanded;
   const runningCount = activities.filter((activity) => activity.status === 'running' || activity.status === 'waiting').length;
   const completedCount = activities.filter((activity) => activity.status === 'success' || activity.status === 'error').length;
-  const visibleActivities = expanded ? activities : activities.slice(-4);
+  const visibleActivities = isExpanded ? activities : activities.slice(-4);
 
   return (
     <div className="rounded-xl border border-border bg-card/90 shadow-sm overflow-hidden">
@@ -4158,7 +4179,7 @@ function AgentWorkflowCard({ session }: { session: AgentSession }) {
           >
             {runningCount > 0 ? 'RUNNING' : session.status === 'error' ? 'ERROR' : 'READY'}
           </Badge>
-          {expanded ? (
+          {isExpanded ? (
             <ChevronUp className="h-4 w-4 text-muted-foreground" />
           ) : (
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -4236,7 +4257,7 @@ function AgentWorkflowCard({ session }: { session: AgentSession }) {
               );
             })}
 
-            {!expanded && activities.length > visibleActivities.length ? (
+            {!isExpanded && activities.length > visibleActivities.length ? (
               <p className="text-center text-[11px] text-muted-foreground">
                 已收起 {activities.length - visibleActivities.length} 条更早流程
               </p>
@@ -4546,7 +4567,9 @@ function AgentRunView({
       try {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) return parsed;
-      } catch (e) {}
+      } catch {
+        localStorage.removeItem('repo-pulse:agent-projects');
+      }
     }
     return initialRepository ? [initialRepository.id] : [];
   });
@@ -4673,7 +4696,7 @@ function AgentRunView({
       let parsedSessions: AgentSession[] = [];
       try {
         parsedSessions = storedSessions ? JSON.parse(storedSessions) : [];
-      } catch (e) {
+      } catch {
         parsedSessions = [];
       }
 
@@ -4811,8 +4834,8 @@ function AgentRunView({
   useEffect(() => {
     if (!window.repoPulseDesktop?.agent) return;
 
-    const unsubscribeMessage = window.repoPulseDesktop.agent.onMessage((msg: any) => {
-      if (msg && ['finished', 'error', 'tool_result'].includes(msg.type)) {
+    const unsubscribeMessage = window.repoPulseDesktop.agent.onMessage((msg: AgentIpcMessage) => {
+      if (msg && msg.type && ['finished', 'error', 'tool_result'].includes(msg.type)) {
         setGitRefreshTrigger(prev => prev + 1);
       }
       const runningTarget = runningAgentTargetRef.current;
@@ -4932,26 +4955,26 @@ function AgentRunView({
           if (lastMsg && lastMsg.type === 'assistant') {
             updatedMessages[updatedMessages.length - 1] = {
               ...lastMsg,
-              content: msg.text,
+              content: msg.text || '',
             };
           } else {
             updatedMessages.push({
               id: createAgentId(),
               type: 'assistant',
-              content: msg.text,
+              content: msg.text || '',
             });
           }
         } else if (msg.type === 'thought') {
           if (lastMsg && lastMsg.type === 'thought') {
             updatedMessages[updatedMessages.length - 1] = {
               ...lastMsg,
-              content: msg.text,
+              content: msg.text || '',
             };
           } else {
             updatedMessages.push({
               id: createAgentId(),
               type: 'thought',
-              content: msg.text,
+              content: msg.text || '',
             });
           }
           updatedWorkflow = upsertWorkflowActivity(updatedWorkflow, createWorkflowActivity({
@@ -5037,7 +5060,7 @@ function AgentRunView({
       });
     });
 
-    const unsubscribePermission = window.repoPulseDesktop.agent.onPermissionRequest((req: any) => {
+    const unsubscribePermission = window.repoPulseDesktop.agent.onPermissionRequest((req: AgentIpcMessage) => {
       const runningTarget = runningAgentTargetRef.current;
       const activeId = runningTarget?.sessionId || activeSessionIdRef.current;
       const activeRepo = runningTarget?.repoId || activeRepoIdRef.current;
@@ -5233,8 +5256,8 @@ function AgentRunView({
       });
       toast.success('Agent 会话已启动');
       console.log('[AgentRunView] startSessionOnSession: agent.startSession resolved successfully.');
-    } catch (err: any) {
-      const errorMsg = err.message || String(err);
+    } catch (err) {
+      const errorMsg = getErrorMessage(err);
       console.error('[AgentRunView] startSessionOnSession: agent.startSession rejected with error:', err);
       updateRepoSessions(repo.id, prev => {
         return prev.map(s => {
@@ -5299,8 +5322,8 @@ function AgentRunView({
         });
       });
       toast.info('会话已终止');
-    } catch (err: any) {
-      toast.error(`停止会话失败: ${err.message}`);
+    } catch (err) {
+      toast.error(`停止会话失败: ${getErrorMessage(err)}`);
     }
   };
 
@@ -5364,8 +5387,8 @@ function AgentRunView({
           };
         });
       });
-    } catch (err: any) {
-      toast.error(`回应权限请求失败: ${err.message}`);
+    } catch (err) {
+      toast.error(`回应权限请求失败: ${getErrorMessage(err)}`);
     }
   };
 

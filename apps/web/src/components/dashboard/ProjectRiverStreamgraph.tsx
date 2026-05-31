@@ -1,3 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// D3 internals (scales, area generators, brush, zoom) use polymorphic generics
+// that TypeScript cannot safely infer. Suppressing explicit-any is the established
+// pattern for D3 + TypeScript integration.
 import { useEffect, useRef, useState } from 'react';
 import { extent, max, min } from 'd3-array';
 import { scaleLinear, scaleUtc } from 'd3-scale';
@@ -233,28 +237,28 @@ export function ProjectRiverStreamgraph({
 
     svg.append('style').text(`
       .brush .overlay {
-        cursor: crosshair !important;
+        fill: transparent !important;
       }
       .brush .selection {
-        fill: rgba(139, 92, 246, 0.1) !important;
-        stroke: rgba(139, 92, 246, 0.92) !important;
-        stroke-width: 1.5px !important;
-        rx: 4px !important;
-        filter: drop-shadow(0 0 2px rgba(139, 92, 246, 0.5)) !important;
-        cursor: grab !important;
+        fill: #8b5cf6 !important;
+        fill-opacity: 0.16 !important;
+        stroke: #8b5cf6 !important;
+        stroke-width: 2px !important;
+        rx: 3px !important;
+        filter: drop-shadow(0 0 3px rgba(139, 92, 246, 0.65)) !important;
       }
       .brush .handle {
-        fill: rgba(167, 139, 250, 0.72) !important;
-        stroke: rgba(139, 92, 246, 0.95) !important;
+        fill: #a78bfa !important;
+        stroke: #8b5cf6 !important;
         stroke-width: 1.2px !important;
-        width: 16px !important;
-        rx: 4px !important;
+        width: 8px !important;
+        rx: 3px !important;
         cursor: ew-resize !important;
-        transition: fill 0.2s, stroke 0.2s;
+        transition: fill 0.2s, stroke-width 0.2s;
       }
       .brush .handle:hover {
-        fill: rgba(196, 181, 253, 0.86) !important;
-        stroke: rgba(167, 139, 250, 1) !important;
+        fill: #c084fc !important;
+        stroke: #a78bfa !important;
       }
     `);
 
@@ -293,7 +297,7 @@ export function ProjectRiverStreamgraph({
 
     const brushYScale: any = scaleLinear()
       .domain([yMin - ySpan * 0.08, yMax + ySpan * 0.08])
-      .range([BRUSH_HEIGHT - 8, 8]);
+      .range([BRUSH_HEIGHT - 6, 6]);
 
     const areaGenerator: any = d3Area<[number, number]>()
       .x((_, i) => xScale(rawData[i].date))
@@ -543,14 +547,17 @@ export function ProjectRiverStreamgraph({
             bestIndex = index;
           }
         });
+        const originalX = xScale(rawData[bestIndex].date);
+        const clampedX = Math.max(MARGIN.left + 40, Math.min(cssW - MARGIN.right - 40, originalX));
         return {
           contributor: layer.key,
           maxThickness,
-          x: xScale(rawData[bestIndex].date),
+          date: rawData[bestIndex].date,
+          x: clampedX,
           y: (yScale(layer[bestIndex][0]) + yScale(layer[bestIndex][1])) / 2,
         };
       })
-      .filter((d) => d.maxThickness >= 16)
+      .filter((d) => d.maxThickness >= 12)
       .sort((a, b) => b.maxThickness - a.maxThickness)
       .slice(0, MAX_CONTRIBUTOR_LABELS);
 
@@ -562,11 +569,15 @@ export function ProjectRiverStreamgraph({
       .attr('class', 'river-label')
       .attr('x', (d) => d.x)
       .attr('y', (d) => d.y + 4)
-      .attr('fill', 'hsl(var(--background))')
-      .attr('font-size', 11)
-      .attr('font-weight', 700)
+      .attr('fill', 'hsl(var(--foreground))')
+      .style('paint-order', 'stroke')
+      .style('stroke', 'hsl(var(--background))')
+      .style('stroke-width', '2.5px')
+      .style('stroke-linejoin', 'round')
+      .attr('font-size', 10)
+      .attr('font-weight', 600)
       .attr('text-anchor', 'middle')
-      .attr('opacity', 0.78)
+      .attr('opacity', 0.85)
       .text((d) => (d.contributor === 'Other contributors' ? t('projectRiver.otherContributors') : d.contributor));
 
     // Bottom Brush Section
@@ -600,8 +611,12 @@ export function ProjectRiverStreamgraph({
       .append('path')
       .attr('class', 'brush-river-path')
       .attr('d', brushAreaGenerator)
-      .attr('fill', (d: any) => colorMap.get(d.key) || colors.fallback)
-      .attr('opacity', 0.5);
+      .attr('fill', (_, i) => {
+        const sat = 55 + (i % 3) * 10;
+        const light = 45 + (i % 4) * 8;
+        return `hsl(262, ${sat}%, ${light}%)`;
+      })
+      .attr('opacity', 0.35);
 
     // Syncing zoom callback handles
     let isProgrammatic = false;
@@ -673,14 +688,25 @@ export function ProjectRiverStreamgraph({
 
       labelsGroup
         .selectAll('.river-label')
-        .attr('x', (d: any) => xScale(rawData.find((r) => r.dateKey === d.dateKey)?.date || new Date()));
+        .attr('x', (d: any) => {
+          const originalX = xScale(d.date);
+          return Math.max(MARGIN.left + 40, Math.min(cssW - MARGIN.right - 40, originalX));
+        });
     };
 
+    let rangeRafId: number | null = null;
     const emitVisibleRange = () => {
-      const [d0, d1] = xScale.domain();
-      onRangeChange({
-        start: d0.toISOString().split('T')[0],
-        end: d1.toISOString().split('T')[0],
+      if (rangeRafId) {
+        cancelAnimationFrame(rangeRafId);
+      }
+      rangeRafId = requestAnimationFrame(() => {
+        rangeRafId = null;
+        if (!xScale) return;
+        const [d0, d1] = xScale.domain();
+        onRangeChange({
+          start: d0.toISOString().split('T')[0],
+          end: d1.toISOString().split('T')[0],
+        });
       });
     };
 
@@ -696,8 +722,6 @@ export function ProjectRiverStreamgraph({
         [cssW - MARGIN.right, Infinity],
       ])
       .on('zoom', (event) => {
-        if (event.sourceEvent?.type === 'brush') return;
-
         const k = event.transform.k;
         const [rMin, rMax] = xBase.range();
         const clampedX = Math.max(rMax * (1 - k), Math.min(rMin * (1 - k), event.transform.x));
@@ -712,8 +736,11 @@ export function ProjectRiverStreamgraph({
 
         redrawChartForCurrentDomain();
 
-        // Sync brush slider handle
-        if (brushGroupSelection && brushBehavior && !isProgrammatic) {
+        // Sync brush slider handle:
+        // ONLY if the zoom was NOT triggered by the brush (e.g. sourceEvent type is not 'brush' or 'end'),
+        // and we are not in programmatic mode!
+        const isFromBrush = event.sourceEvent?.type === 'brush' || event.sourceEvent?.type === 'end';
+        if (!isFromBrush && brushGroupSelection && brushBehavior && !isProgrammatic) {
           isProgrammatic = true;
           const sel =
             rMax > rMin
@@ -731,6 +758,9 @@ export function ProjectRiverStreamgraph({
 
     // Disable default wheel zooms (overridden for panning trackpad support)
     svg.on('wheel.zoom', null);
+
+    // Ensure tooltip hides when mouse leaves the SVG boundary entirely
+    svg.on('pointerleave', handleLeave);
 
     // Custom scroll zooms
     const handleCustomWheel = (event: WheelEvent) => {
@@ -859,6 +889,9 @@ export function ProjectRiverStreamgraph({
 
     // Cleanup listeners
     return () => {
+      if (rangeRafId) {
+        cancelAnimationFrame(rangeRafId);
+      }
       element?.removeEventListener('wheel', handleCustomWheel);
       element?.removeEventListener('gesturestart', handleGestureStart);
       element?.removeEventListener('gesturechange', handleGestureChange);
