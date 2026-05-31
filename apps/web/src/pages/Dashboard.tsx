@@ -37,6 +37,7 @@ import { Progress } from '@/components/ui/progress';
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
@@ -1142,7 +1143,7 @@ export function Dashboard({
               {t('dashboard.empty.description')}
             </p>
             <Button asChild className="btn-x-primary">
-              <Link to="/repositories">{t('dashboard.empty.action')}</Link>
+              <Link to="/workbench/repositories">{t('dashboard.empty.action')}</Link>
             </Button>
           </CardContent>
         </Card>
@@ -1414,6 +1415,9 @@ export function Dashboard({
                 <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
                   <SheetHeader>
                     <SheetTitle>{t('dashboard.sections.recentActivity')}</SheetTitle>
+                    <SheetDescription className="sr-only">
+                      Browse and filter recent repository activity events.
+                    </SheetDescription>
                   </SheetHeader>
 
                   {/* Search */}

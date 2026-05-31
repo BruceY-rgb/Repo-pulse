@@ -18,15 +18,23 @@ export function AuthCallback() {
     const resolveCurrentUser = async () => {
       for (let attempt = 1; attempt <= 5; attempt += 1) {
         try {
-          const user = await authService.getMe();
+          const user = await authService.getSession();
 
           if (isCancelled) {
             return;
           }
 
-          queryClient.setQueryData(authQueryKeys.currentUser(), user);
-          navigate('/dashboard', { replace: true });
-          return;
+          if (user) {
+            queryClient.setQueryData(authQueryKeys.currentUser(), user);
+            navigate('/workbench', { replace: true });
+            return;
+          }
+
+          if (attempt < 5) {
+            await new Promise((resolve) => {
+              window.setTimeout(resolve, 600);
+            });
+          }
         } catch (error) {
           if (isCancelled) {
             return;
@@ -42,6 +50,10 @@ export function AuthCallback() {
             window.setTimeout(resolve, 600);
           });
         }
+      }
+
+      if (!isCancelled) {
+        navigate('/login?error=oauth_failed', { replace: true });
       }
     };
 

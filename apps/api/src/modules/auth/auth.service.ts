@@ -88,6 +88,14 @@ export class AuthService {
     }
   }
 
+  async verifyToken(token: string): Promise<JwtPayload | null> {
+    try {
+      return await this.jwtService.verifyAsync<JwtPayload>(token);
+    } catch {
+      return null;
+    }
+  }
+
   async handleGithubAuth(profile: {
     id: string;
     email: string | undefined;

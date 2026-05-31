@@ -31,6 +31,11 @@ export const authService = {
     return data.data;
   },
 
+  async getSession(): Promise<User | null> {
+    const { data } = await apiClient.get<ApiResponse<User | null>>('/auth/session');
+    return data.data ?? null;
+  },
+
   async updatePreferences(preferences: Record<string, unknown>): Promise<User> {
     const { data } = await apiClient.patch<ApiResponse<User>>('/users/preferences', {
       preferences,

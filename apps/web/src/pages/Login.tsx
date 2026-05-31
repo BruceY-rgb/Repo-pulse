@@ -86,7 +86,7 @@ export function Login() {
   const onSubmit = async (values: LoginFormValues) => {
     try {
       await loginMutation.mutateAsync(values);
-      navigate('/dashboard', { replace: true });
+      navigate('/workbench', { replace: true });
     } catch {
       // Form-level error is rendered below.
     }
@@ -131,7 +131,7 @@ export function Login() {
   const onDesktopGithubLogin = async () => {
     try {
       await desktopGithubLoginMutation.mutateAsync(undefined);
-      navigate('/dashboard', { replace: true });
+      navigate('/workbench', { replace: true });
     } catch {
       // Error is rendered below.
     }

@@ -13,6 +13,7 @@ import { AnalysisDetail } from '@/components/analysis/AnalysisDetail';
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
@@ -235,6 +236,9 @@ export function AIAnalysis() {
         <SheetContent className="w-[480px] sm:max-w-[480px] overflow-y-auto">
           <SheetHeader>
             <SheetTitle>{t('analysis.detail.title')}</SheetTitle>
+            <SheetDescription className="sr-only">
+              View the selected AI analysis details and available actions.
+            </SheetDescription>
           </SheetHeader>
           {selected && (
             <div className="mt-6">

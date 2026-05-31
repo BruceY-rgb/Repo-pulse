@@ -3,6 +3,7 @@ import { Search, FileText, ArrowRight } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -109,6 +110,9 @@ export function SearchDialog({ isOpen, onClose, onSectionChange }: SearchDialogP
       <DialogContent className="max-w-2xl p-0 gap-0">
         <DialogHeader className="p-4 pb-0">
           <DialogTitle className="sr-only">Search Documentation</DialogTitle>
+          <DialogDescription className="sr-only">
+            Search documentation sections by title or description.
+          </DialogDescription>
           <div className="flex items-center gap-2">
             <Search className="h-5 w-5 text-muted-foreground" />
             <Input

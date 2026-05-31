@@ -176,12 +176,12 @@ export function Landing() {
             <a href="#testimonials" className="text-sm text-[var(--github-text-secondary)] hover:text-white transition-colors">
               {t('landing.nav.testimonials')}
             </a>
-            <Link to="/dashboard">
+            <Link to="/workbench">
               <Button variant="ghost" className="text-[var(--github-text-secondary)] hover:text-white">
                 {t('landing.nav.signIn')}
               </Button>
             </Link>
-            <Link to="/dashboard">
+            <Link to="/workbench">
               <Button className="btn-x-primary gap-2">
                 {t('landing.nav.getStarted')}
                 <ArrowRight className="w-4 h-4" />
@@ -211,7 +211,7 @@ export function Landing() {
                 {t('landing.hero.description')}
               </p>
               <div className="animate-in flex flex-wrap gap-4">
-                <Link to="/dashboard">
+                <Link to="/workbench">
                   <Button className="btn-x-primary gap-2 text-lg px-8 py-6">
                     {t('landing.hero.primaryCta')}
                     <ArrowRight className="w-5 h-5" />
@@ -383,7 +383,7 @@ export function Landing() {
             {t('landing.cta.description')}
           </p>
           <div className="flex flex-wrap justify-center gap-4">
-            <Link to="/dashboard">
+            <Link to="/workbench">
               <Button className="btn-x-primary gap-2 text-lg px-8 py-6">
                 {t('landing.cta.primary')}
                 <ArrowRight className="w-5 h-5" />

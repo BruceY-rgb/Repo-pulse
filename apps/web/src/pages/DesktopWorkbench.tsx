@@ -81,6 +81,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
@@ -2480,6 +2481,9 @@ function MessageDetailSheet({
                     <SheetTitle className="text-xl font-bold tracking-tight text-foreground/90 mt-1 leading-snug">
                       {message.title}
                     </SheetTitle>
+                    <SheetDescription className="sr-only">
+                      {repository.fullName} 的会话消息详情。
+                    </SheetDescription>
                   </div>
                 </div>
 
@@ -2665,6 +2669,9 @@ function ConversationSearchSheet({
                 <Command className="h-4.5 w-4.5 text-primary" />
                 搜索会话记录
               </SheetTitle>
+              <SheetDescription className="sr-only">
+                按标题、正文、作者、分支或消息类型搜索当前会话记录。
+              </SheetDescription>
               {results.length > 0 && (
                 <span className="text-xs font-semibold text-muted-foreground/60 bg-secondary px-2.5 py-0.5 rounded-full border border-border/40">
                   找到 {results.length} 条记录
@@ -2818,6 +2825,9 @@ function BranchMonitorSheet({
               <GitBranch className="h-4.5 w-4.5 text-primary" />
               分支监控配置
             </SheetTitle>
+            <SheetDescription className="sr-only">
+              配置当前仓库是否纳入监控，以及需要监控的分支范围。
+            </SheetDescription>
             <p className="text-xs text-muted-foreground flex items-center gap-1.5 font-medium">
               <Folder className="h-3.5 w-3.5 text-muted-foreground/60" />
               {repository ? repository.fullName : '未选择仓库'}
@@ -2828,16 +2838,19 @@ function BranchMonitorSheet({
         {repository ? (
           <div className="flex-1 overflow-y-auto p-6 space-y-5">
             {/* Join Monitoring Scope Switch Card */}
-            <button
-              type="button"
+            <div
               className={cn(
                 "flex w-full items-center justify-between gap-4 rounded-xl border p-4.5 text-left transition-all duration-200 shadow-sm",
                 isRepositoryMonitored
                   ? "bg-primary/5 border-primary/20 hover:bg-primary/10"
-                  : "bg-secondary/15 border-border/60 hover:bg-secondary/20"
+                  : "bg-secondary/15 border-border/60 hover:bg-secondary/20",
+                saving ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
               )}
-              onClick={onToggleRepository}
-              disabled={saving}
+              onClick={() => {
+                if (!saving) {
+                  onToggleRepository();
+                }
+              }}
             >
               <div className="flex items-center gap-3">
                 <Checkbox checked={isRepositoryMonitored} className="pointer-events-none data-[state=checked]:bg-primary data-[state=checked]:border-primary" />
@@ -2846,7 +2859,7 @@ function BranchMonitorSheet({
                   <p className="text-xs text-muted-foreground/75 mt-0.5">关闭后，该仓库的数据、变更和推送事件将不会出现在仪表盘或收件箱中。</p>
                 </div>
               </div>
-            </button>
+            </div>
 
             {/* Branch Filtering Card */}
             <div className={cn(
@@ -2911,22 +2924,25 @@ function BranchMonitorSheet({
                       filteredBranches.map((branch) => {
                         const isSelected = selectedBranches.includes(branch.name);
                         return (
-                          <button
+                          <div
                             key={branch.name}
-                            type="button"
                             className={cn(
-                              "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-all duration-150 hover:bg-secondary/40 text-xs font-mono",
-                              isSelected ? "bg-primary/5 text-primary" : "text-muted-foreground hover:text-foreground"
+                              "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-all duration-150 text-xs font-mono",
+                              isSelected ? "bg-primary/5 text-primary" : "text-muted-foreground",
+                              saving || !isRepositoryMonitored ? "opacity-50 cursor-not-allowed" : "hover:bg-secondary/40 hover:text-foreground cursor-pointer"
                             )}
-                            onClick={() => onToggleBranch(branch.name)}
-                            disabled={saving || !isRepositoryMonitored}
+                            onClick={() => {
+                              if (!saving && isRepositoryMonitored) {
+                                onToggleBranch(branch.name);
+                              }
+                            }}
                           >
                             <Checkbox checked={isSelected} className="pointer-events-none scale-90 data-[state=checked]:bg-primary data-[state=checked]:border-primary" />
                             <span className="min-w-0 flex-1 truncate">{branch.name}</span>
                             {branch.isDefault ? (
                               <Badge variant="secondary" className="rounded-full text-[9px] px-1.5 py-0 bg-secondary/80 text-secondary-foreground border border-border/40 font-sans font-medium">默认</Badge>
                             ) : null}
-                          </button>
+                          </div>
                         );
                       })
                     ) : (
@@ -3375,7 +3391,7 @@ function InboxView({
               <p className="text-sm text-muted-foreground">来自真实仓库事件、审批和通知的会话摘要</p>
             </div>
             <Button variant="outline" size="sm" asChild>
-              <Link to="/dashboard">打开旧 Dashboard</Link>
+              <Link to="/workbench/dashboard">打开仓库看板</Link>
             </Button>
           </div>
           <div className="divide-y divide-border">
@@ -3744,8 +3760,8 @@ function WatchFeedPreviewDialog({
       }
     }}>
       {item && meta ? (
-        <DialogContent aria-describedby={undefined} className="max-h-[min(760px,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-3xl gap-0 overflow-hidden rounded-xl border-border bg-background p-0">
-          <DialogHeader className="border-b border-border bg-card/80 px-6 py-5 pr-12 text-left">
+        <DialogContent className="max-h-[min(760px,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-3xl gap-0 overflow-hidden rounded-xl border-border bg-background p-0 flex flex-col">
+          <DialogHeader className="border-b border-border bg-card/80 px-6 py-5 pr-12 text-left shrink-0">
             <div className="flex items-start gap-4">
               <Avatar className="h-12 w-12 rounded-xl border border-border bg-background">
                 <AvatarImage src={item.repositoryAvatar || getWatchFeedAvatarUrl(item.repositoryFullName)} alt={item.repositoryFullName} />
@@ -3773,7 +3789,7 @@ function WatchFeedPreviewDialog({
             </div>
           </DialogHeader>
 
-          <ScrollArea className="max-h-[calc(100dvh-18rem)]">
+          <ScrollArea className="flex-1 min-h-0">
             <div className="space-y-6 px-6 py-5">
               <section>
                 <div className="mb-3 flex items-center gap-2 text-sm font-medium text-foreground">
@@ -3799,7 +3815,7 @@ function WatchFeedPreviewDialog({
             </div>
           </ScrollArea>
 
-          <DialogFooter className="border-t border-border bg-background/95 px-6 py-4 sm:items-center sm:justify-between">
+          <DialogFooter className="border-t border-border bg-background/95 px-6 py-4 sm:items-center sm:justify-between shrink-0">
             <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
               <span className={cn('h-2 w-2 shrink-0 rounded-full', meta.dotClass)} />
               <span className="truncate">{item.repositoryFullName}</span>
