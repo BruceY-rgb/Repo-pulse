@@ -568,4 +568,27 @@ export class GithubService {
       return null;
     }
   }
+
+  async starRepository(
+    owner: string,
+    repo: string,
+    userToken: string,
+  ): Promise<boolean> {
+    try {
+      const client = this.createUserClient(userToken);
+      await client.put(`/user/starred/${owner}/${repo}`, null, {
+        headers: {
+          'Content-Length': '0',
+        },
+      });
+      this.logger.log(`Starred repository ${owner}/${repo} successfully`);
+      return true;
+    } catch (error) {
+      this.logger.error(
+        `Failed to star repository ${owner}/${repo}`,
+        this.formatErrorForLog(error),
+      );
+      return false;
+    }
+  }
 }

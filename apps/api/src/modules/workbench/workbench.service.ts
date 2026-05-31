@@ -659,11 +659,16 @@ export class WorkbenchService {
   async addWatchRepository(userId: string, dto: CreateRepositoryDto) {
     const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
     const monitoredSet = new Set(monitoredRepositoryIds);
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { githubAccessToken: true },
+    });
     const repository = await this.repositoryService.create(userId, dto, {
       accessMode: RepositoryAccessMode.MONITOR,
       accessLevel: RepositoryAccessLevel.READ,
       role: Role.VIEWER,
       isStarred: true,
+      userOAuthToken: user?.githubAccessToken || undefined,
     });
 
     return this.toWatchRepositoryItem(repository, monitoredSet);

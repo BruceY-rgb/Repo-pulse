@@ -3760,7 +3760,10 @@ function WatchFeedPreviewDialog({
       }
     }}>
       {item && meta ? (
-        <DialogContent className="max-h-[min(760px,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-3xl gap-0 overflow-hidden rounded-xl border-border bg-background p-0 flex flex-col">
+        <DialogContent
+          style={{ display: 'flex', flexDirection: 'column' }}
+          className="max-h-[min(760px,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-3xl gap-0 overflow-hidden rounded-xl border-border bg-background p-0"
+        >
           <DialogHeader className="border-b border-border bg-card/80 px-6 py-5 pr-12 text-left shrink-0">
             <div className="flex items-start gap-4">
               <Avatar className="h-12 w-12 rounded-xl border border-border bg-background">
@@ -3789,31 +3792,29 @@ function WatchFeedPreviewDialog({
             </div>
           </DialogHeader>
 
-          <ScrollArea className="flex-1 min-h-0">
-            <div className="space-y-6 px-6 py-5">
-              <section>
+          <div className="flex-1 overflow-y-auto min-h-0 px-6 py-5 space-y-6">
+            <section>
+              <div className="mb-3 flex items-center gap-2 text-sm font-medium text-foreground">
+                <FileText className="h-4 w-4 text-muted-foreground" />
+                正文
+              </div>
+              <MarkdownContent className="prose-pre:max-h-none">
+                {item.summary || item.title}
+              </MarkdownContent>
+            </section>
+
+            {item.aiInsight ? (
+              <section className="border-t border-border pt-5">
                 <div className="mb-3 flex items-center gap-2 text-sm font-medium text-foreground">
-                  <FileText className="h-4 w-4 text-muted-foreground" />
-                  正文
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  AI 洞察
                 </div>
                 <MarkdownContent className="prose-pre:max-h-none">
-                  {item.summary || item.title}
+                  {item.aiInsight}
                 </MarkdownContent>
               </section>
-
-              {item.aiInsight ? (
-                <section className="border-t border-border pt-5">
-                  <div className="mb-3 flex items-center gap-2 text-sm font-medium text-foreground">
-                    <Sparkles className="h-4 w-4 text-primary" />
-                    AI 洞察
-                  </div>
-                  <MarkdownContent className="prose-pre:max-h-none">
-                    {item.aiInsight}
-                  </MarkdownContent>
-                </section>
-              ) : null}
-            </div>
-          </ScrollArea>
+            ) : null}
+          </div>
 
           <DialogFooter className="border-t border-border bg-background/95 px-6 py-4 sm:items-center sm:justify-between shrink-0">
             <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">

@@ -194,6 +194,14 @@ export class RepositoryService {
       },
     });
 
+    if (options?.isStarred && platform === Platform.GITHUB && options?.userOAuthToken) {
+      try {
+        await this.githubService.starRepository(owner, repo, options.userOAuthToken);
+      } catch (error) {
+        this.logger.error(`Failed to star repository ${repoInfo.fullName} on GitHub`, error);
+      }
+    }
+
     const apiUrl = this.configService.get<string>('API_URL', 'http://localhost:3001');
     if (shouldRegisterWebhook) {
       const editableWebhookSecret = webhookSecret ?? this.generateWebhookSecret();
@@ -419,56 +427,69 @@ export class RepositoryService {
   }
 
   async delete(userId: string, id: string) {
-    await assertUserCanEditRepository(userId, id);
+    const membership = await assertUserCanAccessRepository(userId, id);
 
-    const repository = await this.prisma.repository.findUnique({
-      where: { id },
-      include: {
-        users: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                githubAccessToken: true,
+    if (isEditableRepositoryAccessLevel(membership.accessLevel)) {
+      const repository = await this.prisma.repository.findUnique({
+        where: { id },
+        include: {
+          users: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  githubAccessToken: true,
+                },
               },
             },
           },
         },
-      },
-    });
+      });
 
-    if (!repository) {
-      throw new NotFoundException('Repository not found');
-    }
-
-    const [owner, repo] = this.parseRepositoryPath(repository.fullName);
-    const tokenOwner = repository.users.find((entry) => entry.user.githubAccessToken);
-
-    if (repository.webhookId) {
-      try {
-        if (repository.platform === Platform.GITHUB) {
-          await this.githubService.deleteWebhook(
-            owner,
-            repo,
-            repository.webhookId,
-            tokenOwner?.user.githubAccessToken || undefined,
-          );
-        } else {
-          await this.gitlabService.deleteWebhook(owner, repo, Number(repository.webhookId));
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'unknown_error';
-        this.logger.warn(
-          `Failed to clean up webhook for repository ${repository.fullName}: ${message}`,
-        );
+      if (!repository) {
+        throw new NotFoundException('Repository not found');
       }
+
+      const [owner, repo] = this.parseRepositoryPath(repository.fullName);
+      const tokenOwner = repository.users.find((entry) => entry.user.githubAccessToken);
+
+      if (repository.webhookId) {
+        try {
+          if (repository.platform === Platform.GITHUB) {
+            await this.githubService.deleteWebhook(
+              owner,
+              repo,
+              repository.webhookId,
+              tokenOwner?.user.githubAccessToken || undefined,
+            );
+          } else {
+            await this.gitlabService.deleteWebhook(owner, repo, Number(repository.webhookId));
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'unknown_error';
+          this.logger.warn(
+            `Failed to clean up webhook for repository ${repository.fullName}: ${message}`,
+          );
+        }
+      }
+
+      await this.prisma.repository.delete({
+        where: { id },
+      });
+
+      this.logger.log(`Repository ${repository.fullName} deleted globally by user ${userId}`);
+    } else {
+      await this.prisma.userRepository.delete({
+        where: {
+          userId_repositoryId: {
+            userId,
+            repositoryId: id,
+          },
+        },
+      });
+      this.logger.log(`Repository membership for ${id} deleted for user ${userId}`);
     }
 
-    await this.prisma.repository.delete({
-      where: { id },
-    });
-
-    this.logger.log(`Repository ${repository.fullName} deleted by user ${userId}`);
     return { success: true };
   }
 
@@ -810,7 +831,7 @@ export class RepositoryService {
     id: string,
     options?: { daysBack?: number },
   ): Promise<SyncSummary> {
-    await assertUserCanEditRepository(userId, id);
+    await assertUserCanAccessRepository(userId, id);
     return this.sync(id, options);
   }
 
