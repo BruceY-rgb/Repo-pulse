@@ -21,6 +21,23 @@ export class SettingsController {
   }
 
   /**
+   * 获取原始 AI 配置 (含解密 API Key)
+   */
+  @Get('ai/raw')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '获取原始 AI 配置 (含解密 API Key)' })
+  async getRawAIConfig(@CurrentUser() user: { sub: string }) {
+    const config = await this.settingsService.getAIConfig(user.sub);
+    const rawApiKey = await this.settingsService.resolveApiKey(user.sub, '***');
+    return {
+      ...config,
+      aiApiKey: rawApiKey,
+    };
+  }
+
+
+  /**
    * 更新当前用户的 AI 配置
    */
   @Post('ai')

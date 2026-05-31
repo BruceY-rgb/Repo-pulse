@@ -23,6 +23,8 @@ jest.mock('@repo-pulse/database', () => ({
   Platform: { GITHUB: 'GITHUB' },
   RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
   RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
+  NotificationChannel: { IN_APP: 'IN_APP', EMAIL: 'EMAIL' },
+  Role: { ADMIN: 'ADMIN', MANAGER: 'MANAGER', MEMBER: 'MEMBER', VIEWER: 'VIEWER' },
   prisma: {
     user: { findUnique: (...a: any[]) => mockUserFindUnique(...a) },
     repository: {
@@ -60,6 +62,7 @@ describe('SyncService', () => {
   let service: SyncService;
   let mockGithubService: { [key: string]: jest.Mock };
   let mockRepositoryService: { create: jest.Mock };
+  let mockBranchSyncService: { syncBranchesForUser: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -75,8 +78,15 @@ describe('SyncService', () => {
     mockRepositoryService = {
       create: jest.fn().mockResolvedValue({ id: 'new-r1' }),
     };
+    mockBranchSyncService = {
+      syncBranchesForUser: jest.fn().mockResolvedValue(undefined),
+    };
     mockUserRepoUpdateMany.mockResolvedValue({ count: 0 });
-    service = new SyncService(mockGithubService as any, mockRepositoryService as any);
+    service = new SyncService(
+      mockGithubService as any,
+      mockRepositoryService as any,
+      mockBranchSyncService as any,
+    );
   });
 
   afterEach(() => {
@@ -260,6 +270,17 @@ describe('SyncService', () => {
       jest.runOnlyPendingTimers();
 
       expect(historySpy).toHaveBeenCalledWith('u1', ['r-starred']);
+    });
+
+    it('triggers branch sync after repository sync', async () => {
+      mockUserFindUnique.mockResolvedValue({ githubAccessToken: 'token', githubRefreshToken: null });
+      mockGithubService.getUserRepositories.mockResolvedValue([]);
+      mockGithubService.getStarredRepos.mockResolvedValue([]);
+
+      await service.syncUserRepositories('u1');
+      jest.runOnlyPendingTimers();
+
+      expect(mockBranchSyncService.syncBranchesForUser).toHaveBeenCalledWith('u1');
     });
 
     it('handles errors per individual repo without stopping sync', async () => {

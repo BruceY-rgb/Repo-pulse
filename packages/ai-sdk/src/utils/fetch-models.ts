@@ -175,6 +175,37 @@ export async function fetchModels(
         };
       }
 
+      case 'ollama': {
+        const response = await fetch(`${url}/api/tags`, {
+          method: 'GET',
+        });
+
+        if (!response.ok) {
+          const text = await response.text().catch(() => '');
+          return {
+            success: false,
+            message: `拉取失败 (${response.status}): ${text.slice(0, 200)}`,
+            models: [],
+          };
+        }
+
+        const data = await response.json() as { models?: { name: string }[] };
+        const models: ModelInfo[] = (data.models || []).map((item) => ({
+          id: item.name,
+          name: item.name,
+          enabled: true,
+        }));
+
+        // 按 ID 字母排序
+        models.sort((a, b) => a.id.localeCompare(b.id));
+
+        return {
+          success: true,
+          message: `成功获取 ${models.length} 个模型`,
+          models,
+        };
+      }
+
       default:
         return {
           success: false,

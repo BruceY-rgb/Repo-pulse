@@ -31,6 +31,14 @@ export const settingsService = {
   },
 
   /**
+   * 获取当前用户的原始 AI 配置 (包含明文 API Key)
+   */
+  async getRawAIConfig(): Promise<AIConfig> {
+    const { data } = await apiClient.get<ApiResponse<AIConfig>>('/settings/ai/raw');
+    return data.data;
+  },
+
+  /**
    * 更新 AI 配置
    */
   async updateAIConfig(config: Partial<AIConfig>): Promise<AIConfig> {

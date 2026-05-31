@@ -726,6 +726,7 @@ export class WorkbenchService {
   private toRepositoryView(
     repository: {
       id: string;
+      name: string;
       fullName: string;
       url: string;
       defaultBranch: string;
@@ -736,6 +737,7 @@ export class WorkbenchService {
     const isEditable = isEditableRepositoryAccessLevel(membership.accessLevel);
     return {
       id: repository.id,
+      name: repository.name,
       fullName: repository.fullName,
       url: repository.url,
       defaultBranch: repository.defaultBranch,

@@ -1246,6 +1246,12 @@ export function Settings() {
                             <span>{PROVIDER_LABELS.qwen}</span>
                           </div>
                         </SelectItem>
+                        <SelectItem value="ollama">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('ollama')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.ollama}</span>
+                          </div>
+                        </SelectItem>
                         <SelectItem value="custom">
                           <div className="flex items-center gap-2">
                             <img src={getProviderLogo('custom')} alt="" className="w-5 h-5" />
@@ -1256,8 +1262,8 @@ export function Settings() {
                     </Select>
                   </div>
 
-                  {/* API Key - show for all providers except custom */}
-                  {(aiConfig.aiProvider && aiConfig.aiProvider !== 'custom') && (
+                  {/* API Key - show for all providers except custom & ollama */}
+                  {(aiConfig.aiProvider && aiConfig.aiProvider !== 'custom' && aiConfig.aiProvider !== 'ollama') && (
                     <div className="space-y-2">
                       <Label htmlFor="aiApiKey" className="text-sm text-white">{t('settings.ai.apiKey')}</Label>
                       <div className="relative">
@@ -1455,6 +1461,8 @@ function getModelHint(provider?: string): string {
       return 'e.g., doubao-pro-32k';
     case 'qwen':
       return 'e.g., qwen-turbo, qwen-plus';
+    case 'ollama':
+      return 'e.g., llama3, qwen2.5, mistral, codellama';
     case 'custom':
       return 'Enter the model name supported by your custom endpoint';
     default:

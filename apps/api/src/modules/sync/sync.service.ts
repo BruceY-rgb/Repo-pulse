@@ -9,6 +9,7 @@ import {
 } from '@repo-pulse/database';
 import { GithubService } from '../repository/services/github.service';
 import { RepositoryService } from '../repository/repository.service';
+import { BranchSyncService } from './branch-sync.service';
 
 @Injectable()
 export class SyncService {
@@ -17,6 +18,7 @@ export class SyncService {
   constructor(
     private readonly githubService: GithubService,
     private readonly repositoryService: RepositoryService,
+    private readonly branchSyncService: BranchSyncService,
   ) {}
 
   private resolveGithubAccessLevel(
@@ -280,6 +282,9 @@ export class SyncService {
       setTimeout(() => {
         this.syncAllUserRepositoriesHistory(userId, starredRepositoryIds).catch((err) => {
           this.logger.error(`Failed to sync repository history for user ${userId}`, err);
+        });
+        this.branchSyncService.syncBranchesForUser(userId).catch((err) => {
+          this.logger.error(`Failed to sync branches for user ${userId}`, err);
         });
       }, 500);
 

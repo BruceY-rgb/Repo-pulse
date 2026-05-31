@@ -7,6 +7,20 @@ type RepoPulseDesktopBridge = {
     node: string;
   };
   openExternal: (url: string) => Promise<void>;
+  agent?: {
+    startSession: (params: {
+      repositoryId: string;
+      gitUrl: string;
+      defaultBranch: string;
+      prompt: string;
+      apiKey: string;
+      model?: string;
+    }) => Promise<any>;
+    stopSession: () => Promise<any>;
+    resolvePermission: (params: { toolUseID: string; approve: boolean }) => Promise<any>;
+    onMessage: (callback: (message: any) => void) => () => void;
+    onPermissionRequest: (callback: (request: any) => void) => () => void;
+  };
 };
 
 declare global {

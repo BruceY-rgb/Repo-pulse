@@ -21,6 +21,7 @@ export interface User {
   updatedAt: string;
   // TODO: 生产环境移除 - 用于 WebSocket 测试
   accessToken?: string;
+  githubAccessToken?: string;
 }
 
 export interface DashboardPreferences {

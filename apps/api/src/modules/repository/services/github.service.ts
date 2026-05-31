@@ -22,6 +22,11 @@ export interface GithubRepoResponse {
     triage?: boolean;
     pull?: boolean;
   };
+  fork?: boolean;
+  parent?: {
+    full_name: string;
+    default_branch: string;
+  };
 }
 
 export interface GithubSearchResult {
@@ -536,6 +541,31 @@ export class GithubService {
     } catch (error) {
       this.logger.error(`Failed to fetch contributors for ${owner}/${repo}`, this.formatErrorForLog(error));
       return [];
+    }
+  }
+
+  /**
+   * 对比两个分支
+   * @param base 基准分支
+   * @param head 对比分支
+   */
+  async compareBranches(
+    owner: string,
+    repo: string,
+    base: string,
+    head: string,
+    userToken?: string,
+  ): Promise<any> {
+    try {
+      const client = this.createUserClient(userToken);
+      const response = await client.get(`/repos/${owner}/${repo}/compare/${base}...${head}`);
+      return response.data;
+    } catch (error) {
+      this.logger.error(
+        `Failed to compare branches ${base}...${head} for ${owner}/${repo}`,
+        this.formatErrorForLog(error),
+      );
+      return null;
     }
   }
 }

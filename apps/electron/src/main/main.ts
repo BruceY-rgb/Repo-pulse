@@ -1,11 +1,15 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import { URL } from 'node:url';
+import { AgentWorkspaceManager } from './lib/agent-workspace-manager';
+import { AgentOrchestrator } from './lib/agent-orchestrator';
 
 const isDev = !app.isPackaged;
 const devServerUrl = process.env.VITE_DEV_SERVER_URL ?? 'http://127.0.0.1:5173';
 
 let mainWindow: BrowserWindow | null = null;
+let workspaceManager: AgentWorkspaceManager | null = null;
+let agentOrchestrator: AgentOrchestrator | null = null;
 
 function getPreloadPath() {
   return path.join(__dirname, '../preload/preload.js');
@@ -42,6 +46,9 @@ function createMainWindow() {
     },
   });
 
+  workspaceManager = new AgentWorkspaceManager();
+  agentOrchestrator = new AgentOrchestrator(mainWindow);
+
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
   });
@@ -74,6 +81,53 @@ function registerIpcHandlers() {
     }
 
     await shell.openExternal(url.toString());
+  });
+
+  ipcMain.handle('agent:start-session', async (
+    _event,
+    params: {
+      repositoryId: string;
+      gitUrl: string;
+      defaultBranch: string;
+      prompt: string;
+      apiKey: string;
+      model?: string;
+      baseUrl?: string;
+    },
+  ) => {
+    if (!workspaceManager || !agentOrchestrator) {
+      throw new Error('Agent systems not initialized');
+    }
+
+    const { repositoryId, gitUrl, defaultBranch, prompt, apiKey, model, baseUrl } = params;
+
+    // 1. 准备物理工作区
+    const cwd = await workspaceManager.prepareWorkspace(repositoryId, gitUrl, defaultBranch);
+
+    // 2. 异步启动 Agent 会话，防止 IPC 调用阻塞
+    void agentOrchestrator.startSession({
+      prompt,
+      cwd,
+      apiKey,
+      model,
+      baseUrl,
+    });
+
+    return { success: true, cwd };
+  });
+
+  ipcMain.handle('agent:stop-session', async () => {
+    if (agentOrchestrator) {
+      agentOrchestrator.stopSession();
+    }
+    return { success: true };
+  });
+
+  ipcMain.handle('agent:resolve-permission', async (_event, params: { toolUseID: string; approve: boolean }) => {
+    if (agentOrchestrator) {
+      agentOrchestrator.resolvePermission(params.toolUseID, params.approve);
+    }
+    return { success: true };
   });
 }
 

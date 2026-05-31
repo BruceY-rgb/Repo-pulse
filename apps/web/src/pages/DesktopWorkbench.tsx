@@ -14,18 +14,24 @@ import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useQueryClient } from '@tanstack/react-query';
 import {
+  AlertTriangle,
   Bell,
   Bot,
+  CheckCheck,
   CheckSquare,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   CircleDot,
   Command,
+  ExternalLink,
   Eye,
   EyeOff,
-  ExternalLink,
   FileText,
   Filter,
+  Folder,
+  FolderPlus,
   GitBranch,
   Github,
   LayoutDashboard,
@@ -33,22 +39,26 @@ import {
   LogOut,
   MessageSquare,
   PauseCircle,
+  Pencil,
   Pin,
   PinOff,
+  Play,
   Plus,
   RotateCcw,
   Search,
   Send,
   Settings,
+  Settings2,
   ShieldAlert,
+  SlidersHorizontal,
   Sparkles,
   Star,
-  SlidersHorizontal,
-  CheckCheck,
+  Terminal,
   Trash2,
-  VolumeX,
-  XCircle,
   Users,
+  VolumeX,
+  X,
+  XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -110,6 +120,7 @@ import { eventService } from '@/services/event.service';
 import { approvalService, type Approval } from '@/services/approval.service';
 import { repositoryService } from '@/services/repository.service';
 import { workbenchService } from '@/services/workbench.service';
+import { settingsService } from '@/services/settings.service';
 import { getApiBaseUrl } from '@/lib/desktop';
 import {
   useWorkbenchUnreadStore,
@@ -1727,7 +1738,7 @@ function WorkbenchHeader({
   onAddRepositoryClick,
   onOpenContributors,
 }: {
-  activeView: WorkbenchView;
+  activeView: Exclude<WorkbenchView, 'agent'>;
   repository?: Repository;
   repositoryCanOperate?: boolean;
   onAgent: () => void;
@@ -1755,22 +1766,20 @@ function WorkbenchHeader({
   const repositoryIdParam = searchParams.get('repositoryId');
   const hasRepositoryContext = activeView === 'repository' || ((activeView === 'dashboard' || activeView === 'reports') && repositoryIdParam);
 
-  const titleByView: Record<WorkbenchView, string> = {
+  const titleByView: Record<Exclude<WorkbenchView, 'agent'>, string> = {
     inbox: '今日工作台',
     repository: repository?.fullName ?? '仓库会话',
     repositories: '仓库管理',
     watch: '关注动态',
     dashboard: '仓库看板',
     reports: '报告中心',
-    agent: 'Agent 会话',
     settings: '设置',
   };
-  const subtitleByView: Partial<Record<WorkbenchView, string>> = {
+  const subtitleByView: Partial<Record<Exclude<WorkbenchView, 'agent'>, string>> = {
     watch: 'Watch Feed / 关注源管理',
     repositories: 'Repository inventory / 监控范围管理',
     dashboard: 'Dashboard / 仓库指标',
     reports: 'Reports / Markdown 与 PDF',
-    agent: 'Agent run / 独立执行上下文',
     settings: 'Workspace settings',
   };
   const repositoryAvatarUrl = repository ? getRepositoryAvatarUrl(repository) : undefined;
@@ -3490,84 +3499,1359 @@ function WatchFeed({
   );
 }
 
+interface AgentSession {
+  id: string;
+  title: string;
+  prompt: string;
+  status: 'ready' | 'running' | 'waiting_permission' | 'error' | 'finished';
+  messages: any[];
+  terminalLogs: Array<{ line: string; timestamp: string }>;
+  error: string | null;
+  createdAt: string;
+  pendingPermission?: any | null;
+}
+
 function AgentRunView({
-  repository,
-  prompt,
+  repository: initialRepository,
+  prompt: initialPrompt,
+  editableRepos = [],
 }: {
   repository?: Repository;
   prompt: string;
+  editableRepos?: Repository[];
 }) {
-  return (
-    <ScrollArea className="h-full">
-      <div className="mx-auto grid max-w-6xl gap-6 p-6 xl:grid-cols-[1fr_320px]">
-        <section className="rounded-xl border border-border bg-card">
-          <div className="border-b border-border px-5 py-4">
-            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <Badge variant="secondary" className="rounded-full">
-                {repository ? `${repository.name}-agent` : 'workspace-agent'}
-              </Badge>
-              <Badge variant="outline" className="rounded-full">
-                独立 Agent 会话
-              </Badge>
-            </div>
-            <h2 className="mt-3 text-xl font-semibold text-foreground">{prompt || `检查 ${repository?.fullName ?? '当前工作台'} 的待处理事项`}</h2>
-          </div>
-          <div className="space-y-4 p-5">
-            {['读取仓库事件与审批上下文', '生成执行计划和影响范围', '等待用户确认后执行命令'].map((step, index) => (
-              <div key={step} className="flex gap-3">
-                <div className={cn('mt-1 h-6 w-6 rounded-full border text-center text-xs leading-6', index < 2 ? 'border-success-foreground text-success-foreground' : 'border-primary text-primary')}>
-                  {index + 1}
-                </div>
-                <div>
-                  <p className="font-medium text-foreground">{step}</p>
-                  <p className="text-sm text-muted-foreground">{index < 2 ? '已完成' : '需要确认'}</p>
-                </div>
-              </div>
-            ))}
+  const { data: currentUser } = useCurrentUserQuery();
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [isTerminalExpanded, setIsTerminalExpanded] = useState(true);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState('');
 
-            <div className="rounded-xl border border-border bg-background p-4 font-mono text-sm text-muted-foreground">
-              <p>$ git status --short</p>
-              <p>$ pnpm --filter @repo-pulse/web test -- --runInBand</p>
-              <p className="text-primary">等待确认：不会在未经确认时执行写操作</p>
-            </div>
+  const [activeApiKey, setActiveApiKey] = useState('');
+  const [activeModel, setActiveModel] = useState('claude-3-5-sonnet-latest');
+  const [activeBaseUrl, setActiveBaseUrl] = useState('');
 
-            <div className="rounded-xl border border-primary/30 bg-primary/10 p-4">
-              <p className="font-semibold text-foreground">确认执行</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Agent 将基于当前仓库事件执行建议动作，并保留审批、报告和命令结果记录。
-              </p>
-              <div className="mt-4 flex gap-2">
-                <Button className="gap-2">
-                  <Command className="h-4 w-4" />
-                  确认执行
-                </Button>
-                <Button variant="outline">继续调整计划</Button>
-              </div>
-            </div>
-          </div>
-        </section>
+  // Project List (Repository IDs)
+  const [projectRepoIds, setProjectRepoIds] = useState<string[]>(() => {
+    const stored = localStorage.getItem('repo-pulse:agent-projects');
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {}
+    }
+    return initialRepository ? [initialRepository.id] : [];
+  });
 
-        <aside className="space-y-4">
-          <div className="rounded-xl border border-border bg-card p-4">
-            <h3 className="font-semibold text-foreground">影响范围</h3>
-            <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-              <p>仓库：{repository?.fullName ?? '未选择'}</p>
-              <p>分支：{repository?.defaultBranch ?? 'main'}</p>
-              <p>策略：确认后执行</p>
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <h3 className="font-semibold text-foreground">与 Agent 继续对话</h3>
-            <div className="mt-3 flex gap-2">
-              <Input placeholder="补充约束或问题" />
-              <Button size="icon">
-                <Send className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </aside>
+  const [expandedRepos, setExpandedRepos] = useState<Record<string, boolean>>({});
+  const [sessionsByRepo, setSessionsByRepo] = useState<Record<string, AgentSession[]>>({});
+  
+  const [activeRepoId, setActiveRepoId] = useState<string>('');
+  const [activeSessionId, setActiveSessionId] = useState<string>('');
+
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [sidebarRenameTitle, setSidebarRenameTitle] = useState('');
+
+  const [isAddProjectOpen, setIsAddProjectOpen] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+
+  const terminalEndRef = useRef<HTMLDivElement>(null);
+  const messageEndRef = useRef<HTMLDivElement>(null);
+  const processedInitialPromptRef = useRef<string | null>(null);
+  const activeSessionIdRef = useRef(activeSessionId);
+  const activeRepoIdRef = useRef(activeRepoId);
+
+  // Sync projects to localStorage
+  useEffect(() => {
+    localStorage.setItem('repo-pulse:agent-projects', JSON.stringify(projectRepoIds));
+  }, [projectRepoIds]);
+
+  // Load configuration
+  const loadConfig = async () => {
+    setLoading(true);
+    try {
+      const config = await settingsService.getRawAIConfig();
+
+      if (
+        (config.aiProvider === 'anthropic' || config.aiProvider === 'deepseek' || config.aiProvider === 'custom') &&
+        config.aiApiKey &&
+        config.aiApiKey !== '***'
+      ) {
+        setActiveApiKey(config.aiApiKey);
+        if (config.aiModel) {
+          setActiveModel(config.aiModel);
+        }
+        if (config.aiProvider === 'deepseek') {
+          setActiveBaseUrl(config.aiBaseUrl || 'https://api.deepseek.com/anthropic');
+        } else {
+          setActiveBaseUrl(config.aiBaseUrl || '');
+        }
+      } else {
+        setActiveApiKey('');
+        setActiveBaseUrl('');
+      }
+    } catch (err) {
+      console.error('Failed to load AI config for Agent:', err);
+      setActiveApiKey('');
+      setActiveBaseUrl('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadConfig();
+  }, []);
+
+  // Load sessions for all projects from localStorage
+  useEffect(() => {
+    const newSessionsByRepo: Record<string, AgentSession[]> = {};
+    
+    projectRepoIds.forEach(repoId => {
+      const storedSessions = localStorage.getItem(`repo-pulse:agent-sessions:${repoId}`);
+      let parsedSessions: AgentSession[] = [];
+      try {
+        parsedSessions = storedSessions ? JSON.parse(storedSessions) : [];
+      } catch (e) {
+        parsedSessions = [];
+      }
+
+      if (parsedSessions.length === 0) {
+        const defaultSession: AgentSession = {
+          id: Math.random().toString(36).substring(2, 9),
+          title: '默认会话',
+          prompt: '',
+          status: 'ready',
+          messages: [],
+          terminalLogs: [],
+          error: null,
+          createdAt: new Date().toISOString(),
+        };
+        parsedSessions = [defaultSession];
+        localStorage.setItem(`repo-pulse:agent-sessions:${repoId}`, JSON.stringify(parsedSessions));
+      }
+      newSessionsByRepo[repoId] = parsedSessions;
+    });
+
+    setSessionsByRepo(newSessionsByRepo);
+
+    // Determine initial active repo and session
+    if (projectRepoIds.length > 0) {
+      let nextRepoId = activeRepoId;
+      if (!nextRepoId || !projectRepoIds.includes(nextRepoId)) {
+        nextRepoId = initialRepository?.id && projectRepoIds.includes(initialRepository.id)
+          ? initialRepository.id
+          : projectRepoIds[0];
+      }
+      setActiveRepoId(nextRepoId);
+
+      const repoSessions = newSessionsByRepo[nextRepoId] || [];
+      const storedActiveId = localStorage.getItem(`repo-pulse:active-agent-session:${nextRepoId}`);
+      const validActiveId = repoSessions.some(s => s.id === storedActiveId)
+        ? storedActiveId!
+        : (repoSessions[0]?.id || '');
+      setActiveSessionId(validActiveId);
+    } else {
+      setActiveRepoId('');
+      setActiveSessionId('');
+    }
+  }, [projectRepoIds]);
+
+  // Sync activeSessionId back to localStorage per repo
+  useEffect(() => {
+    if (activeRepoId && activeSessionId) {
+      localStorage.setItem(`repo-pulse:active-agent-session:${activeRepoId}`, activeSessionId);
+    }
+  }, [activeSessionId, activeRepoId]);
+
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    activeRepoIdRef.current = activeRepoId;
+  }, [activeRepoId]);
+
+  const activeRepository = editableRepos.find(r => r.id === activeRepoId);
+  const activeSession = activeRepoId && sessionsByRepo[activeRepoId]
+    ? sessionsByRepo[activeRepoId].find(s => s.id === activeSessionId)
+    : null;
+
+  // Scroll to bottom of terminal
+  useEffect(() => {
+    if (isTerminalExpanded) {
+      terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [activeSession?.terminalLogs, isTerminalExpanded]);
+
+  // Scroll to bottom of messages
+  useEffect(() => {
+    messageEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [activeSession?.messages]);
+
+  const updateRepoSessions = (repoId: string, updater: (prev: AgentSession[]) => AgentSession[]) => {
+    setSessionsByRepo(prev => {
+      const current = prev[repoId] || [];
+      const updated = updater(current);
+      localStorage.setItem(`repo-pulse:agent-sessions:${repoId}`, JSON.stringify(updated));
+      return {
+        ...prev,
+        [repoId]: updated,
+      };
+    });
+  };
+
+  // Handle start session reactive to initialPrompt & activeApiKey
+  useEffect(() => {
+    if (initialPrompt && initialPrompt.trim() && processedInitialPromptRef.current !== initialPrompt) {
+      processedInitialPromptRef.current = initialPrompt;
+
+      // Stop current running sessions
+      void window.repoPulseDesktop?.agent?.stopSession();
+
+      const targetRepo = initialRepository || activeRepository;
+      if (!targetRepo) return;
+
+      // 1. Ensure target repo is in projects
+      if (!projectRepoIds.includes(targetRepo.id)) {
+        setProjectRepoIds(prev => [...prev, targetRepo.id]);
+      }
+
+      // 2. Set active
+      setActiveRepoId(targetRepo.id);
+
+      const newSession: AgentSession = {
+        id: Math.random().toString(36).substring(2, 9),
+        title: initialPrompt.length > 20 ? initialPrompt.slice(0, 20) + '...' : initialPrompt,
+        prompt: initialPrompt,
+        status: 'running',
+        messages: [],
+        terminalLogs: [{ line: `[SYSTEM] 正在连接本地 Git 工作区并拉取最新分支...`, timestamp: new Date().toISOString() }],
+        error: null,
+        createdAt: new Date().toISOString(),
+      };
+
+      updateRepoSessions(targetRepo.id, (prev) => [newSession, ...prev.filter(s => s.prompt !== initialPrompt)]);
+      setActiveSessionId(newSession.id);
+      setExpandedRepos(prev => ({ ...prev, [targetRepo.id]: true }));
+
+      setTimeout(() => {
+        startSessionOnSession(newSession, initialPrompt, targetRepo);
+      }, 300);
+
+      // Clean search parameters to keep URL clean
+      const updatedParams = new URLSearchParams(window.location.search);
+      updatedParams.delete('prompt');
+      navigate(`${window.location.pathname}?${updatedParams.toString()}`, { replace: true });
+    }
+  }, [initialPrompt, initialRepository?.id, activeRepository?.id]);
+
+  // Set up electron agent listeners
+  useEffect(() => {
+    if (!window.repoPulseDesktop?.agent) return;
+
+    const unsubscribeMessage = window.repoPulseDesktop.agent.onMessage((msg: any) => {
+      const activeId = activeSessionIdRef.current;
+      const activeRepo = activeRepoIdRef.current;
+      if (!activeRepo || !activeId) return;
+      const now = new Date();
+      
+      updateRepoSessions(activeRepo, (prevSessions) => {
+        const currentActive = prevSessions.find(s => s.id === activeId);
+        if (!currentActive) return prevSessions;
+
+        let updatedMessages = [...currentActive.messages];
+        const lastMsg = updatedMessages[updatedMessages.length - 1];
+
+        // 1. Handle message status updates
+        if (msg.type === 'finished') {
+          return prevSessions.map(s => {
+            if (s.id !== activeId) return s;
+            return {
+              ...s,
+              status: 'finished' as const,
+              terminalLogs: [
+                ...s.terminalLogs,
+                { line: `[SYSTEM] Agent 执行完毕。`, timestamp: now.toISOString() }
+              ]
+            };
+          });
+        }
+
+        if (msg.type === 'error') {
+          return prevSessions.map(s => {
+            if (s.id !== activeId) return s;
+            return {
+              ...s,
+              status: 'error' as const,
+              error: msg.message || String(msg),
+              messages: [
+                ...s.messages,
+                {
+                  id: Math.random().toString(),
+                  type: 'error',
+                  content: msg.message || String(msg),
+                }
+              ],
+              terminalLogs: [
+                ...s.terminalLogs,
+                { line: `[ERROR] 执行终止: ${msg.message || String(msg)}`, timestamp: now.toISOString() }
+              ]
+            };
+          });
+        }
+
+        // 2. Handle standard content updates (streaming)
+        if (msg.type === 'text') {
+          if (lastMsg && lastMsg.type === 'assistant') {
+            updatedMessages[updatedMessages.length - 1] = {
+              ...lastMsg,
+              content: msg.text,
+            };
+          } else {
+            updatedMessages.push({
+              id: Math.random().toString(),
+              type: 'assistant',
+              content: msg.text,
+            });
+          }
+        } else if (msg.type === 'thought') {
+          if (lastMsg && lastMsg.type === 'thought') {
+            updatedMessages[updatedMessages.length - 1] = {
+              ...lastMsg,
+              content: msg.text,
+            };
+          } else {
+            updatedMessages.push({
+              id: Math.random().toString(),
+              type: 'thought',
+              content: msg.text,
+            });
+          }
+        } else if (msg.type === 'tool_use') {
+          updatedMessages.push({
+            id: msg.toolUseID || Math.random().toString(),
+            type: 'tool_call',
+            toolUseID: msg.toolUseID,
+            name: msg.name,
+            command: msg.input?.command || JSON.stringify(msg.input),
+            status: 'running',
+          });
+        } else if (msg.type === 'tool_result' && msg.toolUseID) {
+          updatedMessages = updatedMessages.map((item) => {
+            if (item.type === 'tool_call' && item.toolUseID === msg.toolUseID) {
+              return {
+                ...item,
+                status: msg.error ? 'failed' : 'success',
+                output: msg.output,
+                error: msg.error,
+              };
+            }
+            return item;
+          });
+        }
+
+        // 3. Handle terminal logs
+        let logLine = '';
+        let isStreamLog = false;
+        let logPrefix = '';
+
+        if (msg.type === 'text') {
+          logLine = `[AI] ${msg.text}`;
+          isStreamLog = true;
+          logPrefix = '[AI]';
+        } else if (msg.type === 'thought') {
+          logLine = `[THINKING] ${msg.text}`;
+          isStreamLog = true;
+          logPrefix = '[THINKING]';
+        } else if (msg.type === 'tool_use') {
+          logLine = `[TOOL CALL] Running ${msg.name} with command: ${msg.input?.command || JSON.stringify(msg.input)}`;
+        } else if (msg.type === 'tool_result') {
+          logLine = `[TOOL RESULT] ${msg.output ? `Stdout: ${msg.output}` : ''} ${msg.error ? `Error: ${msg.error}` : ''}`;
+        } else if (typeof msg === 'string') {
+          logLine = msg;
+        } else {
+          logLine = `[INFO] ${JSON.stringify(msg)}`;
+        }
+
+        let updatedLogs = [...currentActive.terminalLogs];
+        const lastLog = updatedLogs[updatedLogs.length - 1];
+
+        if (isStreamLog && lastLog && lastLog.line.startsWith(logPrefix)) {
+          updatedLogs[updatedLogs.length - 1] = {
+            line: logLine,
+            timestamp: now.toISOString(),
+          };
+        } else {
+          updatedLogs.push({
+            line: logLine,
+            timestamp: now.toISOString(),
+          });
+        }
+
+        return prevSessions.map(s => {
+          if (s.id !== activeId) return s;
+          return {
+            ...s,
+            messages: updatedMessages,
+            terminalLogs: updatedLogs,
+          };
+        });
+      });
+    });
+
+    const unsubscribePermission = window.repoPulseDesktop.agent.onPermissionRequest((req: any) => {
+      const activeId = activeSessionIdRef.current;
+      const activeRepo = activeRepoIdRef.current;
+      if (!activeRepo || !activeId) return;
+
+      updateRepoSessions(activeRepo, (prevSessions) => {
+        return prevSessions.map(s => {
+          if (s.id !== activeId) return s;
+          return {
+            ...s,
+            status: 'waiting_permission' as const,
+            pendingPermission: req,
+          };
+        });
+      });
+    });
+
+    return () => {
+      unsubscribeMessage();
+      unsubscribePermission();
+    };
+  }, []);
+
+  const handleCreateSessionInRepo = (repoId: string) => {
+    const newSession: AgentSession = {
+      id: Math.random().toString(36).substring(2, 9),
+      title: '新会话',
+      prompt: '',
+      status: 'ready',
+      messages: [],
+      terminalLogs: [],
+      error: null,
+      createdAt: new Date().toISOString(),
+    };
+    updateRepoSessions(repoId, prev => [newSession, ...prev]);
+    setActiveRepoId(repoId);
+    setActiveSessionId(newSession.id);
+    setExpandedRepos(prev => ({ ...prev, [repoId]: true }));
+    void window.repoPulseDesktop?.agent?.stopSession();
+  };
+
+  const handleDeleteSessionInRepo = (repoId: string, sessionId: string) => {
+    const repoSessions = sessionsByRepo[repoId] || [];
+    const isDeletingActive = sessionId === activeSessionId && repoId === activeRepoId;
+    const remaining = repoSessions.filter(s => s.id !== sessionId);
+
+    if (remaining.length === 0) {
+      const defaultSession: AgentSession = {
+        id: Math.random().toString(36).substring(2, 9),
+        title: '默认会话',
+        prompt: '',
+        status: 'ready',
+        messages: [],
+        terminalLogs: [],
+        error: null,
+        createdAt: new Date().toISOString(),
+      };
+      updateRepoSessions(repoId, () => [defaultSession]);
+      if (isDeletingActive) {
+        setActiveSessionId(defaultSession.id);
+      }
+    } else {
+      updateRepoSessions(repoId, () => remaining);
+      if (isDeletingActive) {
+        setActiveSessionId(remaining[0].id);
+      }
+    }
+
+    if (isDeletingActive) {
+      void window.repoPulseDesktop?.agent?.stopSession();
+    }
+  };
+
+  const handleRemoveProject = (repoId: string) => {
+    setProjectRepoIds(prev => prev.filter(id => id !== repoId));
+    if (activeRepoId === repoId) {
+      setActiveRepoId('');
+      setActiveSessionId('');
+    }
+  };
+
+  const startSessionOnSession = async (session: AgentSession, customPrompt?: string, targetRepo?: Repository) => {
+    const promptToUse = customPrompt || session.prompt;
+    if (!promptToUse.trim()) {
+      toast.error('请输入执行指令');
+      return;
+    }
+
+    if (!activeApiKey) {
+      const errorMsg = '未检测到有效的 Anthropic API Key，无法启动会话。请先前往【设置】页面配置您的 AI 渠道。';
+      toast.error('启动失败：未配置 API 密钥');
+      
+      const repoId = targetRepo?.id || activeRepoId;
+      if (repoId) {
+        updateRepoSessions(repoId, prev => {
+          return prev.map(s => {
+            if (s.id !== session.id) return s;
+            return {
+              ...s,
+              status: 'error',
+              error: errorMsg,
+              messages: [
+                ...s.messages,
+                {
+                  id: Math.random().toString(),
+                  type: 'error',
+                  content: errorMsg,
+                }
+              ],
+              terminalLogs: [
+                ...s.terminalLogs,
+                { line: `[ERROR] 启动失败: ${errorMsg}`, timestamp: new Date().toISOString() }
+              ]
+            };
+          });
+        });
+      }
+      return;
+    }
+
+    const repo = targetRepo || activeRepository;
+    if (!repo) {
+      toast.error('未选择有效的仓库');
+      return;
+    }
+
+    updateRepoSessions(repo.id, prev => {
+      return prev.map(s => {
+        if (s.id !== session.id) return s;
+        return {
+          ...s,
+          status: 'running',
+          error: null,
+          pendingPermission: null,
+          terminalLogs: [{ line: `[SYSTEM] 正在连接本地 Git 工作区并拉取最新分支...`, timestamp: new Date().toISOString() }],
+          messages: [],
+        };
+      });
+    });
+
+    const token = currentUser?.githubAccessToken;
+    let gitUrl = repo.url;
+    if (token && gitUrl.startsWith('https://')) {
+      gitUrl = gitUrl.replace('https://', `https://${token}@`);
+    }
+
+    try {
+      await window.repoPulseDesktop.agent.startSession({
+        repositoryId: repo.id,
+        gitUrl,
+        defaultBranch: repo.defaultBranch,
+        prompt: promptToUse,
+        apiKey: activeApiKey,
+        model: activeModel,
+        baseUrl: activeBaseUrl || undefined,
+      });
+      toast.success('Agent 会话已启动');
+    } catch (err: any) {
+      const errorMsg = err.message || String(err);
+      updateRepoSessions(repo.id, prev => {
+        return prev.map(s => {
+          if (s.id !== session.id) return s;
+          return {
+            ...s,
+            status: 'error',
+            error: errorMsg,
+            terminalLogs: [
+              ...s.terminalLogs,
+              { line: `[ERROR] 启动失败: ${errorMsg}`, timestamp: new Date().toISOString() }
+            ]
+          };
+        });
+      });
+    }
+  };
+
+  const stopSessionOnSession = async (session: AgentSession) => {
+    if (!activeRepoId) return;
+    try {
+      await window.repoPulseDesktop.agent.stopSession();
+      updateRepoSessions(activeRepoId, prev => {
+        return prev.map(s => {
+          if (s.id !== session.id) return s;
+          return {
+            ...s,
+            status: 'ready',
+            terminalLogs: [
+              ...s.terminalLogs,
+              { line: `[SYSTEM] 用户已终止会话。`, timestamp: new Date().toISOString() }
+            ]
+          };
+        });
+      });
+      toast.info('会话已终止');
+    } catch (err: any) {
+      toast.error(`停止会话失败: ${err.message}`);
+    }
+  };
+
+  const resolvePermission = async (approve: boolean) => {
+    const activeRepo = activeRepoIdRef.current;
+    const activeId = activeSessionIdRef.current;
+    if (!activeRepo || !activeId) return;
+    
+    const repoSessions = sessionsByRepo[activeRepo] || [];
+    const activeSession = repoSessions.find(s => s.id === activeId);
+    if (!activeSession || !activeSession.pendingPermission) return;
+    
+    const toolUseID = activeSession.pendingPermission.toolUseID;
+    const command = activeSession.pendingPermission.command;
+
+    try {
+      await window.repoPulseDesktop.agent.resolvePermission({
+        toolUseID,
+        approve,
+      });
+
+      updateRepoSessions(activeRepo, prev => {
+        return prev.map(s => {
+          if (s.id !== activeSession.id) return s;
+          
+          const updatedMessages = s.messages.map((item) => {
+            if (item.type === 'tool_call' && item.toolUseID === toolUseID) {
+              return {
+                ...item,
+                permissionResolved: approve ? 'approved' : 'rejected',
+              };
+            }
+            return item;
+          });
+
+          return {
+            ...s,
+            pendingPermission: null,
+            status: 'running',
+            messages: updatedMessages,
+            terminalLogs: [
+              ...s.terminalLogs,
+              { line: `[SYSTEM] 用户已${approve ? '批准' : '拒绝'}命令执行: ${command}`, timestamp: new Date().toISOString() }
+            ]
+          };
+        });
+      });
+    } catch (err: any) {
+      toast.error(`回应权限请求失败: ${err.message}`);
+    }
+  };
+
+  const handleSaveTitle = () => {
+    if (!editedTitle.trim() || !activeRepoId || !activeSessionId) return;
+    updateRepoSessions(activeRepoId, prev => prev.map(s => {
+      if (s.id === activeSessionId) {
+        return {
+          ...s,
+          title: editedTitle.trim(),
+        };
+      }
+      return s;
+    }));
+    setIsEditingTitle(false);
+  };
+
+  const handleSaveSidebarRename = (repoId: string, sessionId: string) => {
+    const trimmed = sidebarRenameTitle.trim();
+    if (trimmed) {
+      updateRepoSessions(repoId, prev => prev.map(s => {
+        if (s.id === sessionId) {
+          return {
+            ...s,
+            title: trimmed,
+          };
+        }
+        return s;
+      }));
+    }
+    setEditingSessionId(null);
+  };
+
+  const handleSendChat = () => {
+    if (!activeSession || !activeRepoId) return;
+    const nextPrompt = chatInput.trim() || activeSession.prompt;
+    if (!nextPrompt) return;
+
+    setChatInput('');
+    
+    updateRepoSessions(activeRepoId, prev => prev.map(s => {
+      if (s.id === activeSession.id) {
+        return {
+          ...s,
+          prompt: nextPrompt,
+          title: chatInput.trim() ? (chatInput.trim().length > 20 ? chatInput.trim().slice(0, 20) + '...' : chatInput.trim()) : s.title,
+        };
+      }
+      return s;
+    }));
+
+    void window.repoPulseDesktop.agent.stopSession().then(() => {
+      setTimeout(() => {
+        const freshActiveSession = {
+          ...activeSession,
+          prompt: nextPrompt,
+        };
+        startSessionOnSession(freshActiveSession, nextPrompt);
+      }, 500);
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">正在加载 AI 配置与本地工作区...</p>
       </div>
-    </ScrollArea>
+    );
+  }
+
+  const availableRepos = editableRepos.filter(repo => !projectRepoIds.includes(repo.id));
+
+  return (
+    <div className="flex h-full overflow-hidden bg-background text-foreground animate-in fade-in-50 duration-350">
+      {/* Left Sidebar: Project & Session List */}
+      <div className="w-[240px] shrink-0 border-r border-border bg-card flex flex-col h-full select-none">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <span className="font-semibold text-xs text-muted-foreground uppercase tracking-wider">Agent 项目</span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary"
+            onClick={() => setIsAddProjectOpen(true)}
+            title="添加项目"
+          >
+            <FolderPlus className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <ScrollArea className="flex-1">
+          <div className="p-2 space-y-2">
+            {projectRepoIds.map((repoId) => {
+              const repo = editableRepos.find(r => r.id === repoId);
+              if (!repo) return null;
+
+              const isExpanded = expandedRepos[repoId] !== false;
+              const repoSessions = sessionsByRepo[repoId] || [];
+              const isActiveRepo = repoId === activeRepoId;
+
+              return (
+                <div key={repoId} className="space-y-1">
+                  {/* Project Folder Header */}
+                  <div
+                    className={cn(
+                      "group flex items-center justify-between px-2 py-1.5 rounded-lg text-sm font-medium text-foreground hover:bg-secondary/40 cursor-pointer select-none transition-colors",
+                      isActiveRepo && "bg-secondary/20"
+                    )}
+                    onClick={() => {
+                      setExpandedRepos(prev => ({
+                        ...prev,
+                        [repoId]: !isExpanded
+                      }));
+                      if (repoId !== activeRepoId && repoSessions.length > 0) {
+                        setActiveRepoId(repoId);
+                        const storedActiveId = localStorage.getItem(`repo-pulse:active-agent-session:${repoId}`);
+                        const validActiveId = repoSessions.some(s => s.id === storedActiveId)
+                          ? storedActiveId!
+                          : repoSessions[0].id;
+                        setActiveSessionId(validActiveId);
+                      }
+                    }}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-muted-foreground/85 p-0.5 rounded-md hover:bg-secondary shrink-0">
+                        {isExpanded ? (
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        ) : (
+                          <ChevronRight className="h-3.5 w-3.5" />
+                        )}
+                      </span>
+                      <Folder className="h-4 w-4 text-primary shrink-0 animate-in zoom-in-50 duration-200" />
+                      <span className="truncate text-xs font-semibold">{repo.name || repo.fullName.split('/').pop() || repo.fullName}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCreateSessionInRepo(repoId);
+                        }}
+                        className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary/80"
+                        title="新建会话"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveProject(repoId);
+                        }}
+                        className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-secondary/80"
+                        title="移除项目"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Project Sessions List */}
+                  {isExpanded && (
+                    <div className="ml-4 pl-3 border-l border-border/60 space-y-1 mt-0.5 animate-in slide-in-from-top-1 duration-150">
+                      {repoSessions.map((session) => {
+                        const isActiveSession = session.id === activeSessionId && isActiveRepo;
+                        return (
+                          <div
+                            key={session.id}
+                            onClick={() => {
+                              setActiveRepoId(repoId);
+                              setActiveSessionId(session.id);
+                            }}
+                            className={cn(
+                              "group/session relative flex items-center justify-between p-2 rounded-lg cursor-pointer text-xs transition-colors",
+                              isActiveSession 
+                                ? "bg-secondary text-foreground font-semibold" 
+                                : "text-muted-foreground hover:bg-secondary/40 hover:text-foreground"
+                            )}
+                          >
+                            <div className="flex items-center gap-2 min-w-0 flex-1 pr-1">
+                              <span className={cn(
+                                "h-1.5 w-1.5 rounded-full shrink-0",
+                                session.status === 'running' && "bg-blue-500 animate-pulse",
+                                session.status === 'waiting_permission' && "bg-amber-500 animate-pulse",
+                                session.status === 'error' && "bg-destructive",
+                                session.status === 'finished' && "bg-emerald-500",
+                                session.status === 'ready' && "bg-muted-foreground/40"
+                              )} />
+                              {editingSessionId === session.id ? (
+                                <Input
+                                  value={sidebarRenameTitle}
+                                  onChange={(e) => setSidebarRenameTitle(e.target.value)}
+                                  className="h-6 py-0 px-1 text-xs bg-background border-border flex-1 min-w-0 font-normal"
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      handleSaveSidebarRename(repoId, session.id);
+                                    } else if (e.key === 'Escape') {
+                                      setEditingSessionId(null);
+                                    }
+                                  }}
+                                  onBlur={() => handleSaveSidebarRename(repoId, session.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  autoFocus
+                                />
+                              ) : (
+                                <span
+                                  className="truncate max-w-[120px] flex-1 select-none"
+                                  title={session.title}
+                                  onDoubleClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingSessionId(session.id);
+                                    setSidebarRenameTitle(session.title || '新会话');
+                                  }}
+                                >
+                                  {session.title || '新会话'}
+                                </span>
+                              )}
+                            </div>
+
+                            {editingSessionId !== session.id && (
+                              <div className="flex items-center gap-0.5 opacity-0 group-session/session:opacity-100 transition-opacity shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingSessionId(session.id);
+                                    setSidebarRenameTitle(session.title || '新会话');
+                                  }}
+                                  className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-all"
+                                  title="重命名会话"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteSessionInRepo(repoId, session.id);
+                                  }}
+                                  className="p-0.5 rounded text-muted-foreground hover:text-destructive hover:bg-secondary/80 transition-all"
+                                  title="删除会话"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </ScrollArea>
+      </div>
+
+      {/* Main Workspace */}
+      <div className="flex-1 flex flex-col h-full min-w-0 bg-background/50 relative">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-border px-6 py-4 bg-card">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-primary/10 text-primary">
+              <Bot className="h-5 w-5 animate-in spin-in-12 duration-300" />
+            </div>
+            <div>
+              {isEditingTitle ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={editedTitle}
+                    onChange={(e) => setEditedTitle(e.target.value)}
+                    className="h-7 py-0 px-2 text-sm bg-background border-border max-w-[200px]"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleSaveTitle();
+                      } else if (e.key === 'Escape') {
+                        setIsEditingTitle(false);
+                      }
+                    }}
+                    autoFocus
+                  />
+                  <Button
+                    onClick={handleSaveTitle}
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 text-emerald-500 hover:bg-emerald-500/10"
+                  >
+                    <CheckCheck className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    onClick={() => setIsEditingTitle(false)}
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : activeSession ? (
+                <div className="flex items-center gap-2 group/title">
+                  <h3 className="font-semibold text-foreground text-sm">
+                    {activeSession.title || '新会话'}
+                  </h3>
+                  <button
+                    onClick={() => {
+                      setEditedTitle(activeSession.title);
+                      setIsEditingTitle(true);
+                    }}
+                    className="opacity-0 group-hover/title:opacity-100 p-0.5 text-muted-foreground hover:text-foreground transition-opacity"
+                    title="重命名会话"
+                  >
+                    <Settings2 className="h-3 w-3" />
+                  </button>
+                  <Badge
+                    variant={
+                      activeSession.status === 'running' 
+                        ? "default" 
+                        : activeSession.status === 'error' 
+                        ? "destructive" 
+                        : activeSession.status === 'finished' 
+                        ? "secondary" 
+                        : "outline"
+                    }
+                    className={cn(
+                      "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                      activeSession.status === 'waiting_permission' && "border-amber-500/30 text-amber-500 bg-amber-500/10"
+                    )}
+                  >
+                    {activeSession.status === 'running' 
+                      ? '运行中' 
+                      : activeSession.status === 'waiting_permission' 
+                      ? '等待审批' 
+                      : activeSession.status === 'error' 
+                      ? '执行失败' 
+                      : activeSession.status === 'finished' 
+                      ? '执行成功' 
+                      : '就绪'}
+                  </Badge>
+                </div>
+              ) : (
+                <h3 className="font-semibold text-foreground text-sm">Agent 控制台</h3>
+              )}
+              {activeSession && (
+                <p className="text-xs text-muted-foreground mt-0.5 animate-in slide-in-from-left-1 duration-200">
+                  基于 {activeModel} · 本地工作区隔离执行
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Timeline Content */}
+        {!activeSession || !activeRepository ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center max-w-xl mx-auto space-y-6 animate-in zoom-in-95 duration-250">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <FolderPlus className="h-7 w-7" />
+            </div>
+            <div>
+              <h4 className="text-base font-semibold text-foreground">选择或添加一个项目开始</h4>
+              <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
+                请在左侧边栏添加您的监控仓库为 Agent 项目，或展开现有项目并选择一个会话。
+              </p>
+            </div>
+            <Button
+              onClick={() => setIsAddProjectOpen(true)}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs gap-1.5 font-semibold shadow-md"
+            >
+              <Plus className="h-4 w-4" />
+              添加项目
+            </Button>
+          </div>
+        ) : activeSession.messages.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center max-w-xl mx-auto space-y-6 animate-in zoom-in-95 duration-250">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <Sparkles className="h-7 w-7" />
+            </div>
+            <div>
+              <h4 className="text-base font-semibold text-foreground">开始在 {activeRepository.name || activeRepository.fullName.split('/').pop() || activeRepository.fullName} 中使用 Git Workspace Agent</h4>
+              <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
+                请输入您的 Git 调整命令或在下方选择推荐操作。Agent 将在本地安全沙箱内分析代码并协助您自动执行。
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-md pt-2">
+              <button
+                onClick={() => {
+                  const cmd = '帮我检查当前分支状态并进行合并';
+                  setChatInput(cmd);
+                  handleSendChat();
+                }}
+                className="p-3 text-left rounded-xl border border-border bg-card hover:bg-secondary/40 hover:border-primary/20 transition-all text-xs space-y-1"
+              >
+                <div className="font-semibold text-foreground">合并分支</div>
+                <div className="text-muted-foreground text-[10px]">检查本地更改，将特定分支安全合并</div>
+              </button>
+              <button
+                onClick={() => {
+                  const cmd = '同步上游分支最新修改，评估潜在冲突';
+                  setChatInput(cmd);
+                  handleSendChat();
+                }}
+                className="p-3 text-left rounded-xl border border-border bg-card hover:bg-secondary/40 hover:border-primary/20 transition-all text-xs space-y-1"
+              >
+                <div className="font-semibold text-foreground">同步上游 (Sync Upstream)</div>
+                <div className="text-muted-foreground text-[10px]">拉取上游 commits 并同步到本地分支</div>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 scrollbar-thin">
+            {activeSession.prompt && (
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-1">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-primary">当前目标</span>
+                <h4 className="text-sm font-semibold text-foreground">{activeSession.prompt}</h4>
+              </div>
+            )}
+
+            {activeSession.error && (
+              <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-4 flex gap-3 text-destructive-foreground text-sm animate-in fade-in-50 duration-200">
+                <AlertTriangle className="h-5 w-5 shrink-0 text-destructive" />
+                <div>
+                  <p className="font-semibold">会话执行提示</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{activeSession.error}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {activeSession.messages.map((item, index) => (
+                <div key={item.id || index} className="space-y-2 animate-in fade-in-50 duration-200">
+                  {item.type === 'assistant' && (
+                    <div className="flex gap-3">
+                      <Avatar className="h-7 w-7 rounded-lg border border-border mt-0.5 mt-0.5 shrink-0">
+                        <AvatarFallback className="bg-primary/10 text-primary text-xs font-bold">
+                          AI
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 rounded-xl bg-card border border-border p-4 text-sm text-foreground prose dark:prose-invert max-w-none">
+                        <MarkdownContent>{item.content}</MarkdownContent>
+                      </div>
+                    </div>
+                  )}
+
+                  {item.type === 'thought' && (
+                    <details className="group ml-10 border-l border-border pl-4 space-y-2">
+                      <summary className="text-xs text-muted-foreground cursor-pointer select-none hover:text-foreground">
+                        思考逻辑 (点击展开)
+                      </summary>
+                      <p className="text-xs text-muted-foreground/80 italic pl-2 bg-secondary/30 py-1.5 rounded-lg">
+                        {item.content}
+                      </p>
+                    </details>
+                  )}
+
+                  {item.type === 'tool_call' && (
+                    <div className="ml-10 rounded-xl border border-border bg-slate-950 p-4 font-mono text-xs text-muted-foreground space-y-3 shadow-inner">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Terminal className="h-3.5 w-3.5 text-cyan-400" />
+                          <span className="text-cyan-400 font-bold">$ {item.command}</span>
+                        </div>
+                        <Badge variant="outline" className={cn(
+                          "rounded-full text-[9px] px-2 py-0",
+                          item.status === 'success' ? "border-green-500/30 text-green-400 bg-green-500/5" :
+                          item.status === 'failed' ? "border-red-500/30 text-red-400 bg-red-500/5" :
+                          "border-cyan-500/30 text-cyan-400 animate-pulse bg-cyan-500/5"
+                        )}>
+                          {item.status === 'success' ? 'SUCCESS' : item.status === 'failed' ? 'FAILED' : 'RUNNING'}
+                        </Badge>
+                      </div>
+
+                      {item.output && (
+                        <pre className="overflow-x-auto text-[11px] text-slate-300 bg-black/40 p-2.5 rounded max-h-60 overflow-y-auto">
+                          {item.output}
+                        </pre>
+                      )}
+
+                      {item.error && (
+                        <pre className="overflow-x-auto text-[11px] text-red-400 bg-red-950/20 p-2.5 rounded">
+                          {item.error}
+                        </pre>
+                      )}
+                    </div>
+                  )}
+
+                  {item.type === 'error' && (
+                    <div className="ml-10 rounded-xl border border-destructive/20 bg-destructive/5 p-4 flex gap-3 text-destructive-foreground text-xs">
+                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-destructive" />
+                      <div>
+                        <p className="font-semibold">执行未成功完成</p>
+                        <p className="mt-1 text-muted-foreground">{item.content}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {activeSession.pendingPermission && (
+                <div className="ml-10 rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 space-y-4 shadow-md animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 rounded-lg bg-amber-500/20 text-amber-500 mt-0.5 shrink-0">
+                      <Shield className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-foreground">
+                        安全拦截：命令执行授权请求
+                      </h4>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Claude Agent 申请在您的本地工作区执行以下写入命令。
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg bg-black p-3.5 font-mono text-xs text-amber-500 border border-amber-500/20 flex items-center justify-between">
+                    <span>$ {activeSession.pendingPermission.command}</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      onClick={() => resolvePermission(true)}
+                      size="sm"
+                      className="bg-amber-600 hover:bg-amber-700 text-white font-semibold gap-1.5"
+                    >
+                      <CheckCheck className="h-4 w-4" />
+                      同意执行
+                    </Button>
+                    <Button
+                      onClick={() => resolvePermission(false)}
+                      variant="outline"
+                      size="sm"
+                      className="border-border text-muted-foreground hover:bg-secondary"
+                    >
+                      拒绝授权
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div ref={messageEndRef} />
+            </div>
+          </div>
+        )}
+
+        {/* Chat Input Area */}
+        {activeSession && activeRepository && (
+          <div className="border-t border-border bg-background px-6 py-4">
+            <div className="mx-auto flex max-w-4xl flex-col gap-2">
+              <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-2 shadow-sm focus-within:ring-1 focus-within:ring-primary focus-within:border-primary">
+                <Input
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  className="border-0 bg-transparent focus-visible:ring-0 text-sm flex-1"
+                  placeholder={
+                    !activeApiKey 
+                      ? "未检测到 API 密钥，请先前往“设置”配置 AI 渠道" 
+                      : "向 Agent 补充说明或要求，回车发送..."
+                  }
+                  disabled={!activeApiKey}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (chatInput.trim() && activeApiKey) {
+                        handleSendChat();
+                      }
+                    }
+                  }}
+                />
+                <div className="flex items-center gap-2 shrink-0">
+                  {activeSession.status === 'running' || activeSession.status === 'waiting_permission' ? (
+                    <Button
+                      onClick={() => stopSessionOnSession(activeSession)}
+                      variant="destructive"
+                      size="sm"
+                      className="h-8 gap-1.5 font-semibold text-xs rounded-lg"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      停止
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={handleSendChat}
+                      disabled={(!chatInput.trim() && !activeSession.prompt) || !activeApiKey}
+                      size="sm"
+                      className="h-8 gap-1.5 font-semibold text-xs rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground"
+                    >
+                      <Play className="h-3.5 w-3.5" />
+                      {activeSession.prompt && !chatInput.trim() ? '重试' : '运行'}
+                    </Button>
+                  )}
+                </div>
+              </div>
+              {!activeApiKey && (
+                <p className="text-[11px] text-amber-500 flex items-center gap-1.5 px-1 animate-pulse">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  未在系统设置中配置有效的 Anthropic AI 渠道，Agent 无法使用。请在页面顶部的“设置”中进行配置。
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Collapsible Live Terminal Logs */}
+        {activeSession && activeRepository && (
+          <div className="border-t border-border bg-slate-950">
+            <button
+              onClick={() => setIsTerminalExpanded(!isTerminalExpanded)}
+              type="button"
+              className="w-full flex items-center justify-between px-6 py-2.5 bg-slate-900 text-slate-400 font-mono text-[10px] tracking-wider uppercase cursor-pointer select-none hover:bg-slate-900/80 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Terminal className="h-3.5 w-3.5 text-emerald-400" />
+                <span className="font-semibold">实时控制台输出</span>
+                {activeSession.status === 'running' && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                {isTerminalExpanded ? (
+                  <>
+                    <span>折叠</span>
+                    <ChevronDown className="h-3 w-3" />
+                  </>
+                ) : (
+                  <>
+                    <span>展开</span>
+                    <ChevronUp className="h-3 w-3" />
+                  </>
+                )}
+              </div>
+            </button>
+
+            {isTerminalExpanded && (
+              <div className="h-48 overflow-y-auto px-6 py-4 font-mono text-[11px] text-emerald-400 space-y-1 bg-black scrollbar-thin">
+                {activeSession.terminalLogs.length === 0 ? (
+                  <p className="text-slate-600">等待 Agent 启动...</p>
+                ) : (
+                  activeSession.terminalLogs.map((log, idx) => {
+                    const dateStr = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '';
+                    return (
+                      <div key={idx} className="flex gap-2 leading-relaxed">
+                        <span className="text-slate-600 select-none">
+                          [{dateStr}]
+                        </span>
+                        <span className="break-all whitespace-pre-wrap">{log.line}</span>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={terminalEndRef} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Add Project Dialog */}
+      <Dialog open={isAddProjectOpen} onOpenChange={setIsAddProjectOpen}>
+        <DialogContent className="sm:max-w-md bg-card border-border text-foreground">
+          <DialogHeader>
+            <DialogTitle className="text-foreground">添加 Agent 项目</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              选择一个可编辑的 Git 仓库作为项目，在其中开展 Agent 会话。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[300px] overflow-y-auto mt-2 pr-1.5 scrollbar-thin w-full">
+            <div className="space-y-1 p-1">
+              {availableRepos.length === 0 ? (
+                <p className="text-center text-xs text-muted-foreground py-6">
+                  暂无其他可编辑仓库。请先在“仓库管理”中添加新仓库。
+                </p>
+              ) : (
+                availableRepos.map((repo) => (
+                  <div
+                    key={repo.id}
+                    onClick={() => {
+                      setProjectRepoIds(prev => [...prev, repo.id]);
+                      setExpandedRepos(prev => ({ ...prev, [repo.id]: true }));
+                      setActiveRepoId(repo.id);
+                      setIsAddProjectOpen(false);
+                    }}
+                    className="flex items-center gap-3 p-3 rounded-lg hover:bg-secondary/40 cursor-pointer transition-colors border border-transparent hover:border-border"
+                  >
+                    <Folder className="h-5 w-5 text-primary shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-foreground truncate">{repo.name || repo.fullName.split('/').pop() || repo.fullName}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{repo.fullName}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => setIsAddProjectOpen(false)}
+              variant="outline"
+              size="sm"
+              className="border-border text-muted-foreground hover:bg-secondary"
+            >
+              取消
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 
@@ -4388,23 +5672,25 @@ export function DesktopWorkbench() {
           />
         ) : null}
         <div className="flex min-w-0 flex-1 flex-col">
-          <WorkbenchHeader
-            activeView={activeView}
-            repository={selectedRepository}
-            repositoryCanOperate={selectedRepositoryCanOperate}
-            onAgent={() => openAgent(undefined, selectedRepository)}
-            onSearch={() => setIsSearchOpen(true)}
-            onOpenBranchMonitor={() => setIsBranchMonitorOpen(true)}
-            feedSearchKeyword={feedSearchKeyword}
-            onFeedSearchKeywordChange={setFeedSearchKeyword}
-            feedFilters={feedFilters}
-            onFeedFiltersChange={setFeedFilters}
-            isRefreshing={isRefreshing}
-            onRefresh={handleRefreshFeed}
-            onMarkAllRead={handleIgnoreAllVisibleFeedItems}
-            onAddRepositoryClick={() => setIsAddRepositoryOpen(true)}
-            onOpenContributors={() => setIsContributorsOpen(true)}
-          />
+          {activeView !== 'agent' && (
+            <WorkbenchHeader
+              activeView={activeView}
+              repository={selectedRepository}
+              repositoryCanOperate={selectedRepositoryCanOperate}
+              onAgent={() => openAgent(undefined, selectedRepository)}
+              onSearch={() => setIsSearchOpen(true)}
+              onOpenBranchMonitor={() => setIsBranchMonitorOpen(true)}
+              feedSearchKeyword={feedSearchKeyword}
+              onFeedSearchKeywordChange={setFeedSearchKeyword}
+              feedFilters={feedFilters}
+              onFeedFiltersChange={setFeedFilters}
+              isRefreshing={isRefreshing}
+              onRefresh={handleRefreshFeed}
+              onMarkAllRead={handleIgnoreAllVisibleFeedItems}
+              onAddRepositoryClick={() => setIsAddRepositoryOpen(true)}
+              onOpenContributors={() => setIsContributorsOpen(true)}
+            />
+          )}
           <main className="min-h-0 flex-1 overflow-hidden">
             {activeView === 'repository' && selectedRepository ? (
               <RepositoryConversation
@@ -4472,6 +5758,7 @@ export function DesktopWorkbench() {
               <AgentRunView
                 repository={agentRepository}
                 prompt={searchParams.get('prompt') ?? ''}
+                editableRepos={editableRepos.map((item) => item.repository)}
               />
             ) : null}
 

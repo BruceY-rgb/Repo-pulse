@@ -329,7 +329,7 @@ describe('WorkbenchService.getWatchFeed', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    svc = new WorkbenchService();
+    svc = new WorkbenchService({} as any, {} as any);
     mockGetUserMonitoredRepositoryIds.mockResolvedValue([]);
     mockEventFindMany.mockResolvedValue([]);
   });
@@ -415,7 +415,7 @@ describe('WorkbenchService.markConversationAsRead', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    svc = new WorkbenchService();
+    svc = new WorkbenchService({} as any, {} as any);
     mockAssertUserCanAccessRepository.mockResolvedValue({ accessLevel: 'READ' });
     mockConversationStateFindUnique.mockResolvedValue(null);
     mockEventFindFirst.mockResolvedValue(null);
