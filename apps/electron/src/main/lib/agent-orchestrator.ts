@@ -5,7 +5,10 @@ import path from 'node:path';
 
 export class AgentOrchestrator {
   private activeQuery: any = null;
-  private pendingPermissions = new Map<string, (result: PermissionResult) => void>();
+  private pendingPermissions = new Map<string, {
+    resolve: (result: PermissionResult) => void;
+    input: Record<string, unknown>;
+  }>();
 
   constructor(private readonly mainWindow: BrowserWindow) {}
 
@@ -18,12 +21,26 @@ export class AgentOrchestrator {
     apiKey: string;
     model?: string;
     baseUrl?: string;
+    workspaceSource?: 'local' | 'managed';
+    workspaceBranch?: string | null;
+    workspaceRemembered?: boolean;
+    sdkSessionId?: string | null;
   }): Promise<void> {
     if (this.activeQuery) {
       this.stopSession();
     }
 
-    const { prompt, cwd, apiKey, model, baseUrl } = params;
+    const {
+      prompt,
+      cwd,
+      apiKey,
+      model,
+      baseUrl,
+      workspaceSource,
+      workspaceBranch,
+      workspaceRemembered,
+      sdkSessionId,
+    } = params;
 
     // 检测当前仓库工作区目录及 .git 是否存在
     try {
@@ -41,13 +58,65 @@ export class AgentOrchestrator {
     }
 
 
+    const stringifyToolResult = (content: unknown) => {
+      if (typeof content === 'string') return content;
+      if (Array.isArray(content)) {
+        return content
+          .map((block) => {
+            if (typeof block === 'string') return block;
+            if (block && typeof block === 'object' && 'text' in block) {
+              return String((block as { text?: unknown }).text ?? '');
+            }
+            return '';
+          })
+          .join('');
+      }
+      if (content == null) return '';
+      try {
+        return JSON.stringify(content);
+      } catch {
+        return String(content);
+      }
+    };
+
+    const sendToolUse = (toolUseID: string, toolName: string, input: Record<string, unknown>) => {
+      this.mainWindow.webContents.send('agent:message', {
+        type: 'tool_use',
+        toolUseID,
+        name: toolName,
+        input,
+      });
+    };
+
+    this.mainWindow.webContents.send('agent:message', {
+      type: 'workspace_ready',
+      cwd,
+      source: workspaceSource ?? 'managed',
+      branch: workspaceBranch,
+      remembered: workspaceRemembered === true,
+    });
+
+    const emittedSessionIds = new Set<string>();
+    const sendSessionState = (sessionId: unknown) => {
+      if (typeof sessionId !== 'string' || !sessionId.trim()) return;
+      if (emittedSessionIds.has(sessionId)) return;
+      emittedSessionIds.add(sessionId);
+      this.mainWindow.webContents.send('agent:message', {
+        type: 'session_state',
+        sessionId,
+        resumed: sdkSessionId === sessionId,
+      });
+    };
+
     const canUseTool: CanUseTool = async (toolName, input, options) => {
       const command = (input.command as string || '').trim();
+      const toolUseID = options.toolUseID;
+
+      sendToolUse(toolUseID, toolName, input);
 
       // 所有操作均向渲染层发送授权请求，并等待用户确认
       return new Promise<PermissionResult>((resolve) => {
-        const toolUseID = options.toolUseID;
-        this.pendingPermissions.set(toolUseID, resolve);
+        this.pendingPermissions.set(toolUseID, { resolve, input });
 
         this.mainWindow.webContents.send('agent:permission-request', {
           toolUseID,
@@ -66,10 +135,34 @@ export class AgentOrchestrator {
           cwd,
           canUseTool,
           model: model || 'claude-3-5-sonnet-latest',
+          resume: sdkSessionId || undefined,
           env: {
             ...process.env,
             ANTHROPIC_API_KEY: apiKey,
             ...(baseUrl ? { ANTHROPIC_BASE_URL: baseUrl } : {}),
+          },
+          hooks: {
+            PostToolUse: [{
+              hooks: [async (input: any) => {
+                this.mainWindow.webContents.send('agent:message', {
+                  type: 'tool_result',
+                  toolUseID: input.tool_use_id,
+                  output: stringifyToolResult(input.tool_response),
+                });
+                return { continue: true };
+              }],
+            }],
+            PostToolUseFailure: [{
+              hooks: [async (input: any) => {
+                this.mainWindow.webContents.send('agent:message', {
+                  type: 'tool_result',
+                  toolUseID: input.tool_use_id,
+                  output: '',
+                  error: stringifyToolResult(input.error),
+                });
+                return { continue: true };
+              }],
+            }],
           },
           includeHookEvents: true,
           includePartialMessages: true,
@@ -90,28 +183,9 @@ export class AgentOrchestrator {
         }
       };
 
-      const stringifyToolResult = (content: unknown) => {
-        if (typeof content === 'string') return content;
-        if (Array.isArray(content)) {
-          return content
-            .map((block) => {
-              if (typeof block === 'string') return block;
-              if (block && typeof block === 'object' && 'text' in block) {
-                return String((block as { text?: unknown }).text ?? '');
-              }
-              return '';
-            })
-            .join('');
-        }
-        if (content == null) return '';
-        try {
-          return JSON.stringify(content);
-        } catch {
-          return String(content);
-        }
-      };
-
       for await (const message of this.activeQuery) {
+        sendSessionState(message.session_id);
+
         if (message.type === 'stream_event') {
           const event = message.event;
           
@@ -125,12 +199,6 @@ export class AgentOrchestrator {
                 id: event.content_block.id,
                 name: event.content_block.name,
                 inputJson: '',
-              });
-              this.mainWindow.webContents.send('agent:message', {
-                type: 'tool_use',
-                toolUseID: event.content_block.id,
-                name: event.content_block.name,
-                input: event.content_block.input ?? {},
               });
             }
           }
@@ -159,12 +227,10 @@ export class AgentOrchestrator {
           else if (event.type === 'content_block_stop') {
             const toolBlock = streamingToolBlocks.get(event.index);
             if (toolBlock) {
-              this.mainWindow.webContents.send('agent:message', {
-                type: 'tool_use',
-                toolUseID: toolBlock.id,
-                name: toolBlock.name,
-                input: parseToolInput(toolBlock.inputJson, {}),
-              });
+              const input = parseToolInput(toolBlock.inputJson, {});
+              if (input && typeof input === 'object' && Object.keys(input as Record<string, unknown>).length > 0) {
+                sendToolUse(toolBlock.id, toolBlock.name, input as Record<string, unknown>);
+              }
               streamingToolBlocks.delete(event.index);
             }
           }
@@ -238,12 +304,12 @@ export class AgentOrchestrator {
    * 解决挂起的权限请求
    */
   resolvePermission(toolUseID: string, approve: boolean): void {
-    const resolve = this.pendingPermissions.get(toolUseID);
-    if (resolve) {
+    const pending = this.pendingPermissions.get(toolUseID);
+    if (pending) {
       if (approve) {
-        resolve({ behavior: 'allow' });
+        pending.resolve({ behavior: 'allow', updatedInput: pending.input });
       } else {
-        resolve({ behavior: 'deny', message: 'User rejected command execution.' });
+        pending.resolve({ behavior: 'deny', message: 'User rejected command execution.' });
       }
       this.pendingPermissions.delete(toolUseID);
     }

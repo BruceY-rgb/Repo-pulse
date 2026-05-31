@@ -93,27 +93,49 @@ function registerIpcHandlers() {
       apiKey: string;
       model?: string;
       baseUrl?: string;
+      authorizedLocalCwd?: string;
+      sdkSessionId?: string | null;
     },
   ) => {
     if (!workspaceManager || !agentOrchestrator) {
       throw new Error('Agent systems not initialized');
     }
 
-    const { repositoryId, gitUrl, defaultBranch, prompt, apiKey, model, baseUrl } = params;
+    const {
+      repositoryId,
+      gitUrl,
+      defaultBranch,
+      prompt,
+      apiKey,
+      model,
+      baseUrl,
+      authorizedLocalCwd,
+      sdkSessionId,
+    } = params;
 
-    // 1. 准备物理工作区
-    const cwd = await workspaceManager.prepareWorkspace(repositoryId, gitUrl, defaultBranch);
+    // 1. 准备物理工作区：优先复用本机已存在的同 remote Git 仓库
+    const workspace = await workspaceManager.prepareWorkspace(repositoryId, gitUrl, defaultBranch, authorizedLocalCwd);
 
     // 2. 异步启动 Agent 会话，防止 IPC 调用阻塞
     void agentOrchestrator.startSession({
       prompt,
-      cwd,
+      cwd: workspace.cwd,
       apiKey,
       model,
       baseUrl,
+      workspaceSource: workspace.source,
+      workspaceBranch: workspace.branch,
+      workspaceRemembered: workspace.remembered,
+      sdkSessionId,
     });
 
-    return { success: true, cwd };
+    return {
+      success: true,
+      cwd: workspace.cwd,
+      source: workspace.source,
+      branch: workspace.branch,
+      remembered: workspace.remembered,
+    };
   });
 
   ipcMain.handle('agent:stop-session', async () => {

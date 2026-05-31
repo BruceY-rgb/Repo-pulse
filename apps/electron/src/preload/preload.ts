@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('repoPulseDesktop', {
       apiKey: string;
       model?: string;
       baseUrl?: string;
+      authorizedLocalCwd?: string;
+      sdkSessionId?: string | null;
     }) => ipcRenderer.invoke('agent:start-session', params),
     stopSession: () => ipcRenderer.invoke('agent:stop-session'),
     resolvePermission: (params: { toolUseID: string; approve: boolean }) =>

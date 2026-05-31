@@ -76,6 +76,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Sheet,
   SheetContent,
@@ -121,8 +122,9 @@ import { eventService } from '@/services/event.service';
 import { approvalService, type Approval } from '@/services/approval.service';
 import { repositoryService } from '@/services/repository.service';
 import { workbenchService } from '@/services/workbench.service';
-import { settingsService } from '@/services/settings.service';
+import { settingsService, PROVIDER_LABELS, type AIProvider } from '@/services/settings.service';
 import { getApiBaseUrl } from '@/lib/desktop';
+import { getProviderLogo } from '@/lib/provider-logo';
 import {
   useWorkbenchUnreadStore,
   type WorkbenchUnreadBoundary,
@@ -3505,8 +3507,25 @@ type AgentToolStatus = 'running' | 'success' | 'failed';
 type AgentWorkflowStatus = 'pending' | 'running' | 'waiting' | 'success' | 'error';
 type AgentWorkflowType = 'system' | 'thought' | 'tool' | 'permission' | 'result';
 
+interface AgentChoiceOption {
+  id: string;
+  label: string;
+  value: string;
+}
+
 type AgentMessage =
   | { id: string; type: 'user' | 'assistant' | 'thought' | 'system' | 'error'; content: string }
+  | {
+      id: string;
+      type: 'choice_request';
+      prompt: string;
+      options: AgentChoiceOption[];
+      sourceMessageId?: string;
+      selectedOptionId?: string;
+      customValue?: string;
+      response?: string;
+      status?: 'open' | 'submitted';
+    }
   | {
       id: string;
       type: 'tool_call';
@@ -3551,10 +3570,43 @@ interface AgentSession {
   workflowActivities: AgentWorkflowActivity[];
   error: string | null;
   createdAt: string;
+  sdkSessionId?: string | null;
+  sdkSessionUpdatedAt?: string | null;
   pendingPermission?: any | null;
 }
 
 const createAgentId = () => Math.random().toString(36).substring(2, 9);
+
+interface AgentWorkspaceMemory {
+  cwd: string;
+  branch?: string | null;
+  authorizedAt: string;
+}
+
+const agentWorkspaceMemoryKey = (repoId: string) => `repo-pulse:agent-workspace-memory:${repoId}`;
+
+function getAgentWorkspaceMemory(repoId: string): AgentWorkspaceMemory | null {
+  if (!repoId) return null;
+  try {
+    const raw = localStorage.getItem(agentWorkspaceMemoryKey(repoId));
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (typeof parsed?.cwd === 'string' && parsed.cwd.trim()) {
+      return {
+        cwd: parsed.cwd,
+        branch: typeof parsed.branch === 'string' ? parsed.branch : null,
+        authorizedAt: typeof parsed.authorizedAt === 'string' ? parsed.authorizedAt : new Date().toISOString(),
+      };
+    }
+  } catch {
+    localStorage.removeItem(agentWorkspaceMemoryKey(repoId));
+  }
+  return null;
+}
+
+function saveAgentWorkspaceMemory(repoId: string, memory: AgentWorkspaceMemory) {
+  if (!repoId || !memory.cwd.trim()) return;
+  localStorage.setItem(agentWorkspaceMemoryKey(repoId), JSON.stringify(memory));
+}
 
 function createDefaultAgentSession(title = '默认会话'): AgentSession {
   return {
@@ -3566,6 +3618,8 @@ function createDefaultAgentSession(title = '默认会话'): AgentSession {
     workflowActivities: [],
     error: null,
     createdAt: new Date().toISOString(),
+    sdkSessionId: null,
+    sdkSessionUpdatedAt: null,
   };
 }
 
@@ -3581,6 +3635,71 @@ function stringifyCompact(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function stripMarkdownInline(value: string): string {
+  return value
+    .replace(/\*\*/g, '')
+    .replace(/__+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function createAgentChoiceRequestFromAssistant(message: { id: string; type: 'assistant'; content: string }): AgentMessage | null {
+  const content = message.content.trim();
+  if (!content) return null;
+
+  const lines = content.split(/\r?\n/);
+  let triggerIndex = -1;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (/(您希望我|你希望我|请选择|选择以下|请确认|确认一下|需要确认|需要您确认|能否告诉我|请告诉我)/.test(lines[index])) {
+      triggerIndex = index;
+      break;
+    }
+  }
+
+  if (triggerIndex === -1) return null;
+
+  const promptLine = lines.slice(triggerIndex).find((line) => /[?？]|(您希望我|你希望我|请选择|请确认|能否告诉我|请告诉我)/.test(line));
+  const prompt = stripMarkdownInline(promptLine || '请选择下一步操作，或补充你的要求。');
+  const options: AgentChoiceOption[] = [];
+
+  for (const line of lines.slice(triggerIndex + 1)) {
+    const match = line.match(/^\s*(?:[-*]|\d+[.)、）])\s+(.+?)\s*$/);
+    if (!match) continue;
+    const label = stripMarkdownInline(match[1] ?? '');
+    if (!label) continue;
+    options.push({
+      id: `option-${options.length + 1}`,
+      label,
+      value: label,
+    });
+    if (options.length >= 5) break;
+  }
+
+  return {
+    id: `choice:${message.id}`,
+    type: 'choice_request',
+    prompt,
+    options,
+    sourceMessageId: message.id,
+    status: 'open',
+  };
+}
+
+function appendChoiceRequestIfNeeded(messages: AgentMessage[]): AgentMessage[] {
+  const hasOpenChoice = messages.some((item) => item.type === 'choice_request' && item.status !== 'submitted');
+  if (hasOpenChoice) return messages;
+
+  const lastAssistant = [...messages].reverse().find((item): item is { id: string; type: 'assistant'; content: string } => item.type === 'assistant');
+  if (!lastAssistant) return messages;
+
+  const choiceRequest = createAgentChoiceRequestFromAssistant(lastAssistant);
+  if (!choiceRequest) return messages;
+
+  const alreadyExists = messages.some((item) => item.id === choiceRequest.id);
+  if (alreadyExists) return messages;
+  return [...messages, choiceRequest];
 }
 
 function extractToolCommand(input: unknown): string {
@@ -3744,6 +3863,8 @@ function normalizeAgentSession(raw: any): AgentSession {
     workflowActivities,
     error: typeof raw?.error === 'string' ? raw.error : null,
     createdAt: typeof raw?.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
+    sdkSessionId: typeof raw?.sdkSessionId === 'string' ? raw.sdkSessionId : null,
+    sdkSessionUpdatedAt: typeof raw?.sdkSessionUpdatedAt === 'string' ? raw.sdkSessionUpdatedAt : null,
     pendingPermission: raw?.pendingPermission ?? null,
   };
 }
@@ -3911,6 +4032,95 @@ function AgentWorkflowCard({ session }: { session: AgentSession }) {
   );
 }
 
+function AgentChoiceRequestCard({
+  message,
+  onSubmit,
+}: {
+  message: Extract<AgentMessage, { type: 'choice_request' }>;
+  onSubmit: (messageId: string, response: string) => void;
+}) {
+  const [selectedOptionId, setSelectedOptionId] = useState(message.selectedOptionId || message.options[0]?.id || '');
+  const [customValue, setCustomValue] = useState(message.customValue || '');
+  const selectedOption = message.options.find((option) => option.id === selectedOptionId);
+  const submitted = message.status === 'submitted';
+  const response = [
+    selectedOption?.value,
+    customValue.trim() ? `补充说明：${customValue.trim()}` : '',
+  ].filter(Boolean).join('\n\n');
+
+  return (
+    <div className="ml-10 rounded-xl border border-primary/20 bg-card p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <MessageSquare className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1 space-y-3">
+          <div>
+            <p className="text-sm font-semibold text-foreground">需要你的选择</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{message.prompt}</p>
+          </div>
+
+          {message.options.length > 0 ? (
+            <div className="grid gap-2">
+              {message.options.map((option) => {
+                const isSelected = option.id === selectedOptionId;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    disabled={submitted}
+                    onClick={() => setSelectedOptionId(option.id)}
+                    className={cn(
+                      'flex min-h-10 w-full items-start gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-colors',
+                      isSelected
+                        ? 'border-primary/40 bg-primary/10 text-foreground'
+                        : 'border-border bg-background/60 text-muted-foreground hover:border-primary/25 hover:bg-secondary/35',
+                    )}
+                  >
+                    {isSelected ? (
+                      <CheckCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                    ) : (
+                      <CircleDot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                    )}
+                    <span className="min-w-0 flex-1 leading-5">{option.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
+          <Textarea
+            value={customValue}
+            disabled={submitted}
+            onChange={(event) => setCustomValue(event.target.value)}
+            placeholder="补充具体提交信息、目标分支，或直接描述你的要求..."
+            className="min-h-20 resize-y rounded-lg bg-background/70 text-sm"
+          />
+
+          {submitted ? (
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-500">
+              已发送选择
+            </div>
+          ) : (
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                size="sm"
+                disabled={!response.trim()}
+                onClick={() => onSubmit(message.id, response)}
+                className="h-8 gap-1.5 rounded-lg text-xs font-semibold"
+              >
+                <Send className="h-3.5 w-3.5" />
+                发送选择
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AgentRunView({
   repository: initialRepository,
   prompt: initialPrompt,
@@ -3929,6 +4139,7 @@ function AgentRunView({
   const [activeApiKey, setActiveApiKey] = useState('');
   const [activeModel, setActiveModel] = useState('claude-3-5-sonnet-latest');
   const [activeBaseUrl, setActiveBaseUrl] = useState('');
+  const [activeProvider, setActiveProvider] = useState<AIProvider | null>(null);
 
   // Project List (Repository IDs)
   const [projectRepoIds, setProjectRepoIds] = useState<string[]>(() => {
@@ -3958,6 +4169,7 @@ function AgentRunView({
   const processedInitialPromptRef = useRef<string | null>(null);
   const activeSessionIdRef = useRef(activeSessionId);
   const activeRepoIdRef = useRef(activeRepoId);
+  const runningAgentTargetRef = useRef<{ repoId: string; sessionId: string } | null>(null);
 
   // Sync projects to localStorage
   useEffect(() => {
@@ -3969,6 +4181,7 @@ function AgentRunView({
     setLoading(true);
     try {
       const config = await settingsService.getRawAIConfig();
+      setActiveProvider(config.aiProvider ?? null);
 
       if (
         (config.aiProvider === 'anthropic' || config.aiProvider === 'deepseek' || config.aiProvider === 'custom') &&
@@ -3992,6 +4205,7 @@ function AgentRunView({
       console.error('Failed to load AI config for Agent:', err);
       setActiveApiKey('');
       setActiveBaseUrl('');
+      setActiveProvider(null);
     } finally {
       setLoading(false);
     }
@@ -4091,6 +4305,7 @@ function AgentRunView({
       processedInitialPromptRef.current = initialPrompt;
 
       // Stop current running sessions
+      runningAgentTargetRef.current = null;
       void window.repoPulseDesktop?.agent?.stopSession();
 
       const targetRepo = initialRepository || activeRepository;
@@ -4118,13 +4333,13 @@ function AgentRunView({
           {
             id: createAgentId(),
             type: 'system',
-            content: '正在连接本地 Git 工作区...',
+            content: '正在准备本地 Git 工作区...',
           },
         ],
         workflowActivities: [
           createWorkflowActivity({
             type: 'system',
-            title: '正在连接本地 Git 工作区',
+            title: '正在准备本地 Git 工作区',
             status: 'running',
             detail: initialRepository?.fullName || activeRepository?.fullName,
           }),
@@ -4153,8 +4368,9 @@ function AgentRunView({
     if (!window.repoPulseDesktop?.agent) return;
 
     const unsubscribeMessage = window.repoPulseDesktop.agent.onMessage((msg: any) => {
-      const activeId = activeSessionIdRef.current;
-      const activeRepo = activeRepoIdRef.current;
+      const runningTarget = runningAgentTargetRef.current;
+      const activeId = runningTarget?.sessionId || activeSessionIdRef.current;
+      const activeRepo = runningTarget?.repoId || activeRepoIdRef.current;
       if (!activeRepo || !activeId) return;
       
       updateRepoSessions(activeRepo, (prevSessions) => {
@@ -4167,6 +4383,14 @@ function AgentRunView({
 
         // 1. Handle message status updates
         if (msg.type === 'finished') {
+          runningAgentTargetRef.current = null;
+          updatedMessages = updatedMessages.map((item) => {
+            if (item.type === 'tool_call' && item.status === 'running') {
+              return { ...item, status: 'success' as const };
+            }
+            return item;
+          });
+          updatedMessages = appendChoiceRequestIfNeeded(updatedMessages);
           updatedMessages = appendSystemMessage(updatedMessages, 'Agent 执行完毕。');
           updatedWorkflow = finalizeWorkflowActivities(updatedWorkflow, 'success');
           updatedWorkflow = upsertWorkflowActivity(updatedWorkflow, createWorkflowActivity({
@@ -4187,6 +4411,7 @@ function AgentRunView({
         }
 
         if (msg.type === 'error') {
+          runningAgentTargetRef.current = null;
           const errorMessage = msg.message || String(msg);
           updatedMessages.push({
             id: createAgentId(),
@@ -4213,8 +4438,52 @@ function AgentRunView({
           });
         }
 
-        // 2. Handle standard content updates (streaming)
-        if (msg.type === 'text') {
+        if (msg.type === 'workspace_ready') {
+          const isLocal = msg.source === 'local';
+          const branchText = msg.branch ? ` · ${msg.branch}` : '';
+          const title = isLocal
+            ? (msg.remembered ? '已复用本地 Git 工作区授权' : '已使用本地 Git 工作区')
+            : '已准备隔离工作区';
+          const detail = `${msg.cwd || ''}${branchText}`;
+          if (isLocal && typeof msg.cwd === 'string' && msg.cwd.trim()) {
+            saveAgentWorkspaceMemory(activeRepo, {
+              cwd: msg.cwd,
+              branch: typeof msg.branch === 'string' ? msg.branch : null,
+              authorizedAt: new Date().toISOString(),
+            });
+          } else if (!isLocal) {
+            localStorage.removeItem(agentWorkspaceMemoryKey(activeRepo));
+          }
+          updatedMessages = appendSystemMessage(updatedMessages, `${title}${branchText}`);
+          updatedWorkflow = upsertWorkflowActivity(updatedWorkflow, createWorkflowActivity({
+            id: `workspace-ready:${msg.cwd || activeRepo}`,
+            type: 'system',
+            title,
+            detail,
+            status: 'success',
+          }));
+        } else if (msg.type === 'session_state' && typeof msg.sessionId === 'string' && msg.sessionId.trim()) {
+          const alreadyBound = currentActive.sdkSessionId === msg.sessionId;
+          const title = msg.resumed || alreadyBound ? '已恢复 SDK 会话记忆' : '已绑定 SDK 会话记忆';
+          updatedMessages = appendSystemMessage(updatedMessages, title);
+          updatedWorkflow = upsertWorkflowActivity(updatedWorkflow, createWorkflowActivity({
+            id: `sdk-session:${msg.sessionId}`,
+            type: 'system',
+            title,
+            detail: msg.sessionId,
+            status: 'success',
+          }));
+          return prevSessions.map(s => {
+            if (s.id !== activeId) return s;
+            return {
+              ...s,
+              sdkSessionId: msg.sessionId,
+              sdkSessionUpdatedAt: new Date().toISOString(),
+              messages: updatedMessages,
+              workflowActivities: updatedWorkflow,
+            };
+          });
+        } else if (msg.type === 'text') {
           if (lastMsg && lastMsg.type === 'assistant') {
             updatedMessages[updatedMessages.length - 1] = {
               ...lastMsg,
@@ -4249,6 +4518,16 @@ function AgentRunView({
           }));
         } else if (msg.type === 'tool_use') {
           const command = extractToolCommand(msg.input);
+          if (msg.name === 'Bash' && (!command || command === '{}')) {
+            return prevSessions.map(s => {
+              if (s.id !== activeId) return s;
+              return {
+                ...s,
+                messages: updatedMessages,
+                workflowActivities: updatedWorkflow,
+              };
+            });
+          }
           const existingIndex = updatedMessages.findIndex((item) => item.type === 'tool_call' && item.toolUseID === msg.toolUseID);
           const nextToolMessage: AgentMessage = {
             id: msg.toolUseID || createAgentId(),
@@ -4314,8 +4593,9 @@ function AgentRunView({
     });
 
     const unsubscribePermission = window.repoPulseDesktop.agent.onPermissionRequest((req: any) => {
-      const activeId = activeSessionIdRef.current;
-      const activeRepo = activeRepoIdRef.current;
+      const runningTarget = runningAgentTargetRef.current;
+      const activeId = runningTarget?.sessionId || activeSessionIdRef.current;
+      const activeRepo = runningTarget?.repoId || activeRepoIdRef.current;
       if (!activeRepo || !activeId) return;
 
       updateRepoSessions(activeRepo, (prevSessions) => {
@@ -4352,6 +4632,7 @@ function AgentRunView({
     setActiveRepoId(repoId);
     setActiveSessionId(newSession.id);
     setExpandedRepos(prev => ({ ...prev, [repoId]: true }));
+    runningAgentTargetRef.current = null;
     void window.repoPulseDesktop?.agent?.stopSession();
   };
 
@@ -4374,6 +4655,7 @@ function AgentRunView({
     }
 
     if (isDeletingActive) {
+      runningAgentTargetRef.current = null;
       void window.repoPulseDesktop?.agent?.stopSession();
     }
   };
@@ -4443,6 +4725,14 @@ function AgentRunView({
       return;
     }
 
+    const workspaceMemory = getAgentWorkspaceMemory(repo.id);
+    const hasWorkspaceMemory = Boolean(workspaceMemory?.cwd);
+    const sdkSessionId = typeof session.sdkSessionId === 'string' && session.sdkSessionId.trim()
+      ? session.sdkSessionId
+      : null;
+
+    runningAgentTargetRef.current = { repoId: repo.id, sessionId: session.id };
+
     console.log('[AgentRunView] startSessionOnSession: updating status to running for repo:', repo.id);
     updateRepoSessions(repo.id, prev => {
       return prev.map(s => {
@@ -4452,14 +4742,28 @@ function AgentRunView({
           status: 'running',
           error: null,
           pendingPermission: null,
-          messages: appendSystemMessage(s.messages, '正在连接本地 Git 工作区并拉取最新分支...'),
-          workflowActivities: upsertWorkflowActivity(s.workflowActivities, createWorkflowActivity({
-            id: `workspace:${repo.id}:${session.id}`,
-            type: 'system',
-            title: '准备本地工作区',
-            detail: repo.fullName,
-            status: 'running',
-          })),
+          messages: appendSystemMessage(
+            s.messages,
+            hasWorkspaceMemory ? '正在复用本地 Git 工作区授权...' : '正在准备本地 Git 工作区...',
+          ),
+          workflowActivities: upsertWorkflowActivity(
+            sdkSessionId
+              ? upsertWorkflowActivity(s.workflowActivities, createWorkflowActivity({
+                  id: `sdk-session-resume:${session.id}`,
+                  type: 'system',
+                  title: '恢复 SDK 会话记忆',
+                  detail: sdkSessionId,
+                  status: 'running',
+                }))
+              : s.workflowActivities,
+            createWorkflowActivity({
+              id: `workspace:${repo.id}:${session.id}`,
+              type: 'system',
+              title: hasWorkspaceMemory ? '复用本地工作区授权' : '准备本地工作区',
+              detail: workspaceMemory?.cwd || repo.fullName,
+              status: 'running',
+            }),
+          ),
         };
       });
     });
@@ -4480,6 +4784,8 @@ function AgentRunView({
         apiKey: activeApiKey,
         model: activeModel,
         baseUrl: activeBaseUrl || undefined,
+        authorizedLocalCwd: workspaceMemory?.cwd,
+        sdkSessionId,
       });
       toast.success('Agent 会话已启动');
       console.log('[AgentRunView] startSessionOnSession: agent.startSession resolved successfully.');
@@ -4521,6 +4827,7 @@ function AgentRunView({
     if (!activeRepoId) return;
     try {
       await window.repoPulseDesktop!.agent!.stopSession();
+      runningAgentTargetRef.current = null;
       updateRepoSessions(activeRepoId, prev => {
         return prev.map(s => {
           if (s.id !== session.id) return s;
@@ -4646,6 +4953,28 @@ function AgentRunView({
     setEditingSessionId(null);
   };
 
+  const handleSubmitChoiceResponse = (messageId: string, response: string) => {
+    const trimmed = response.trim();
+    if (!trimmed || !activeRepoId || !activeSessionId) return;
+
+    updateRepoSessions(activeRepoId, prev => prev.map(s => {
+      if (s.id !== activeSessionId) return s;
+      return {
+        ...s,
+        messages: s.messages.map((message) => {
+          if (message.type !== 'choice_request' || message.id !== messageId) return message;
+          return {
+            ...message,
+            status: 'submitted',
+            response: trimmed,
+          };
+        }),
+      };
+    }));
+
+    void handleSendChat(trimmed);
+  };
+
   const handleSendChat = async (overridePrompt?: string) => {
     console.log('[AgentRunView] handleSendChat called.');
     if (!activeSession || !activeRepoId) {
@@ -4690,6 +5019,7 @@ function AgentRunView({
       if (window.repoPulseDesktop?.agent?.stopSession) {
         console.log('[AgentRunView] handleSendChat: stopping active agent session...');
         await window.repoPulseDesktop!.agent!.stopSession();
+        runningAgentTargetRef.current = null;
         console.log('[AgentRunView] handleSendChat: stopSession completed.');
       }
     } catch (err) {
@@ -4710,6 +5040,8 @@ function AgentRunView({
   }
 
   const availableRepos = editableRepos.filter(repo => !projectRepoIds.includes(repo.id));
+  const assistantProviderLogo = activeProvider ? getProviderLogo(activeProvider) : undefined;
+  const assistantProviderLabel = activeProvider ? (PROVIDER_LABELS[activeProvider] ?? 'AI') : 'AI';
 
   return (
     <div className="flex h-full overflow-hidden bg-background text-foreground animate-in fade-in-50 duration-350">
@@ -5086,8 +5418,18 @@ function AgentRunView({
 
                   {item.type === 'assistant' && (
                     <div className="flex gap-3">
-                      <Avatar className="h-7 w-7 rounded-lg border border-border mt-0.5 shrink-0">
-                        <AvatarFallback className="bg-primary/10 text-primary text-xs font-bold">
+                      <Avatar
+                        className="h-8 w-8 rounded-full border border-border/70 bg-background mt-0.5 shrink-0 shadow-sm ring-2 ring-background"
+                        title={assistantProviderLabel}
+                      >
+                        {assistantProviderLogo ? (
+                          <AvatarImage
+                            src={assistantProviderLogo}
+                            alt={assistantProviderLabel}
+                            className="rounded-full object-cover"
+                          />
+                        ) : null}
+                        <AvatarFallback className="rounded-full bg-primary/10 text-primary text-xs font-bold">
                           AI
                         </AvatarFallback>
                       </Avatar>
@@ -5097,24 +5439,33 @@ function AgentRunView({
                     </div>
                   )}
 
+                  {item.type === 'choice_request' && (
+                    <AgentChoiceRequestCard
+                      message={item}
+                      onSubmit={handleSubmitChoiceResponse}
+                    />
+                  )}
+
                   {item.type === 'thought' && (
                     <details className="group ml-10 border-l border-border pl-4 space-y-2">
                       <summary className="text-xs text-muted-foreground cursor-pointer select-none hover:text-foreground">
                         思考逻辑 (点击展开)
                       </summary>
-                      <p className="text-xs text-muted-foreground/80 italic pl-2 bg-secondary/30 py-1.5 rounded-lg">
-                        {item.content}
-                      </p>
+                      <div className="rounded-lg bg-secondary/30 px-3 py-2">
+                        <MarkdownContent className="text-xs prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-pre:my-2 prose-pre:max-h-64 prose-pre:overflow-auto">
+                          {item.content}
+                        </MarkdownContent>
+                      </div>
                     </details>
                   )}
 
                   {item.type === 'tool_call' && (
-                    <div className="ml-10 rounded-xl border border-border bg-slate-950 p-4 font-mono text-xs text-muted-foreground space-y-3 shadow-inner">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                    <div className="ml-10 rounded-xl border border-border bg-slate-950 p-4 text-xs text-muted-foreground space-y-3 shadow-inner">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 flex-1 items-start gap-2">
                           <Terminal className="h-3.5 w-3.5 text-cyan-400" />
-                          <span className="text-cyan-400 font-bold">
-                            {item.command && item.command !== '{}' ? `$ ${item.command}` : `${item.name || '工具调用'} 正在准备输入...`}
+                          <span className="min-w-0 whitespace-pre-wrap break-words font-mono font-bold leading-5 text-cyan-400">
+                            {item.command && item.command !== '{}' ? `$ ${item.command}` : getToolDisplayName(item.name)}
                           </span>
                         </div>
                         <Badge variant="outline" className={cn(
@@ -5127,16 +5478,26 @@ function AgentRunView({
                         </Badge>
                       </div>
 
-                      {item.output && (
-                        <pre className="overflow-x-auto text-[11px] text-slate-300 bg-black/40 p-2.5 rounded max-h-60 overflow-y-auto">
-                          {item.output}
-                        </pre>
-                      )}
+                      {(item.output || item.error) && (
+                        <details className="group rounded-lg border border-slate-700/70 bg-black/30">
+                          <summary className="flex cursor-pointer select-none items-center justify-between gap-3 px-3 py-2 text-[11px] font-medium text-slate-300 hover:text-slate-100">
+                            <span>{item.error ? '查看错误输出' : '查看执行结果'}</span>
+                            <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
+                          </summary>
+                          <div className="max-h-[320px] min-h-[112px] overflow-auto border-t border-slate-700/70 p-3 sm:max-h-[360px]">
+                            {item.output ? (
+                              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-slate-300">
+                                {item.output}
+                              </pre>
+                            ) : null}
 
-                      {item.error && (
-                        <pre className="overflow-x-auto text-[11px] text-red-400 bg-red-950/20 p-2.5 rounded">
-                          {item.error}
-                        </pre>
+                            {item.error ? (
+                              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-red-400">
+                                {item.error}
+                              </pre>
+                            ) : null}
+                          </div>
+                        </details>
                       )}
                     </div>
                   )}

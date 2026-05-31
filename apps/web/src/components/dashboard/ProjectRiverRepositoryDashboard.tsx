@@ -699,8 +699,8 @@ function ProjectRiverStreamgraph({
   const brushYScale = scaleLinear()
     .domain([yMin - ySpan * 0.08, yMax + ySpan * 0.08])
     .range([STREAM_HEIGHT - 8, brushTop + 8]);
-  const getMainY1 = (point: [number, number]) => Math.min(yScale(point[1]), yScale(point[0]) - 2);
-  const getBrushY1 = (point: [number, number]) => Math.min(brushYScale(point[1]), brushYScale(point[0]) - 1);
+  const getMainY1 = (point: readonly [number, number]) => Math.min(yScale(point[1]), yScale(point[0]) - 2);
+  const getBrushY1 = (point: readonly [number, number]) => Math.min(brushYScale(point[1]), brushYScale(point[0]) - 1);
   const areaGenerator = area<[number, number]>()
     .x((_, index) => xScale(data[index]?.date ?? new Date()))
     .y0((point) => yScale(point[0]))

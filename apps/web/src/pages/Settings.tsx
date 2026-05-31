@@ -376,7 +376,7 @@ export function Settings() {
   };
 
   const handleEditExceptionRule = (rule: NotificationExceptionRule) => {
-    setSelectedTemplate(rule.template);
+    setSelectedTemplate(rule.template ?? null);
     setExceptionDraft(rule);
   };
 
@@ -1023,9 +1023,9 @@ export function Settings() {
                       <div className="w-10 h-10 rounded-lg bg-[var(--github-surface)] flex items-center justify-center">
                         {account.logo ? (
                           <img src={account.logo} alt="" className="h-5 w-5 rounded" />
-                        ) : (
+                        ) : Icon ? (
                           <Icon className="w-5 h-5 text-white" />
-                        )}
+                        ) : null}
                       </div>
                       <div>
                         <p className="text-sm font-medium text-white">{account.provider}</p>
@@ -1186,7 +1186,7 @@ export function Settings() {
                     <Label htmlFor="aiProvider" className="text-sm text-white">{t('settings.ai.provider')}</Label>
                     <Select
                       value={aiConfig.aiProvider || ''}
-                      onValueChange={(value: AIProvider) => setAiConfig({ ...aiConfig, aiProvider: value, aiModel: PROVIDER_DEFAULT_MODELS[value] || '', aiBaseUrl: value === 'custom' ? '' : null })}
+                      onValueChange={(value: AIProvider) => setAiConfig({ ...aiConfig, aiProvider: value, aiModel: PROVIDER_DEFAULT_MODELS[value] || '', aiBaseUrl: value === 'custom' ? '' : undefined })}
                     >
                       <SelectTrigger className="bg-[var(--github-surface)] border-[var(--github-border)]">
                         <SelectValue placeholder={t('settings.ai.providerPlaceholder')} />
