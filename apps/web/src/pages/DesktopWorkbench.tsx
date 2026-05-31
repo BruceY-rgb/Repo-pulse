@@ -461,6 +461,50 @@ function HighlightText({ text, query }: { text: string; query: string }) {
   );
 }
 
+function getSearchBodyPreview(body: string, query: string): string {
+  if (!query || !query.trim() || !body) {
+    return body;
+  }
+  const terms = query.trim().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) {
+    return body;
+  }
+
+  const lowerBody = body.toLowerCase();
+  let firstMatchIdx = -1;
+  let matchedTermLength = 0;
+
+  for (const term of terms) {
+    const idx = lowerBody.indexOf(term.toLowerCase());
+    if (idx !== -1 && (firstMatchIdx === -1 || idx < firstMatchIdx)) {
+      firstMatchIdx = idx;
+      matchedTermLength = term.length;
+    }
+  }
+
+  if (firstMatchIdx === -1) {
+    return body;
+  }
+
+  const contextBefore = 40;
+  const contextAfter = 80;
+
+  const start = Math.max(0, firstMatchIdx - contextBefore);
+  const end = Math.min(body.length, firstMatchIdx + matchedTermLength + contextAfter);
+
+  let snippet = body.slice(start, end);
+
+  if (start > 0) {
+    snippet = '...' + snippet;
+  }
+  if (end < body.length) {
+    snippet = snippet + '...';
+  }
+
+  return snippet;
+}
+
+
 
 function getLatestWorkbenchMessageAt(messages: Array<Pick<WorkbenchConversationMessage, 'createdAt'>>) {
   return messages.reduce<string | null>((latest, message) => {
@@ -474,17 +518,21 @@ function getLatestWorkbenchMessageAt(messages: Array<Pick<WorkbenchConversationM
   }, null);
 }
 
-function getRepoInitial(repo: Pick<Repository, 'name' | 'fullName'>) {
+function getRepoInitial(repo?: Pick<Repository, 'name' | 'fullName'> | null) {
+  if (!repo) return 'R';
   return (repo.name || repo.fullName || 'R').slice(0, 1).toUpperCase();
 }
 
-function getRepositoryOwner(repo: Pick<Repository, 'fullName' | 'url'>) {
-  const [ownerFromFullName] = repo.fullName.split('/');
+function getRepositoryOwner(repo?: Pick<Repository, 'fullName' | 'url'> | null) {
+  if (!repo) return '';
+  const fullName = repo.fullName || '';
+  const [ownerFromFullName] = fullName.split('/');
   if (ownerFromFullName) {
     return ownerFromFullName;
   }
 
   try {
+    if (!repo.url) return '';
     const url = new URL(repo.url);
     return url.pathname.split('/').filter(Boolean)[0] ?? '';
   } catch {
@@ -492,7 +540,8 @@ function getRepositoryOwner(repo: Pick<Repository, 'fullName' | 'url'>) {
   }
 }
 
-function getRepositoryAvatarUrl(repo: Pick<Repository, 'fullName' | 'platform' | 'url'>) {
+function getRepositoryAvatarUrl(repo?: Pick<Repository, 'fullName' | 'platform' | 'url'> | null) {
+  if (!repo) return undefined;
   const owner = getRepositoryOwner(repo);
   if (!owner) {
     return undefined;
@@ -503,6 +552,7 @@ function getRepositoryAvatarUrl(repo: Pick<Repository, 'fullName' | 'platform' |
   }
 
   try {
+    if (!repo.url) return undefined;
     const url = new URL(repo.url);
     return `${url.origin}/${encodeURIComponent(owner)}.png`;
   } catch {
@@ -1946,7 +1996,7 @@ function WorkbenchHeader({
           </h1>
         </div>
       </div>
-      {activeView === 'watch' ? (
+      {activeView === 'settings' ? null : activeView === 'watch' ? (
         <div className="desktop-no-drag flex items-center gap-2">
           {/* Dynamic Search Filter */}
           <div className="relative w-48 sm:w-64">
@@ -2296,7 +2346,8 @@ function ConversationBubble({
 
   return (
     <div
-      className="group flex cursor-pointer gap-3 w-full min-w-0"
+      data-message-id={message.id}
+      className="group flex cursor-pointer gap-3 w-full min-w-0 transition-all duration-300"
       role="button"
       tabIndex={0}
       onClick={() => onOpenDetail(message)}
@@ -2365,13 +2416,17 @@ function MessageDetailSheet({
   approvalActionId,
 }: {
   message: ConversationMessage | null;
-  repository: Repository;
+  repository: Repository | undefined | null;
   onClose: () => void;
   onOpenAgent: (prompt: string) => void;
   onApproveMessage: (message: ConversationMessage) => void;
   onRejectMessage: (message: ConversationMessage) => void;
   approvalActionId?: string;
 }) {
+  if (!message || !repository) {
+    return null;
+  }
+
   const repositoryAvatarUrl = getRepositoryAvatarUrl(repository);
   const authorAvatarUrl = message
     ? getAuthorAvatarUrl(message) ?? repositoryAvatarUrl
@@ -2555,6 +2610,7 @@ function ConversationSearchSheet({
   selectedRepository,
   onQueryChange,
   onOpenChange,
+  onOpenDetail,
 }: {
   open: boolean;
   query: string;
@@ -2563,6 +2619,7 @@ function ConversationSearchSheet({
   selectedRepository?: Repository;
   onQueryChange: (value: string) => void;
   onOpenChange: (open: boolean) => void;
+  onOpenDetail: (message: ConversationMessage) => void;
 }) {
   const repositoryMap = useMemo(
     () => new Map(repositories.map((repository) => [repository.id, repository])),
@@ -2647,9 +2704,12 @@ function ConversationSearchSheet({
               return (
                 <Link
                   key={message.id}
-                  to={message.sourceRepositoryId ? `/workbench/repository/${message.sourceRepositoryId}` : '/workbench'}
+                  to={message.sourceRepositoryId ? `/workbench/repository/${message.sourceRepositoryId}?messageId=${message.id}` : `/workbench?messageId=${message.id}`}
                   className="relative block rounded-xl border border-border/50 bg-card/45 backdrop-blur-sm p-4.5 pl-6 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:bg-secondary/30 hover:border-primary/25 overflow-hidden group"
-                  onClick={() => onOpenChange(false)}
+                  onClick={() => {
+                    onOpenChange(false);
+                    onOpenDetail(message);
+                  }}
                 >
                   {/* Left accent indicator strip matching message risk */}
                   <div className={cn(
@@ -2678,7 +2738,7 @@ function ConversationSearchSheet({
                   </p>
 
                   <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground/75 font-normal">
-                    <HighlightText text={message.body} query={query} />
+                    <HighlightText text={getSearchBodyPreview(message.body, query)} query={query} />
                   </p>
                 </Link>
               );
@@ -2724,14 +2784,18 @@ function BranchMonitorSheet({
 }) {
   const branchesQuery = useRepositoryBranchesQuery(repository?.id ?? '', Boolean(open && repository?.id));
   const isRepositoryMonitored = repository ? monitoredRepositoryIds.includes(repository.id) : false;
-  const [searchQuery, setSearchQuery] = useState('');
-
-  // Reset search query when sheet closes or repository changes
-  useEffect(() => {
-    if (!open) {
-      setSearchQuery('');
+  const repositorySearchKey = repository?.id ?? '';
+  const [branchSearch, setBranchSearch] = useState({ repositoryId: '', query: '' });
+  const searchQuery = open && branchSearch.repositoryId === repositorySearchKey ? branchSearch.query : '';
+  const setBranchSearchQuery = (query: string) => {
+    setBranchSearch({ repositoryId: repositorySearchKey, query });
+  };
+  const handleSheetOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setBranchSearch({ repositoryId: repositorySearchKey, query: '' });
     }
-  }, [open, repository?.id]);
+    onOpenChange(nextOpen);
+  };
 
   const filteredBranches = useMemo(() => {
     const data = branchesQuery.data ?? [];
@@ -2743,7 +2807,7 @@ function BranchMonitorSheet({
   }, [branchesQuery.data, searchQuery]);
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={handleSheetOpenChange}>
       <SheetContent side="right" className="w-full overflow-y-auto border-l border-border bg-background/95 backdrop-blur-md sm:max-w-xl p-0 shadow-2xl flex flex-col h-full">
         {/* Header with gradient glow accent */}
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-purple-500 to-indigo-500 z-10" />
@@ -2821,14 +2885,14 @@ function BranchMonitorSheet({
                     <Search className="absolute left-3 h-3.5 w-3.5 text-muted-foreground/60" />
                     <Input
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onChange={(e) => setBranchSearchQuery(e.target.value)}
                       placeholder="搜索分支名称..."
                       className="pl-9 pr-9 h-9 rounded-lg bg-secondary/30 border-border/50 hover:bg-secondary/40 focus-visible:ring-primary/30 text-xs transition-all"
                     />
                     {searchQuery && (
                       <button
                         type="button"
-                        onClick={() => setSearchQuery('')}
+                        onClick={() => setBranchSearchQuery('')}
                         className="absolute right-3 p-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors"
                       >
                         <X className="h-3 w-3" />
@@ -2904,6 +2968,7 @@ function RepositoryConversation({
   onApproveMessage,
   onRejectMessage,
   approvalActionId,
+  onOpenDetail,
 }: {
   repository: Repository;
   messages: ConversationMessage[];
@@ -2913,15 +2978,19 @@ function RepositoryConversation({
   onApproveMessage: (message: ConversationMessage) => void;
   onRejectMessage: (message: ConversationMessage) => void;
   approvalActionId?: string;
+  onOpenDetail: (message: ConversationMessage | null) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [selectedMessage, setSelectedMessage] = useState<ConversationMessage | null>(null);
   const [activeFilter, setActiveFilter] = useState<MessageFilterKey>('all');
   const [pendingUnreadJump, setPendingUnreadJump] = useState(false);
   const [isGitTreeOpen, setIsGitTreeOpen] = useState(() => {
     return localStorage.getItem('repo-pulse:repo-git-tree-open') === 'true';
   });
   const unreadBoundaryRef = useRef<HTMLDivElement | null>(null);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusMessageId = searchParams.get('messageId');
+
 
   const [gitTreeWidth, setGitTreeWidth] = useState(() => {
     return Number(localStorage.getItem('repo-pulse:git-tree-sidebar-width')) || 320;
@@ -2969,9 +3038,15 @@ function RepositoryConversation({
     };
     setIsGitTreeResizing(true);
   };
+  const focusedMessage = useMemo(
+    () => (focusMessageId ? messages.find((message) => message.id === focusMessageId) ?? null : null),
+    [focusMessageId, messages],
+  );
+  const shouldResetFilterForFocus = Boolean(focusedMessage && !doesMessageMatchFilter(focusedMessage, activeFilter));
+  const effectiveActiveFilter = shouldResetFilterForFocus ? 'all' : activeFilter;
   const filteredMessages = useMemo(
-    () => messages.filter((message) => doesMessageMatchFilter(message, activeFilter)),
-    [activeFilter, messages],
+    () => messages.filter((message) => doesMessageMatchFilter(message, effectiveActiveFilter)),
+    [effectiveActiveFilter, messages],
   );
   const hasUnreadBoundary = Boolean(
     unreadBoundary &&
@@ -2982,6 +3057,39 @@ function RepositoryConversation({
     hasUnreadBoundary &&
       filteredMessages.some((message) => message.id === unreadBoundary?.messageId),
   );
+
+  // Handle auto-scroll, highlighting, opening drawer, and query cleaning
+  useEffect(() => {
+    if (focusMessageId) {
+      const timer = setTimeout(() => {
+        if (shouldResetFilterForFocus) {
+          setActiveFilter('all');
+        }
+        const element = document.querySelector(`[data-message-id="${focusMessageId}"]`);
+        if (element) {
+          element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+
+          const card = element.querySelector('.bg-card');
+          if (card) {
+            card.classList.add('animate-message-highlight');
+            setTimeout(() => {
+              card.classList.remove('animate-message-highlight');
+            }, 2500);
+          }
+
+          const targetMsg = messages.find((m) => m.id === focusMessageId);
+          if (targetMsg) {
+            onOpenDetail(targetMsg);
+          }
+
+          const nextParams = new URLSearchParams(searchParams);
+          nextParams.delete('messageId');
+          setSearchParams(nextParams, { replace: true });
+        }
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [focusMessageId, messages, onOpenDetail, searchParams, setSearchParams, shouldResetFilterForFocus]);
 
   const handleJumpToUnread = () => {
     if (!hasUnreadBoundary) {
@@ -3029,6 +3137,17 @@ function RepositoryConversation({
 
   return (
     <div className="flex w-full h-full min-h-0 overflow-hidden bg-background">
+      <style>{`
+        @keyframes message-highlight-flash {
+          0% { background-color: transparent; }
+          20% { background-color: hsl(var(--primary) / 0.15); box-shadow: 0 0 16px hsl(var(--primary) / 0.12); border-color: hsl(var(--primary) / 0.4); }
+          80% { background-color: hsl(var(--primary) / 0.15); box-shadow: 0 0 16px hsl(var(--primary) / 0.12); border-color: hsl(var(--primary) / 0.4); }
+          100% { background-color: transparent; }
+        }
+        .animate-message-highlight {
+          animation: message-highlight-flash 2.5s ease-out;
+        }
+      `}</style>
       <div className="flex-1 min-w-0 flex flex-col h-full min-h-0">
       <div className="border-b border-border bg-background px-6 py-3">
         <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-2">
@@ -3087,7 +3206,7 @@ function RepositoryConversation({
                   <ConversationBubble
                     message={message}
                     repository={repository}
-                    onOpenDetail={setSelectedMessage}
+                    onOpenDetail={onOpenDetail}
                     onOpenAgent={onOpenAgent}
                     onApproveMessage={onApproveMessage}
                     onRejectMessage={onRejectMessage}
@@ -3187,15 +3306,6 @@ function RepositoryConversation({
         </div>
       ) : null}
 
-      <MessageDetailSheet
-        message={selectedMessage}
-        repository={repository}
-        onClose={() => setSelectedMessage(null)}
-        onOpenAgent={onOpenAgent}
-        onApproveMessage={onApproveMessage}
-        onRejectMessage={onRejectMessage}
-        approvalActionId={approvalActionId}
-      />
       </div>
 
       {isGitTreeOpen && (
@@ -3634,7 +3744,7 @@ function WatchFeedPreviewDialog({
       }
     }}>
       {item && meta ? (
-        <DialogContent className="max-h-[min(760px,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-3xl gap-0 overflow-hidden rounded-xl border-border bg-background p-0">
+        <DialogContent aria-describedby={undefined} className="max-h-[min(760px,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-3xl gap-0 overflow-hidden rounded-xl border-border bg-background p-0">
           <DialogHeader className="border-b border-border bg-card/80 px-6 py-5 pr-12 text-left">
             <div className="flex items-start gap-4">
               <Avatar className="h-12 w-12 rounded-xl border border-border bg-background">
@@ -6460,6 +6570,7 @@ export function DesktopWorkbench() {
   const [approvalActionId, setApprovalActionId] = useState<string>();
   const [isPrimaryRailCollapsed, setIsPrimaryRailCollapsed] = useState(true);
   const [isRepositorySidebarCollapsed, setIsRepositorySidebarCollapsed] = useState(false);
+  const [selectedMessage, setSelectedMessage] = useState<ConversationMessage | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isBranchMonitorOpen, setIsBranchMonitorOpen] = useState(false);
@@ -6570,6 +6681,11 @@ export function DesktopWorkbench() {
   const notificationsQuery = useNotificationsQuery();
   const unreadNotificationCountQuery = useUnreadNotificationCountQuery();
   const repositories = useMemo(() => repositoriesQuery.data ?? [], [repositoriesQuery.data]);
+
+  const selectedMessageRepository = useMemo(() => {
+    if (!selectedMessage || !selectedMessage.sourceRepositoryId) return undefined;
+    return repositories.find((r) => r.id === selectedMessage.sourceRepositoryId);
+  }, [selectedMessage, repositories]);
 
   // Workbench chat repositories (grouped by editable / monitored-readonly)
   const chatReposQuery = useChatRepositoriesQuery();
@@ -7301,6 +7417,7 @@ export function DesktopWorkbench() {
                 onApproveMessage={handleApproveMessage}
                 onRejectMessage={handleRejectMessage}
                 approvalActionId={approvalActionId}
+                onOpenDetail={setSelectedMessage}
               />
             ) : null}
 
@@ -7378,6 +7495,7 @@ export function DesktopWorkbench() {
           selectedRepository={activeView === 'repository' ? selectedRepository : undefined}
           onQueryChange={setSearchQuery}
           onOpenChange={setIsSearchOpen}
+          onOpenDetail={setSelectedMessage}
         />
         <BranchMonitorSheet
           open={isBranchMonitorOpen}
@@ -7389,6 +7507,15 @@ export function DesktopWorkbench() {
           onToggleRepository={handleToggleSelectedRepositoryMonitoring}
           onToggleBranch={handleToggleSelectedRepositoryBranch}
           onResetBranches={handleResetSelectedRepositoryBranches}
+        />
+        <MessageDetailSheet
+          message={selectedMessage}
+          repository={selectedMessageRepository ?? selectedRepository ?? repositories[0]}
+          onClose={() => setSelectedMessage(null)}
+          onOpenAgent={(prompt) => openAgent(prompt, selectedMessageRepository ?? selectedRepository)}
+          onApproveMessage={handleApproveMessage}
+          onRejectMessage={handleRejectMessage}
+          approvalActionId={approvalActionId}
         />
         <Dialog open={isAddRepositoryOpen} onOpenChange={setIsAddRepositoryOpen}>
           <DialogContent className="max-w-md bg-card border-border text-foreground">
