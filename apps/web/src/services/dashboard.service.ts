@@ -100,6 +100,14 @@ export interface ProjectRiverEventMarker {
   source: 'event';
 }
 
+export interface ProjectRiverHealthSignal {
+  id: string;
+  label: string;
+  severity: 'info' | 'warning' | 'positive';
+  evidence: string;
+  evidenceParams?: Record<string, string | number>;
+}
+
 export interface ProjectRiverDashboardData {
   repositoryId: string;
   generatedAt: string;
@@ -107,6 +115,7 @@ export interface ProjectRiverDashboardData {
   dailyRows: ProjectRiverDailyRow[];
   keyNodes: ProjectRiverKeyNode[];
   eventMarkers: ProjectRiverEventMarker[];
+  healthSignals: ProjectRiverHealthSignal[];
   summary: {
     totalCommits: number;
     totalContributors: number;

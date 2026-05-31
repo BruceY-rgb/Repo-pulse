@@ -1,19 +1,12 @@
 import { useMemo, useRef, useState } from 'react';
-import { extent, max, min } from 'd3-array';
-import { scaleLinear, scaleUtc } from 'd3-scale';
-import {
-  area,
-  curveBasis,
-  stack,
-  stackOffsetWiggle,
-  stackOrderInsideOut,
-} from 'd3-shape';
+import { max, min } from 'd3-array';
 import {
   CalendarDays,
   CheckCircle2,
   ChevronDown,
   CircleAlert,
   Clock,
+  Download,
   ExternalLink,
   GitCommit,
   GitPullRequest,
@@ -31,6 +24,14 @@ import type {
   ProjectRiverKeyNode,
 } from '@/services/dashboard.service';
 import type { Event, Repository } from '@/types/api';
+
+import { ProjectLayout } from './ProjectLayout';
+import type { DockedEdge } from './ProjectLayout';
+import { ProjectRiverStreamgraph } from './ProjectRiverStreamgraph';
+import { HealthSummary } from './HealthSummary';
+import { StreamgraphTooltip } from './StreamgraphTooltip';
+import { EventMarkerTooltip } from './EventMarkerTooltip';
+import { downloadStreamgraphSvg } from '@/utils/svgExport';
 
 type Granularity = 'day' | 'week' | 'month';
 type EventSeverity = 'positive' | 'warning' | 'info';
@@ -622,570 +623,6 @@ function formatChartDate(dateKey: string, granularity: Granularity) {
   return dateKey.slice(5).replace('-', '.');
 }
 
-function ProjectRiverStreamgraph({
-  colorMap,
-  eventMarkers,
-  granularity,
-  highlightedContributor,
-  onHoverContributor,
-  onHoverEvent,
-  onRangeChange,
-  rows,
-  t,
-  visibleRange,
-}: {
-  colorMap: Map<string, string>;
-  eventMarkers: ProjectEventMarker[];
-  granularity: Granularity;
-  highlightedContributor: string | null;
-  onHoverContributor: (payload: StreamgraphTooltipState | null) => void;
-  onHoverEvent: (event: ProjectEventMarker | null) => void;
-  onRangeChange: (range: VisibleRange | null) => void;
-  rows: DailyRow[];
-  t: (key: string, params?: Record<string, string>) => string;
-  visibleRange: VisibleRange | null;
-}) {
-  const { contributors, data: rawData } = useMemo(() => pivotDailyData(rows), [rows]);
-  const data = useMemo(
-    () => padSparsePivotData(rawData, contributors, granularity),
-    [contributors, granularity, rawData],
-  );
-  const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null);
-  const [hoverGuide, setHoverGuide] = useState<{ x: number; y: number } | null>(null);
-  const brushDragRef = useRef<{
-    initialEnd: number;
-    initialStart: number;
-    mode: 'start' | 'end' | 'move' | 'new';
-    startX: number;
-  } | null>(null);
-  const layers = useMemo(() => {
-    if (contributors.length === 0 || data.length === 0) return [];
-    return stack<PivotedRow>()
-      .keys(contributors)
-      .order(stackOrderInsideOut)
-      .offset(stackOffsetWiggle)(data);
-  }, [contributors, data]);
-
-  const chartHeight = STREAM_HEIGHT - STREAM_MARGIN.top - STREAM_MARGIN.bottom - BRUSH_HEIGHT - BRUSH_GAP;
-  const brushTop = STREAM_HEIGHT - BRUSH_HEIGHT;
-  const xDomain = extent(data, (datum) => datum.date);
-  const fullDomainStart = xDomain[0] ?? new Date();
-  const fullDomainEnd = xDomain[1] ?? offsetDate(fullDomainStart, granularity, 1);
-  const chartLeft = STREAM_MARGIN.left;
-  const chartRight = STREAM_WIDTH - STREAM_MARGIN.right;
-  const baseXScale = scaleUtc()
-    .domain([fullDomainStart, fullDomainEnd])
-    .range([chartLeft, chartRight]);
-  const visibleStart = visibleRange ? new Date(`${visibleRange.start}T00:00:00Z`) : fullDomainStart;
-  const visibleEnd = visibleRange ? new Date(`${visibleRange.end}T00:00:00Z`) : fullDomainEnd;
-  const hasValidVisibleRange =
-    visibleRange &&
-    Number.isFinite(visibleStart.getTime()) &&
-    Number.isFinite(visibleEnd.getTime()) &&
-    visibleStart < fullDomainEnd &&
-    visibleEnd > fullDomainStart &&
-    visibleStart < visibleEnd;
-  const visibleDomainStart = hasValidVisibleRange && visibleStart > fullDomainStart ? visibleStart : fullDomainStart;
-  const visibleDomainEnd = hasValidVisibleRange && visibleEnd < fullDomainEnd ? visibleEnd : fullDomainEnd;
-  const yMin = min(layers, (layer) => min(layer, (point) => point[0])) ?? 0;
-  const yMax = max(layers, (layer) => max(layer, (point) => point[1])) ?? 1;
-  const ySpan = yMax - yMin || 1;
-  const xScale = scaleUtc()
-    .domain([visibleDomainStart, visibleDomainEnd])
-    .range([chartLeft, chartRight]);
-  const yScale = scaleLinear()
-    .domain([yMin - ySpan * 0.08, yMax + ySpan * 0.08])
-    .range([STREAM_MARGIN.top + chartHeight, STREAM_MARGIN.top]);
-  const brushYScale = scaleLinear()
-    .domain([yMin - ySpan * 0.08, yMax + ySpan * 0.08])
-    .range([STREAM_HEIGHT - 8, brushTop + 8]);
-  const getMainY1 = (point: readonly [number, number]) => Math.min(yScale(point[1]), yScale(point[0]) - 2);
-  const getBrushY1 = (point: readonly [number, number]) => Math.min(brushYScale(point[1]), brushYScale(point[0]) - 1);
-  const areaGenerator = area<[number, number]>()
-    .x((_, index) => xScale(data[index]?.date ?? new Date()))
-    .y0((point) => yScale(point[0]))
-    .y1((point) => getMainY1(point))
-    .curve(curveBasis);
-  const brushAreaGenerator = area<[number, number]>()
-    .x((_, index) => baseXScale(data[index]?.date ?? new Date()))
-    .y0((point) => brushYScale(point[0]))
-    .y1((point) => getBrushY1(point))
-    .curve(curveBasis);
-  const dateTotals = new Map<string, number>();
-  rows.forEach((row) => {
-    dateTotals.set(row.date, (dateTotals.get(row.date) ?? 0) + row.commits);
-  });
-  const markerByDate = new Map<string, ProjectEventMarker[]>();
-  eventMarkers.forEach((marker) => {
-    if (!marker.selected) return;
-    const list = markerByDate.get(marker.date) ?? [];
-    list.push(marker);
-    markerByDate.set(marker.date, list);
-  });
-  const tickData = getTickData(data);
-  const yTicks = yScale.ticks(5);
-  const spikeDates = Array.from(dateTotals.entries())
-    .filter(([, total]) => total > 0)
-    .sort((left, right) => right[1] - left[1])
-    .slice(0, MAX_SPIKE_MARKERS)
-    .map(([date]) => date);
-  const contributorLabels = layers
-    .map((layer) => {
-      let bestIndex = 0;
-      let maxThickness = 0;
-      layer.forEach((point, index) => {
-        const thickness = Math.abs(yScale(point[0]) - yScale(point[1]));
-        if (thickness > maxThickness) {
-          maxThickness = thickness;
-          bestIndex = index;
-        }
-      });
-      const point = layer[bestIndex];
-      return {
-        contributor: layer.key,
-        maxThickness,
-        x: xScale(data[bestIndex]?.date ?? new Date()),
-        y: point ? (yScale(point[0]) + getMainY1(point)) / 2 : STREAM_MARGIN.top,
-      };
-    })
-    .filter((label) => label.maxThickness >= 16)
-    .sort((left, right) => right.maxThickness - left.maxThickness)
-    .slice(0, MAX_CONTRIBUTOR_LABELS);
-
-  const handleLayerHover = (
-    event: React.MouseEvent<SVGPathElement>,
-    layer: (readonly [number, number])[] & { key: string },
-  ) => {
-    const svg = event.currentTarget.ownerSVGElement;
-    if (!svg) return;
-    const rect = svg.getBoundingClientRect();
-    const viewX = ((event.clientX - rect.left) / rect.width) * STREAM_WIDTH;
-    const hoveredDate = xScale.invert(viewX);
-    const targetTime = hoveredDate.getTime();
-    let nearestIndex = 0;
-    let nearestDelta = Number.POSITIVE_INFINITY;
-    data.forEach((datum, index) => {
-      const delta = Math.abs(datum.date.getTime() - targetTime);
-      if (delta < nearestDelta) {
-        nearestDelta = delta;
-        nearestIndex = index;
-      }
-    });
-
-    const point = layer[nearestIndex];
-    const dateKey = data[nearestIndex]?.dateKey ?? '';
-    const commits = Number(data[nearestIndex]?.[layer.key] ?? 0);
-    const totalCommits = dateTotals.get(dateKey) ?? commits;
-    const y = point ? (yScale(point[0]) + getMainY1(point)) / 2 : STREAM_MARGIN.top;
-    setHoverGuide({ x: xScale(data[nearestIndex]?.date ?? new Date()), y });
-    onHoverContributor({
-      contributor: layer.key,
-      date: dateKey,
-      commits,
-      totalCommits,
-      percentage: totalCommits > 0 ? Math.round((commits / totalCommits) * 100) : 0,
-      x: 18,
-      y: 18,
-    });
-  };
-  const getViewX = (event: React.PointerEvent<SVGRectElement>) => {
-    const svg = event.currentTarget.ownerSVGElement;
-    if (!svg) return chartLeft;
-    const rect = svg.getBoundingClientRect();
-    return clamp(((event.clientX - rect.left) / rect.width) * STREAM_WIDTH, chartLeft, chartRight);
-  };
-  const brushStartPx = clamp(
-    hasValidVisibleRange ? baseXScale(visibleDomainStart) : chartLeft,
-    chartLeft,
-    chartRight,
-  );
-  const brushEndPx = clamp(
-    hasValidVisibleRange ? baseXScale(visibleDomainEnd) : chartRight,
-    chartLeft,
-    chartRight,
-  );
-  const updateRangeFromPixels = (nextStartPx: number, nextEndPx: number) => {
-    const minSpan = 14;
-    let startPx = clamp(Math.min(nextStartPx, nextEndPx), chartLeft, chartRight);
-    let endPx = clamp(Math.max(nextStartPx, nextEndPx), chartLeft, chartRight);
-    if (endPx - startPx < minSpan) {
-      const center = clamp((startPx + endPx) / 2, chartLeft + minSpan / 2, chartRight - minSpan / 2);
-      startPx = center - minSpan / 2;
-      endPx = center + minSpan / 2;
-    }
-    const start = toIsoDate(baseXScale.invert(startPx));
-    const end = toIsoDate(baseXScale.invert(endPx));
-    onRangeChange({ start, end });
-  };
-  const handleBrushPointerDown = (event: React.PointerEvent<SVGRectElement>) => {
-    const x = getViewX(event);
-    const handleThreshold = 12;
-    const selectionStart = Math.min(brushStartPx, brushEndPx);
-    const selectionEnd = Math.max(brushStartPx, brushEndPx);
-    let mode: 'start' | 'end' | 'move' | 'new' = 'new';
-    if (Math.abs(x - selectionStart) <= handleThreshold) {
-      mode = 'start';
-    } else if (Math.abs(x - selectionEnd) <= handleThreshold) {
-      mode = 'end';
-    } else if (x > selectionStart && x < selectionEnd) {
-      mode = 'move';
-    }
-    brushDragRef.current = {
-      initialEnd: selectionEnd,
-      initialStart: selectionStart,
-      mode,
-      startX: x,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    if (mode === 'new') {
-      updateRangeFromPixels(x, x);
-    }
-  };
-  const handleBrushPointerMove = (event: React.PointerEvent<SVGRectElement>) => {
-    const drag = brushDragRef.current;
-    if (!drag) return;
-    const x = getViewX(event);
-    if (drag.mode === 'start') {
-      updateRangeFromPixels(x, drag.initialEnd);
-      return;
-    }
-    if (drag.mode === 'end') {
-      updateRangeFromPixels(drag.initialStart, x);
-      return;
-    }
-    if (drag.mode === 'new') {
-      updateRangeFromPixels(drag.startX, x);
-      return;
-    }
-    const width = drag.initialEnd - drag.initialStart;
-    const delta = x - drag.startX;
-    const nextStart = clamp(drag.initialStart + delta, chartLeft, chartRight - width);
-    updateRangeFromPixels(nextStart, nextStart + width);
-  };
-  const handleBrushPointerUp = (event: React.PointerEvent<SVGRectElement>) => {
-    brushDragRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-  };
-  const clipId = 'repo-pulse-project-river-clip';
-  const revealId = 'repo-pulse-project-river-reveal';
-  const highlightedLayer = highlightedContributor
-    ? layers.find((layer) => layer.key === highlightedContributor)
-    : null;
-
-  if (rows.length === 0) {
-    return (
-      <div className="flex h-full min-h-[420px] items-center justify-center px-6 text-center">
-        <div>
-          <p className="text-sm font-medium text-foreground">{t('projectRiver.empty.noCommitData')}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{t('projectRiver.empty.noCommitHint')}</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <svg
-      className="h-full min-h-[420px] w-full"
-      role="img"
-      viewBox={`0 0 ${STREAM_WIDTH} ${STREAM_HEIGHT}`}
-      onMouseLeave={() => {
-        setHoverGuide(null);
-        onHoverContributor(null);
-      }}
-    >
-      <style>
-        {`
-          .project-river-reveal-rect {
-            transform-box: fill-box;
-            transform-origin: left center;
-            animation: project-river-reveal 760ms cubic-bezier(.22,1,.36,1) both;
-          }
-          .project-river-layer {
-            transition: opacity 160ms ease, filter 160ms ease;
-          }
-          .project-river-layer:hover {
-            filter: saturate(1.18) brightness(1.05);
-          }
-          .project-river-highlight {
-            filter: drop-shadow(0 0 8px color-mix(in srgb, hsl(var(--primary)) 42%, transparent));
-            transition: opacity 120ms ease;
-          }
-          @keyframes project-river-reveal {
-            from { transform: scaleX(0); opacity: .2; }
-            to { transform: scaleX(1); opacity: 1; }
-          }
-          @media (prefers-reduced-motion: reduce) {
-            .project-river-reveal-rect { animation: none; }
-          }
-        `}
-      </style>
-      <defs>
-        <clipPath id={clipId}>
-          <rect
-            height={chartHeight + STREAM_MARGIN.top}
-            width={STREAM_WIDTH - STREAM_MARGIN.left - STREAM_MARGIN.right}
-            x={STREAM_MARGIN.left}
-            y={0}
-          />
-        </clipPath>
-        <clipPath id={revealId}>
-          <rect
-            className="project-river-reveal-rect"
-            height={STREAM_HEIGHT}
-            width={STREAM_WIDTH}
-            x={0}
-            y={0}
-          />
-        </clipPath>
-      </defs>
-      <rect fill="transparent" height={STREAM_HEIGHT} width={STREAM_WIDTH} />
-      <g>
-        {yTicks.map((tick) => {
-          const y = yScale(tick);
-          return (
-            <g key={tick}>
-              <line
-                stroke="hsl(var(--border))"
-                strokeDasharray="4 6"
-                strokeOpacity={0.28}
-                x1={STREAM_MARGIN.left}
-                x2={STREAM_WIDTH - STREAM_MARGIN.right}
-                y1={y}
-                y2={y}
-              />
-              <text
-                fill="hsl(var(--muted-foreground))"
-                fontSize={10}
-                textAnchor="end"
-                x={STREAM_MARGIN.left - 8}
-                y={y + 4}
-              >
-                {Math.round(tick)}
-              </text>
-            </g>
-          );
-        })}
-      </g>
-      <g clipPath={`url(#${clipId})`}>
-        <g clipPath={`url(#${revealId})`}>
-          {spikeDates.map((date) => (
-            <line
-              key={date}
-              stroke="hsl(var(--primary))"
-              strokeDasharray="2 5"
-              strokeOpacity={0.22}
-              x1={xScale(new Date(`${date}T00:00:00Z`))}
-              x2={xScale(new Date(`${date}T00:00:00Z`))}
-              y1={STREAM_MARGIN.top}
-              y2={STREAM_MARGIN.top + chartHeight}
-            />
-          ))}
-          {layers.map((layer, index) => {
-            const isDimmed = Boolean(highlightedContributor && highlightedContributor !== layer.key);
-            return (
-              <path
-                key={layer.key}
-                className="project-river-layer"
-                d={areaGenerator(layer as unknown as [number, number][]) ?? undefined}
-                fill={colorMap.get(layer.key) ?? 'hsl(var(--muted-foreground))'}
-                opacity={isDimmed ? 0.16 : 0.9}
-                stroke="none"
-                style={{ animationDelay: `${index * 24}ms` }}
-                onMouseMove={(event) => handleLayerHover(event, layer)}
-              />
-            );
-          })}
-        </g>
-        {highlightedLayer ? (
-          <path
-            className="project-river-highlight"
-            d={areaGenerator(highlightedLayer as unknown as [number, number][]) ?? undefined}
-            fill="none"
-            opacity={0.92}
-            pointerEvents="none"
-            stroke="hsl(var(--foreground))"
-            strokeWidth={2}
-          />
-        ) : null}
-      </g>
-      {hoverGuide ? (
-        <g pointerEvents="none">
-          <line
-            stroke="hsl(var(--muted-foreground))"
-            strokeDasharray="4 4"
-            strokeOpacity={0.55}
-            x1={STREAM_MARGIN.left}
-            x2={STREAM_WIDTH - STREAM_MARGIN.right}
-            y1={hoverGuide.y}
-            y2={hoverGuide.y}
-          />
-          <line
-            stroke="hsl(var(--primary))"
-            strokeDasharray="3 5"
-            strokeOpacity={0.52}
-            x1={hoverGuide.x}
-            x2={hoverGuide.x}
-            y1={STREAM_MARGIN.top}
-            y2={STREAM_MARGIN.top + chartHeight}
-          />
-        </g>
-      ) : null}
-      <g clipPath={`url(#${clipId})`}>
-        {Array.from(markerByDate.entries()).map(([date, markers], index) => {
-          const x = xScale(new Date(`${date}T00:00:00Z`));
-          const y = STREAM_MARGIN.top + 8 + (index % 3) * 15;
-          const marker = markers[0];
-          return (
-            <g
-              key={`${date}-${marker.id}`}
-              className="cursor-pointer"
-              onMouseEnter={() => {
-                setHoveredMarkerId(marker.id);
-                onHoverEvent(marker);
-              }}
-              onMouseLeave={() => {
-                setHoveredMarkerId(null);
-                onHoverEvent(null);
-              }}
-            >
-              <line
-                stroke="hsl(var(--primary))"
-                strokeDasharray="2 5"
-                strokeOpacity={hoveredMarkerId === marker.id ? 0.8 : 0.42}
-                x1={x}
-                x2={x}
-                y1={STREAM_MARGIN.top}
-                y2={STREAM_MARGIN.top + chartHeight}
-              />
-              <circle
-                className={cn(
-                  'fill-[var(--github-info)]',
-                  marker.severity === 'positive' && 'fill-[var(--github-success)]',
-                  marker.severity === 'warning' && 'fill-[var(--github-warning)]',
-                )}
-                r={hoveredMarkerId === marker.id ? 5 : 3.5}
-                stroke="hsl(var(--background))"
-                strokeWidth={2}
-                cx={x}
-                cy={y}
-              />
-              {markers.length > 1 ? (
-                <text fill="hsl(var(--muted-foreground))" fontSize={9} x={x + 6} y={y + 3}>
-                  {markers.length}
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
-      </g>
-      <g clipPath={`url(#${clipId})`}>
-        {contributorLabels.map((label) => (
-          <text
-            key={label.contributor}
-            fill="hsl(var(--background))"
-            fontSize={11}
-            fontWeight={700}
-            opacity={highlightedContributor && highlightedContributor !== label.contributor ? 0.24 : 0.78}
-            pointerEvents="none"
-            textAnchor="middle"
-            x={label.x}
-            y={label.y + 4}
-          >
-            {contributorLabel(label.contributor, t)}
-          </text>
-        ))}
-      </g>
-      <g>
-        {tickData.map((datum) => (
-          <text
-            key={datum.dateKey}
-            fill="hsl(var(--muted-foreground))"
-            fontSize={10}
-            textAnchor="middle"
-            x={xScale(datum.date)}
-            y={STREAM_MARGIN.top + chartHeight + 18}
-          >
-            {formatChartDate(datum.dateKey, granularity)}
-          </text>
-        ))}
-      </g>
-      <line
-        stroke="hsl(var(--border))"
-        strokeOpacity={0.45}
-        x1={STREAM_MARGIN.left}
-        x2={STREAM_WIDTH - STREAM_MARGIN.right}
-        y1={brushTop - BRUSH_GAP / 2}
-        y2={brushTop - BRUSH_GAP / 2}
-      />
-      <rect
-        fill="hsl(var(--secondary))"
-        fillOpacity={0.38}
-        height={BRUSH_HEIGHT - 8}
-        rx={5}
-        width={STREAM_WIDTH - STREAM_MARGIN.left - STREAM_MARGIN.right}
-        x={STREAM_MARGIN.left}
-        y={brushTop + 4}
-      />
-      <g opacity={0.45}>
-        {layers.map((layer) => (
-          <path
-            key={`brush-${layer.key}`}
-            d={brushAreaGenerator(layer as unknown as [number, number][]) ?? undefined}
-            fill={colorMap.get(layer.key) ?? 'hsl(var(--muted-foreground))'}
-            stroke="none"
-          />
-        ))}
-      </g>
-      <rect
-        fill="hsl(var(--primary))"
-        fillOpacity={0.16}
-        height={BRUSH_HEIGHT - 8}
-        rx={4}
-        stroke="hsl(var(--primary))"
-        strokeOpacity={0.65}
-        width={Math.max(brushEndPx - brushStartPx, 3)}
-        x={brushStartPx}
-        y={brushTop + 4}
-      />
-      {[brushStartPx, brushEndPx].map((x, index) => (
-        <g key={`${x}-${index}`} pointerEvents="none">
-          <rect
-            fill="hsl(var(--muted-foreground))"
-            height={BRUSH_HEIGHT}
-            opacity={0.95}
-            rx={2}
-            width={6}
-            x={x - 3}
-            y={brushTop}
-          />
-          {[brushTop + 18, brushTop + 25, brushTop + 32].map((cy) => (
-            <circle
-              key={cy}
-              cx={x}
-              cy={cy}
-              fill="hsl(var(--background))"
-              opacity={0.55}
-              r={0.9}
-            />
-          ))}
-        </g>
-      ))}
-      <rect
-        className="cursor-ew-resize"
-        fill="transparent"
-        height={BRUSH_HEIGHT}
-        width={STREAM_WIDTH - STREAM_MARGIN.left - STREAM_MARGIN.right}
-        x={STREAM_MARGIN.left}
-        y={brushTop}
-        onDoubleClick={() => onRangeChange(null)}
-        onPointerDown={handleBrushPointerDown}
-        onPointerMove={handleBrushPointerMove}
-        onPointerUp={handleBrushPointerUp}
-      />
-    </svg>
-  );
-}
-
 export function ProjectRiverRepositoryDashboard({
   error,
   events,
@@ -1205,6 +642,14 @@ export function ProjectRiverRepositoryDashboard({
   const [hoveredContributor, setHoveredContributor] = useState<string | null>(null);
   const [streamTooltip, setStreamTooltip] = useState<StreamgraphTooltipState | null>(null);
   const [hoveredEvent, setHoveredEvent] = useState<ProjectEventMarker | null>(null);
+  const [hoveredEventCoords, setHoveredEventCoords] = useState<{ x: number; y: number } | null>(null);
+  const [dockedEdge, setDockedEdge] = useState<DockedEdge>(() => {
+    if (typeof window === 'undefined') return 'bottom';
+    const saved = localStorage.getItem('pr:dockedEdge');
+    return saved !== null ? (saved === 'null' ? null : (saved as DockedEdge)) : 'bottom';
+  });
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
   const dailyRows = useMemo(
     () => riverData?.dailyRows ?? buildDailyRows(events),
     [events, riverData],
@@ -1218,10 +663,23 @@ export function ProjectRiverRepositoryDashboard({
     }
     return buildProjectEvents(events, granularity);
   }, [events, granularity, riverData, t]);
-  const eventTypes = useMemo(
-    () => Array.from(new Set(baseProjectEvents.map((event) => event.type))).sort(),
-    [baseProjectEvents],
-  );
+  const eventTypes = useMemo(() => {
+    return [
+      'push',
+      'pull_request',
+      'issue',
+      'release',
+      'security',
+      'contributor_first_commit',
+      'contributor_exit',
+      'activity_spike',
+      'activity_drop',
+      'major_refactor',
+      'commit_milestone',
+      'project_start',
+      'project_archived',
+    ];
+  }, []);
   const [disabledTypes, setDisabledTypes] = useState<Set<string>>(() => new Set());
   const selectedTypes = useMemo(
     () => new Set(eventTypes.filter((type) => !disabledTypes.has(type))),
@@ -1273,6 +731,13 @@ export function ProjectRiverRepositoryDashboard({
     () => aggregateRows(topNRows, granularity),
     [granularity, topNRows],
   );
+  const hoveredRow = useMemo(() => {
+    if (!streamTooltip) return null;
+    return aggregatedRows.find(
+      (r) => r.contributor === streamTooltip.contributor && r.date === streamTooltip.date
+    );
+  }, [streamTooltip, aggregatedRows]);
+
   const colorMap = useMemo(() => getContributorColors(topNRows), [topNRows]);
   const projectEvents = useMemo(
     () => baseProjectEvents.map((event) => ({
@@ -1321,6 +786,25 @@ export function ProjectRiverRepositoryDashboard({
   const topLabel = `${t('projectRiver.topLabel')} ${effectiveTopN}`;
   const timeLabel = selectedYear ?? t('projectRiver.allHistory');
 
+  const handleExportSvg = () => {
+    if (!svgRef.current) return;
+    const filename = `${repository?.name ?? 'repository'}-river-streamgraph.svg`;
+    const contributorNames = contributors.map((c) => c.contributor);
+    const metadata = {
+      projectName: repository?.fullName ?? 'Repository Dashboard',
+      dateRange: formatDateRange(dailyRows),
+      healthSignals: (riverData?.healthSignals ?? []).map((sig) => ({
+        label: t(sig.label),
+        severity: sig.severity,
+      })),
+      localeStrings: {
+        more: language === 'zh' ? '以及其他 {count} 位贡献者' : '+{count} more contributors',
+      },
+    };
+    const isDarkTheme = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+    downloadStreamgraphSvg(svgRef.current, filename, contributorNames, colorMap, metadata, isDarkTheme);
+  };
+
   if (isLoading) {
     return (
       <div className="flex min-h-[520px] items-center justify-center text-sm text-muted-foreground">
@@ -1352,14 +836,25 @@ export function ProjectRiverRepositoryDashboard({
               {t('projectRiver.subtitle')}
             </p>
           </div>
-          {repository?.url ? (
-            <Button asChild variant="outline" size="sm" className="gap-2">
-              <a href={repository.url} target="_blank" rel="noreferrer">
-                <ExternalLink className="h-4 w-4" />
-                {t('projectRiver.openGithub')}
-              </a>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={handleExportSvg}
+            >
+              <Download className="h-4 w-4" />
+              {t('projectRiver.exportSvg')}
             </Button>
-          ) : null}
+            {repository?.url ? (
+              <Button asChild variant="outline" size="sm" className="gap-2">
+                <a href={repository.url} target="_blank" rel="noreferrer">
+                  <ExternalLink className="h-4 w-4" />
+                  {t('projectRiver.openGithub')}
+                </a>
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
@@ -1388,22 +883,25 @@ export function ProjectRiverRepositoryDashboard({
           ) : null}
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Badge className="badge-info gap-1.5">
-            <CheckCircle2 className="h-3 w-3" />
-            {t('projectRiver.signal.coverage')}: {t('projectRiver.topLabel')} {effectiveTopN}
-          </Badge>
-          {highRiskEvents > 0 ? (
-            <Badge className="badge-warning gap-1.5">
-              <CircleAlert className="h-3 w-3" />
-              {t('projectRiver.signal.warning')}: {highRiskEvents}
-            </Badge>
-          ) : (
-            <Badge className="badge-success gap-1.5">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap gap-2">
+            <Badge className="badge-info gap-1.5">
               <CheckCircle2 className="h-3 w-3" />
-              {t('projectRiver.signal.stable')}
+              {t('projectRiver.signal.coverage')}: {t('projectRiver.topLabel')} {effectiveTopN}
             </Badge>
-          )}
+            {highRiskEvents > 0 ? (
+              <Badge className="badge-warning gap-1.5">
+                <CircleAlert className="h-3 w-3" />
+                {t('projectRiver.signal.warning')}: {highRiskEvents}
+              </Badge>
+            ) : (
+              <Badge className="badge-success gap-1.5">
+                <CheckCircle2 className="h-3 w-3" />
+                {t('projectRiver.signal.stable')}
+              </Badge>
+            )}
+          </div>
+          <HealthSummary signals={riverData?.healthSignals} />
         </div>
       </header>
 
@@ -1598,157 +1096,289 @@ export function ProjectRiverRepositoryDashboard({
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card">
-          <div className="relative min-h-[420px] flex-[1.15] overflow-hidden border-b border-border bg-card">
-              <ProjectRiverStreamgraph
-                colorMap={colorMap}
-                eventMarkers={projectEvents}
-                granularity={granularity}
-                highlightedContributor={hoveredContributor}
-                onHoverContributor={(payload) => {
-                  setStreamTooltip(payload);
-                  setHoveredContributor(payload?.contributor ?? null);
-                }}
-                onHoverEvent={setHoveredEvent}
-                onRangeChange={setVisibleRange}
-                rows={aggregatedRows}
-                t={t}
-                visibleRange={visibleRange}
-              />
-              {streamTooltip ? (
-                <div className="pointer-events-none absolute left-4 top-4 z-20 min-w-44 rounded-lg border border-border bg-background/95 px-3 py-2 text-xs shadow-xl backdrop-blur">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="max-w-40 truncate font-semibold text-foreground">
-                      {contributorLabel(streamTooltip.contributor, t)}
-                    </span>
-                    <span className="text-[var(--github-info)]">{streamTooltip.percentage}%</span>
-                  </div>
-                  <p className="mt-1 text-muted-foreground">{streamTooltip.date}</p>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <span className="text-muted-foreground">{t('projectRiver.tooltip.commits')}</span>
-                    <span className="text-right font-medium text-foreground">{streamTooltip.commits}</span>
-                    <span className="text-muted-foreground">{t('projectRiver.tooltip.total')}</span>
-                    <span className="text-right font-medium text-foreground">{streamTooltip.totalCommits}</span>
-                  </div>
-                </div>
-              ) : null}
-              {hoveredEvent ? (
-                <div className="pointer-events-none absolute right-4 top-4 z-20 max-w-xs rounded-lg border border-border bg-background/95 px-3 py-2 text-xs shadow-xl backdrop-blur">
-                  <div className="flex items-center gap-2">
-                    <span className={cn('h-2 w-2 rounded-full', severityClass(hoveredEvent.severity))} />
-                    <span className="font-semibold text-foreground">{eventTypeLabel(hoveredEvent.type, t)}</span>
-                  </div>
-                  <p className="mt-1 truncate text-muted-foreground">{hoveredEvent.title}</p>
-                  <p className="mt-1 line-clamp-2 text-muted-foreground">{hoveredEvent.description}</p>
-                  <p className="mt-1 text-muted-foreground">{hoveredEvent.date}</p>
-                </div>
-              ) : null}
-          </div>
-
-          <section className="flex min-h-[260px] flex-[0.85] flex-col overflow-hidden bg-card">
-            <div className="border-b border-border px-4 py-3">
-              <div className="flex items-center gap-2">
-                <Layers3 className="h-4 w-4 text-primary" />
-                <p className="text-xs font-semibold uppercase tracking-wider text-foreground">
-                  {t('projectRiver.eventsPanel')}
-                </p>
-                <Badge variant="outline" className="ml-auto rounded-full text-[10px]">
-                  {visibleEvents.length}/{baseProjectEvents.length}
-                </Badge>
+        <div className="flex-1 min-h-0 relative">
+          <ProjectLayout
+            dockedEdge={dockedEdge}
+            onDockEdgeChange={(edge) => {
+              setDockedEdge(edge);
+              localStorage.setItem('pr:dockedEdge', edge === null ? 'null' : edge);
+            }}
+            chart={
+              <div className="relative w-full h-full min-h-0 bg-background/25 rounded-xl border border-border overflow-hidden">
+                <ProjectRiverStreamgraph
+                  svgRef={svgRef}
+                  colorMap={colorMap}
+                  eventMarkers={projectEvents}
+                  granularity={granularity}
+                  highlightedContributor={hoveredContributor}
+                  onHoverContributor={(payload) => {
+                    setStreamTooltip(payload);
+                    setHoveredContributor(payload?.contributor ?? null);
+                  }}
+                  onHoverEvent={(event, coords) => {
+                    setHoveredEvent(event);
+                    setHoveredEventCoords(coords);
+                  }}
+                  onRangeChange={setVisibleRange}
+                  rows={aggregatedRows}
+                  t={t}
+                  visibleRange={visibleRange}
+                />
+                <StreamgraphTooltip
+                  visible={Boolean(streamTooltip)}
+                  x={streamTooltip?.x ?? 0}
+                  y={streamTooltip?.y ?? 0}
+                  contributor={streamTooltip?.contributor ?? ''}
+                  date={streamTooltip?.date ?? ''}
+                  commits={streamTooltip?.commits ?? 0}
+                  linesAdded={hoveredRow?.linesAdded ?? 0}
+                  linesDeleted={hoveredRow?.linesDeleted ?? 0}
+                  filesTouched={hoveredRow?.filesTouched ?? 0}
+                  percentage={streamTooltip?.percentage ?? 0}
+                  totalCommits={streamTooltip?.totalCommits ?? 0}
+                  granularity={granularity}
+                />
+                <EventMarkerTooltip
+                  visible={Boolean(hoveredEvent && hoveredEventCoords)}
+                  x={hoveredEventCoords?.x ?? 0}
+                  y={hoveredEventCoords?.y ?? 0}
+                  event={hoveredEvent}
+                />
               </div>
-            </div>
-            <div className="max-h-[210px] min-h-[150px] shrink-0 overflow-y-auto border-b border-border">
-              {visibleEvents.length > 0 ? visibleEvents.map((event) => (
-                <div
-                  key={event.id}
-                  className="flex cursor-default items-start gap-3 border-b border-border/60 px-4 py-3 last:border-b-0 hover:bg-secondary/60"
-                  onMouseEnter={() => setHoveredEvent(event)}
-                  onMouseLeave={() => setHoveredEvent(null)}
-                >
-                  <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', severityClass(event.severity))} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] tabular-nums text-muted-foreground">
-                        {event.date.replace(/-/g, '.')}
-                      </span>
-                      <span className="text-[10px] font-medium text-primary">
-                        {eventTypeLabel(event.type, t)}
-                      </span>
+            }
+            panel={
+              dockedEdge === 'bottom' || dockedEdge === 'top' ? (
+                <div className="flex h-full flex-row overflow-hidden divide-x divide-border bg-card/40">
+                  {/* Column 1: Events Log */}
+                  <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+                    <div className="border-b border-border px-4 py-2 shrink-0">
+                      <div className="flex items-center gap-2">
+                        <Layers3 className="h-4 w-4 text-primary" />
+                        <p className="text-xs font-semibold uppercase tracking-wider text-foreground">
+                          {t('projectRiver.eventsPanel')}
+                        </p>
+                        <Badge variant="outline" className="ml-auto rounded-full text-[10px]">
+                          {visibleEvents.length}/{baseProjectEvents.length}
+                        </Badge>
+                      </div>
                     </div>
-                    <p className="mt-1 truncate text-xs text-foreground">{event.title}</p>
-                    <p className="mt-1 truncate text-[11px] text-muted-foreground">{event.description}</p>
+                    <div className="flex-1 overflow-y-auto">
+                      {visibleEvents.length > 0 ? visibleEvents.map((event) => (
+                        <div
+                          key={event.id}
+                          className="flex cursor-default items-start gap-3 border-b border-border/60 px-4 py-2 last:border-b-0 hover:bg-secondary/60"
+                          onMouseEnter={(e) => {
+                            setHoveredEvent(event);
+                            setHoveredEventCoords({ x: e.clientX, y: e.clientY });
+                          }}
+                          onMouseLeave={() => {
+                            setHoveredEvent(null);
+                            setHoveredEventCoords(null);
+                          }}
+                        >
+                          <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', severityClass(event.severity))} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] tabular-nums text-muted-foreground">
+                                {event.date.replace(/-/g, '.')}
+                              </span>
+                              <span className="text-[10px] font-medium text-primary">
+                                {eventTypeLabel(event.type, t)}
+                              </span>
+                            </div>
+                            <p className="mt-1 truncate text-xs text-foreground">{event.title}</p>
+                            <p className="mt-1 truncate text-[11px] text-muted-foreground">{event.description}</p>
+                          </div>
+                        </div>
+                      )) : (
+                        <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+                          {t('projectRiver.eventsEmpty')}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )) : (
-                <div className="px-4 py-8 text-center text-xs text-muted-foreground">
-                  {t('projectRiver.eventsEmpty')}
-                </div>
-              )}
-            </div>
 
-            <div className="border-b border-border px-4 py-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <GitPullRequest className="h-4 w-4 text-primary" />
-                  <p className="text-xs font-semibold uppercase tracking-wider text-foreground">
-                    {selectedYear ?? t('projectRiver.allHistory')}
-                  </p>
-                </div>
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-              </div>
-              <div className="mt-3 grid grid-cols-3 gap-3">
-                <div>
-                  <p className="text-[10px] text-muted-foreground">{t('projectRiver.commits')}</p>
-                  <p className="text-xl font-semibold tabular-nums text-foreground">{commitTotal}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground">{t('projectRiver.activeContributors')}</p>
-                  <p className="text-xl font-semibold tabular-nums text-foreground">
-                    {contributors.filter((contributor) => contributor.monthlyCommits > 0).length}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground">{t('projectRiver.activeDays')}</p>
-                  <p className="text-xl font-semibold tabular-nums text-foreground">
-                    {activeDays.active}
-                    <span className="text-xs font-normal text-muted-foreground">/{activeDays.total}</span>
-                  </p>
-                </div>
-              </div>
-            </div>
+                  {/* Column 2: Overview Stats */}
+                  <div className="w-80 shrink-0 flex flex-col h-full overflow-hidden">
+                    <div className="border-b border-border px-4 py-2 shrink-0">
+                      <div className="flex items-center gap-2">
+                        <GitPullRequest className="h-4 w-4 text-primary" />
+                        <p className="text-xs font-semibold uppercase tracking-wider text-foreground">
+                          {selectedYear ?? t('projectRiver.allHistory')}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex-1 p-3 flex flex-col justify-center">
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">{t('projectRiver.commits')}</p>
+                          <p className="text-base font-semibold tabular-nums text-foreground">{commitTotal}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">{t('projectRiver.activeContributors')}</p>
+                          <p className="text-base font-semibold tabular-nums text-foreground">
+                            {contributors.filter((contributor) => contributor.monthlyCommits > 0).length}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">{t('projectRiver.activeDays')}</p>
+                          <p className="text-base font-semibold tabular-nums text-foreground">
+                            {activeDays.active}
+                            <span className="text-xs font-normal text-muted-foreground">/{activeDays.total}</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-              <div className="mb-2 flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                <span>{t('projectRiver.contributors')}</span>
-                <span>{t('projectRiver.total')}</span>
-              </div>
-              {contributors.map((contributor, index) => (
-                <div
-                  key={contributor.contributor}
-                  className="flex items-center justify-between gap-3 rounded-md px-2 py-2 hover:bg-secondary/60"
-                  onMouseEnter={() => setHoveredContributor(contributor.contributor)}
-                  onMouseLeave={() => setHoveredContributor(null)}
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="w-5 text-right text-[10px] tabular-nums text-muted-foreground">{index + 1}</span>
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                      style={{ backgroundColor: contributor.color }}
-                    />
-                    <span className="truncate text-sm text-foreground">
-                      {contributorLabel(contributor.contributor, t)}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs">
-                    <span className="font-semibold tabular-nums text-foreground">{contributor.monthlyCommits}</span>
-                    <span className="w-10 text-right tabular-nums text-muted-foreground">
-                      {contributor.cumulativeCommits}
-                    </span>
+                  {/* Column 3: Contributors */}
+                  <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+                    <div className="border-b border-border px-4 py-2 shrink-0 flex items-center justify-between">
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{t('projectRiver.contributors')}</span>
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{t('projectRiver.total')}</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto px-2 py-3">
+                      {contributors.map((contributor, index) => (
+                        <div
+                          key={contributor.contributor}
+                          className="flex items-center justify-between gap-3 rounded-md px-2 py-1 hover:bg-secondary/60"
+                          onMouseEnter={() => setHoveredContributor(contributor.contributor)}
+                          onMouseLeave={() => setHoveredContributor(null)}
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="w-5 text-right text-[10px] tabular-nums text-muted-foreground">{index + 1}</span>
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                              style={{ backgroundColor: contributor.color }}
+                            />
+                            <span className="truncate text-sm text-foreground">
+                              {contributorLabel(contributor.contributor, t)}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 text-xs">
+                            <span className="font-semibold tabular-nums text-foreground">{contributor.monthlyCommits}</span>
+                            <span className="w-10 text-right tabular-nums text-muted-foreground">
+                              {contributor.cumulativeCommits}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              ))}
-            </div>
-          </section>
+              ) : (
+                <div className="flex h-full flex-col overflow-hidden">
+                  <div className="border-b border-border px-4 py-3 shrink-0">
+                    <div className="flex items-center gap-2">
+                      <Layers3 className="h-4 w-4 text-primary" />
+                      <p className="text-xs font-semibold uppercase tracking-wider text-foreground">
+                        {t('projectRiver.eventsPanel')}
+                      </p>
+                      <Badge variant="outline" className="ml-auto rounded-full text-[10px]">
+                        {visibleEvents.length}/{baseProjectEvents.length}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="max-h-[200px] min-h-[120px] shrink-0 overflow-y-auto border-b border-border">
+                    {visibleEvents.length > 0 ? visibleEvents.map((event) => (
+                      <div
+                        key={event.id}
+                        className="flex cursor-default items-start gap-3 border-b border-border/60 px-4 py-3 last:border-b-0 hover:bg-secondary/60"
+                        onMouseEnter={(e) => {
+                          setHoveredEvent(event);
+                          setHoveredEventCoords({ x: e.clientX, y: e.clientY });
+                        }}
+                        onMouseLeave={() => {
+                          setHoveredEvent(null);
+                          setHoveredEventCoords(null);
+                        }}
+                      >
+                        <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', severityClass(event.severity))} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] tabular-nums text-muted-foreground">
+                              {event.date.replace(/-/g, '.')}
+                            </span>
+                            <span className="text-[10px] font-medium text-primary">
+                              {eventTypeLabel(event.type, t)}
+                            </span>
+                          </div>
+                          <p className="mt-1 truncate text-xs text-foreground">{event.title}</p>
+                          <p className="mt-1 truncate text-[11px] text-muted-foreground">{event.description}</p>
+                        </div>
+                      </div>
+                    )) : (
+                      <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+                        {t('projectRiver.eventsEmpty')}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="border-b border-border px-4 py-3 shrink-0">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <GitPullRequest className="h-4 w-4 text-primary" />
+                        <p className="text-xs font-semibold uppercase tracking-wider text-foreground">
+                          {selectedYear ?? t('projectRiver.allHistory')}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-3">
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">{t('projectRiver.commits')}</p>
+                        <p className="text-base font-semibold tabular-nums text-foreground">{commitTotal}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">{t('projectRiver.activeContributors')}</p>
+                        <p className="text-base font-semibold tabular-nums text-foreground">
+                          {contributors.filter((contributor) => contributor.monthlyCommits > 0).length}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">{t('projectRiver.activeDays')}</p>
+                        <p className="text-base font-semibold tabular-nums text-foreground">
+                          {activeDays.active}
+                          <span className="text-xs font-normal text-muted-foreground">/{activeDays.total}</span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                    <div className="mb-2 flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                      <span>{t('projectRiver.contributors')}</span>
+                      <span>{t('projectRiver.total')}</span>
+                    </div>
+                    {contributors.map((contributor, index) => (
+                      <div
+                        key={contributor.contributor}
+                        className="flex items-center justify-between gap-3 rounded-md px-2 py-2 hover:bg-secondary/60"
+                        onMouseEnter={() => setHoveredContributor(contributor.contributor)}
+                        onMouseLeave={() => setHoveredContributor(null)}
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="w-5 text-right text-[10px] tabular-nums text-muted-foreground">{index + 1}</span>
+                          <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                            style={{ backgroundColor: contributor.color }}
+                          />
+                          <span className="truncate text-sm text-foreground">
+                            {contributorLabel(contributor.contributor, t)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs">
+                          <span className="font-semibold tabular-nums text-foreground">{contributor.monthlyCommits}</span>
+                          <span className="w-10 text-right tabular-nums text-muted-foreground">
+                            {contributor.cumulativeCommits}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            }
+          />
         </div>
       </div>
     </div>

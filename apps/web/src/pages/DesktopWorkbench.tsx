@@ -348,6 +348,7 @@ const COLLAPSED_REPOSITORY_SIDEBAR_WIDTH = 68;
 const MIN_REPOSITORY_SIDEBAR_WIDTH = 260;
 const MAX_REPOSITORY_SIDEBAR_WIDTH = 440;
 const SIDEBAR_KEYBOARD_STEP = 12;
+const REPOSITORY_SIDEBAR_WIDTH_STORAGE_KEY = 'repo-pulse:repository-sidebar-width';
 const CONTEXT_MENU_VIEWPORT_PADDING = 12;
 const REPOSITORY_CONTEXT_MENU_WIDTH = 280;
 const REPOSITORY_CONTEXT_MENU_ESTIMATED_HEIGHT = 420;
@@ -356,6 +357,20 @@ const MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT = 136;
 
 function clampRepositorySidebarWidth(width: number) {
   return Math.min(MAX_REPOSITORY_SIDEBAR_WIDTH, Math.max(MIN_REPOSITORY_SIDEBAR_WIDTH, width));
+}
+
+function getInitialRepositorySidebarWidth() {
+  if (typeof window === 'undefined') {
+    return DEFAULT_REPOSITORY_SIDEBAR_WIDTH;
+  }
+  const storedValue = localStorage.getItem(REPOSITORY_SIDEBAR_WIDTH_STORAGE_KEY);
+  if (!storedValue) {
+    return DEFAULT_REPOSITORY_SIDEBAR_WIDTH;
+  }
+  const storedWidth = Number(storedValue);
+  return Number.isFinite(storedWidth)
+    ? clampRepositorySidebarWidth(storedWidth)
+    : DEFAULT_REPOSITORY_SIDEBAR_WIDTH;
 }
 
 function getSafeContextMenuPosition(
@@ -1113,6 +1128,117 @@ function PrimaryRail({
   );
 }
 
+function RepositorySidebarResizeHandle({
+  width,
+  isResizing,
+  onStart,
+  onMove,
+  onEnd,
+  onReset,
+  onSetWidth,
+}: {
+  width: number;
+  isResizing: boolean;
+  onStart: () => void;
+  onMove: (delta: number) => void;
+  onEnd: () => void;
+  onReset: () => void;
+  onSetWidth: (width: number) => void;
+}) {
+  const isDraggingRef = useRef(false);
+  const startXRef = useRef(0);
+
+  const finishResize = (event: PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingRef.current) {
+      return;
+    }
+
+    isDraggingRef.current = false;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    onEnd();
+  };
+
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    isDraggingRef.current = true;
+    startXRef.current = event.clientX;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    onStart();
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingRef.current) {
+      return;
+    }
+
+    const delta = event.clientX - startXRef.current;
+    startXRef.current = event.clientX;
+    onMove(delta);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      onMove(-SIDEBAR_KEYBOARD_STEP);
+      onEnd();
+      return;
+    }
+
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      onMove(SIDEBAR_KEYBOARD_STEP);
+      onEnd();
+      return;
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault();
+      onSetWidth(MIN_REPOSITORY_SIDEBAR_WIDTH);
+      onEnd();
+      return;
+    }
+
+    if (event.key === 'End') {
+      event.preventDefault();
+      onSetWidth(MAX_REPOSITORY_SIDEBAR_WIDTH);
+      onEnd();
+    }
+  };
+
+  return (
+    <div
+      className={cn(
+        'desktop-no-drag absolute bottom-0 right-[-6px] top-0 z-40 flex h-full w-3 shrink-0 touch-none select-none items-center justify-center border-x border-transparent bg-transparent text-muted-foreground/60 transition-colors hover:bg-primary/10 hover:text-primary focus:bg-primary/15 focus:text-primary focus:outline-none',
+        isResizing && 'bg-primary/10 text-primary',
+      )}
+      role="separator"
+      tabIndex={0}
+      aria-orientation="vertical"
+      aria-valuemin={MIN_REPOSITORY_SIDEBAR_WIDTH}
+      aria-valuemax={MAX_REPOSITORY_SIDEBAR_WIDTH}
+      aria-valuenow={width}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={finishResize}
+      onPointerCancel={finishResize}
+      onLostPointerCapture={finishResize}
+      onDoubleClick={onReset}
+      onKeyDown={handleKeyDown}
+    >
+      <svg width="7" height="24" viewBox="0 0 7 24" fill="none" aria-hidden="true">
+        <circle cx="2" cy="5" r="1.2" fill="currentColor" />
+        <circle cx="2" cy="12" r="1.2" fill="currentColor" />
+        <circle cx="2" cy="19" r="1.2" fill="currentColor" />
+        <circle cx="5" cy="5" r="1.2" fill="currentColor" />
+        <circle cx="5" cy="12" r="1.2" fill="currentColor" />
+        <circle cx="5" cy="19" r="1.2" fill="currentColor" />
+      </svg>
+    </div>
+  );
+}
+
 function RepositorySidebar({
   editableRepos,
   monitoredRepos,
@@ -1150,17 +1276,14 @@ function RepositorySidebar({
   onFilterByType: (repository: Repository, type: string) => void;
   newlyMonitoredRepoIds?: Set<string>;
 }) {
-  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_REPOSITORY_SIDEBAR_WIDTH);
+  const [sidebarWidth, setSidebarWidth] = useState(getInitialRepositorySidebarWidth);
   const [isResizing, setIsResizing] = useState(false);
   const [contextMenu, setContextMenu] = useState<RepositoryContextMenuState | null>(null);
   const [repositorySearch, setRepositorySearch] = useState('');
   const optimisticReadAtByRepository = useWorkbenchUnreadStore(
     (state) => state.optimisticReadAtByRepository,
   );
-  const resizeStartRef = useRef({
-    clientX: 0,
-    width: DEFAULT_REPOSITORY_SIDEBAR_WIDTH,
-  });
+  const sidebarWidthRef = useRef(sidebarWidth);
   const normalizedRepositorySearch = repositorySearch.trim().toLowerCase();
 
   const filterBySearch = (items: ChatRepositoryItem[]) =>
@@ -1214,6 +1337,10 @@ function RepositorySidebar({
   }
 
   useEffect(() => {
+    sidebarWidthRef.current = sidebarWidth;
+  }, [sidebarWidth]);
+
+  useEffect(() => {
     if (!isResizing) {
       return;
     }
@@ -1221,25 +1348,12 @@ function RepositorySidebar({
     const previousCursor = document.body.style.cursor;
     const previousUserSelect = document.body.style.userSelect;
 
-    function handlePointerMove(event: globalThis.PointerEvent) {
-      const delta = event.clientX - resizeStartRef.current.clientX;
-      setSidebarWidth(clampRepositorySidebarWidth(resizeStartRef.current.width + delta));
-    }
-
-    function handlePointerUp() {
-      setIsResizing(false);
-    }
-
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
 
     return () => {
       document.body.style.cursor = previousCursor;
       document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
     };
   }, [isResizing]);
 
@@ -1256,46 +1370,20 @@ function RepositorySidebar({
     return () => window.removeEventListener('click', close);
   }, [contextMenu]);
 
-  const handleResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (collapsed) {
-      return;
-    }
-
-    event.preventDefault();
-    resizeStartRef.current = {
-      clientX: event.clientX,
-      width: sidebarWidth,
-    };
-    setIsResizing(true);
+  const updateSidebarWidth = (width: number) => {
+    const nextWidth = clampRepositorySidebarWidth(width);
+    sidebarWidthRef.current = nextWidth;
+    setSidebarWidth(nextWidth);
   };
 
-  const handleResizeKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (collapsed) {
-      return;
-    }
+  const persistSidebarWidth = () => {
+    localStorage.setItem(REPOSITORY_SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidthRef.current));
+    setIsResizing(false);
+  };
 
-    if (event.key === 'ArrowLeft') {
-      event.preventDefault();
-      setSidebarWidth((current) => clampRepositorySidebarWidth(current - SIDEBAR_KEYBOARD_STEP));
-      return;
-    }
-
-    if (event.key === 'ArrowRight') {
-      event.preventDefault();
-      setSidebarWidth((current) => clampRepositorySidebarWidth(current + SIDEBAR_KEYBOARD_STEP));
-      return;
-    }
-
-    if (event.key === 'Home') {
-      event.preventDefault();
-      setSidebarWidth(MIN_REPOSITORY_SIDEBAR_WIDTH);
-      return;
-    }
-
-    if (event.key === 'End') {
-      event.preventDefault();
-      setSidebarWidth(MAX_REPOSITORY_SIDEBAR_WIDTH);
-    }
+  const resetSidebarWidth = () => {
+    updateSidebarWidth(DEFAULT_REPOSITORY_SIDEBAR_WIDTH);
+    localStorage.setItem(REPOSITORY_SIDEBAR_WIDTH_STORAGE_KEY, String(DEFAULT_REPOSITORY_SIDEBAR_WIDTH));
   };
 
   function renderRepoListItem(item: ChatRepositoryItem, kind: 'editable' | 'monitored-readonly') {
@@ -1653,20 +1741,15 @@ function RepositorySidebar({
           )}
         </div>
       </ScrollArea>
-      <div
-        className="desktop-no-drag group absolute bottom-0 right-[-5px] top-0 z-40 w-2 cursor-col-resize outline-none"
-        role="separator"
-        tabIndex={0}
-        aria-orientation="vertical"
-        aria-valuemin={MIN_REPOSITORY_SIDEBAR_WIDTH}
-        aria-valuemax={MAX_REPOSITORY_SIDEBAR_WIDTH}
-        aria-valuenow={sidebarWidth}
-        onPointerDown={handleResizePointerDown}
-        onDoubleClick={() => setSidebarWidth(DEFAULT_REPOSITORY_SIDEBAR_WIDTH)}
-        onKeyDown={handleResizeKeyDown}
-      >
-        <span className="absolute right-[3px] top-0 h-full w-px bg-transparent transition-colors group-hover:bg-primary/50 group-focus-visible:bg-primary" />
-      </div>
+      <RepositorySidebarResizeHandle
+        width={sidebarWidth}
+        isResizing={isResizing}
+        onStart={() => setIsResizing(true)}
+        onMove={(delta) => updateSidebarWidth(sidebarWidthRef.current + delta)}
+        onEnd={persistSidebarWidth}
+        onReset={resetSidebarWidth}
+        onSetWidth={updateSidebarWidth}
+      />
       {contextMenu ? (
         <div
           className="fixed z-50 w-[280px] overflow-y-auto rounded-2xl border border-border bg-popover/95 p-2 shadow-2xl backdrop-blur"

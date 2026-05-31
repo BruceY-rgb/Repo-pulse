@@ -11,6 +11,11 @@ import {
   ProjectRiverKeyNode,
   ProjectRiverSeverity,
 } from './project-river-detector';
+import {
+  calculateHealthStats,
+  evaluateHealthRules,
+  HealthSignal,
+} from './health-rules';
 
 type JsonRecord = Record<string, Prisma.JsonValue>;
 
@@ -46,6 +51,7 @@ export interface ProjectRiverDashboardPayload {
   dailyRows: ProjectRiverDailyRow[];
   keyNodes: ProjectRiverKeyNode[];
   eventMarkers: ProjectRiverEventMarker[];
+  healthSignals: HealthSignal[];
   summary: {
     totalCommits: number;
     totalContributors: number;
@@ -703,6 +709,10 @@ export class DashboardService {
       commitMilestones: [10, 50, 100, 500, 1000, 5000, 10000],
       minDataDaysForMutation: 7,
     });
+
+    const healthStats = calculateHealthStats(dailyRows);
+    const healthSignals = evaluateHealthRules(healthStats);
+
     const expiresAt = now + PROJECT_RIVER_CACHE_TTL_MS;
     const payload: ProjectRiverDashboardPayload = {
       repositoryId,
@@ -711,6 +721,7 @@ export class DashboardService {
       dailyRows,
       keyNodes,
       eventMarkers: buildEventMarkers(events),
+      healthSignals,
       summary: {
         totalCommits,
         totalContributors: new Set(dailyRows.map((row) => row.contributor)).size,
