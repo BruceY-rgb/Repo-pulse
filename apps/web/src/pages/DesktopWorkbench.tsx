@@ -433,6 +433,35 @@ function isMessageCoveredByRead(messageAt?: string | null, readAt?: string | nul
   return messageAtMs <= readAtMs;
 }
 
+function HighlightText({ text, query }: { text: string; query: string }) {
+  if (!query || !query.trim() || !text) {
+    return <>{text}</>;
+  }
+  const terms = query.trim().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) {
+    return <>{text}</>;
+  }
+
+  const escapedTerms = terms.map(term => term.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'));
+  const regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
+  const parts = text.split(regex);
+
+  return (
+    <>
+      {parts.map((part, index) =>
+        regex.test(part) ? (
+          <mark key={index} className="bg-primary/20 text-primary font-medium px-0.5 rounded border border-primary/10">
+            {part}
+          </mark>
+        ) : (
+          part
+        )
+      )}
+    </>
+  );
+}
+
+
 function getLatestWorkbenchMessageAt(messages: Array<Pick<WorkbenchConversationMessage, 'createdAt'>>) {
   return messages.reduce<string | null>((latest, message) => {
     const messageAt = getTimestamp(message.createdAt);
@@ -1825,6 +1854,8 @@ function WorkbenchHeader({
   onMarkAllRead,
   onAddRepositoryClick,
   onOpenContributors,
+  isMonitored,
+  selectedRepositoryBranchesCount,
 }: {
   activeView: Exclude<WorkbenchView, 'agent'>;
   repository?: Repository;
@@ -1849,6 +1880,8 @@ function WorkbenchHeader({
   onMarkAllRead?: () => void;
   onAddRepositoryClick?: () => void;
   onOpenContributors?: () => void;
+  isMonitored?: boolean;
+  selectedRepositoryBranchesCount?: number;
 }) {
   const [searchParams] = useSearchParams();
   const repositoryIdParam = searchParams.get('repositoryId');
@@ -2069,11 +2102,35 @@ function WorkbenchHeader({
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="icon" variant="outline" aria-label="分支监控" onClick={onOpenBranchMonitor}>
-                <GitBranch className="h-4 w-4" />
+              <Button
+                size="icon"
+                variant="outline"
+                aria-label="分支监控"
+                onClick={onOpenBranchMonitor}
+                className={cn(
+                  "relative transition-all duration-200",
+                  repository && !isMonitored && "text-muted-foreground/40 border-dashed border-muted-foreground/30 hover:text-muted-foreground/60 hover:bg-transparent",
+                  repository && isMonitored && (selectedRepositoryBranchesCount ?? 0) > 0 && "border-primary/45 text-primary bg-primary/5 hover:bg-primary/10 shadow-[0_0_8px_rgba(139,92,246,0.1)] hover:border-primary/70"
+                )}
+              >
+                <GitBranch className={cn("h-4 w-4", repository && !isMonitored && "opacity-60")} />
+                {repository && isMonitored && (selectedRepositoryBranchesCount ?? 0) > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                  </span>
+                )}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>分支监控</TooltipContent>
+            <TooltipContent>
+              {!repository
+                ? '分支监控'
+                : !isMonitored
+                ? '分支监控 (当前仓库监控已关闭)'
+                : (selectedRepositoryBranchesCount ?? 0) > 0
+                ? `分支监控 (已过滤监控分支: ${selectedRepositoryBranchesCount}个)`
+                : '分支监控 (默认监控全部分支)'}
+            </TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -2326,112 +2383,169 @@ function MessageDetailSheet({
         onClose();
       }
     }}>
-      <SheetContent side="right" className="w-full overflow-y-auto border-border bg-background sm:max-w-2xl">
+      <SheetContent side="right" className="w-full overflow-y-auto border-l border-border bg-background/95 backdrop-blur-md sm:max-w-2xl p-0 shadow-2xl flex flex-col h-full">
         {message ? (
-          <>
-            <SheetHeader className="space-y-4 text-left">
-              <div className="flex items-center gap-3">
-                <Avatar className="h-11 w-11 rounded-xl border border-border">
-                  <AvatarImage src={authorAvatarUrl} alt={message.author} className="object-cover" />
-                  <AvatarFallback className="rounded-xl bg-secondary text-sm font-semibold">
-                    {getMessageAvatarFallback(message, repository)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0">
-                  <p className="truncate text-sm text-muted-foreground">{repository.fullName}</p>
-                  <SheetTitle className="text-xl leading-7">{message.title}</SheetTitle>
+          <div className="flex flex-col h-full relative">
+            {/* Top Glow Accent Bar */}
+            <div className={cn(
+              "absolute top-0 left-0 right-0 h-1.5 z-10",
+              message.risk === 'high' ? 'bg-gradient-to-r from-destructive via-red-500 to-orange-500' :
+              message.risk === 'medium' ? 'bg-gradient-to-r from-warning via-amber-400 to-yellow-500' :
+              'bg-gradient-to-r from-primary via-indigo-500 to-blue-500'
+            )} />
+
+            <div className="flex-1 overflow-y-auto px-6 py-8 space-y-6">
+              {/* Header section */}
+              <div className="space-y-4 text-left border-b border-border/50 pb-6 mt-2">
+                <div className="flex items-start gap-4">
+                  <div className="relative">
+                    <Avatar className={cn(
+                      "h-12 w-12 rounded-xl border-2 transition-transform duration-300 hover:scale-105 shadow-inner",
+                      message.risk === 'high' ? 'border-destructive/60' :
+                      message.risk === 'medium' ? 'border-warning/60' :
+                      'border-primary/60'
+                    )}>
+                      <AvatarImage src={authorAvatarUrl} alt={message.author} className="object-cover" />
+                      <AvatarFallback className="rounded-xl bg-secondary/80 text-sm font-semibold">
+                        {getMessageAvatarFallback(message, repository)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className={cn(
+                      "absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-background shadow-md",
+                      message.risk === 'high' ? 'bg-destructive animate-pulse' :
+                      message.risk === 'medium' ? 'bg-warning' :
+                      'bg-primary'
+                    )} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground/75">
+                      <Folder className="h-3.5 w-3.5 text-muted-foreground/60" />
+                      {repository.fullName}
+                    </p>
+                    <SheetTitle className="text-xl font-bold tracking-tight text-foreground/90 mt-1 leading-snug">
+                      {message.title}
+                    </SheetTitle>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <Badge variant="outline" className={cn('rounded-full text-[11px] font-medium backdrop-blur-sm shadow-sm', getRiskBadgeClass(message.risk))}>
+                    {message.risk === 'high' ? '需要处理' : message.risk === 'medium' ? '建议关注' : '通知'}
+                  </Badge>
+                  <Badge variant="secondary" className="rounded-full text-[11px] font-medium bg-secondary/60 border border-border/50 text-secondary-foreground shadow-sm">
+                    {getMessageKindLabel(message)}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground flex items-center gap-1.5 ml-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/45" />
+                    <span className="font-medium text-foreground/80">{message.author}</span>
+                    <span className="text-muted-foreground/60">·</span>
+                    <span>{message.time}</span>
+                  </span>
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className={cn('rounded-full text-[11px]', getRiskBadgeClass(message.risk))}>
-                  {message.risk === 'high' ? '需要处理' : message.risk === 'medium' ? '建议关注' : '通知'}
-                </Badge>
-                <Badge variant="secondary" className="rounded-full text-[11px]">
-                  {getMessageKindLabel(message)}
-                </Badge>
-                <span className="text-xs text-muted-foreground">{message.author} · {message.time}</span>
-              </div>
-            </SheetHeader>
 
-            <div className="mt-6 space-y-5">
-              {message.branch ? (
-                <div className="rounded-xl border border-border bg-card p-4">
-                  <p className="text-xs text-muted-foreground">分支</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{message.branch}</p>
+              {/* Body Content */}
+              <div className="space-y-6">
+                {message.branch ? (
+                  <div className="rounded-xl border border-border/60 bg-secondary/15 backdrop-blur-sm p-4 hover:bg-secondary/20 transition-all duration-200 shadow-sm flex items-center justify-between group">
+                    <div>
+                      <p className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-wider flex items-center gap-1.5">
+                        <GitBranch className="h-3.5 w-3.5 text-primary/70" />
+                        目标分支
+                      </p>
+                      <p className="mt-1.5 text-sm font-mono font-medium text-foreground bg-secondary/30 px-2 py-0.5 rounded border border-border/40 inline-block">
+                        {message.branch}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="rounded-2xl border border-border/60 bg-secondary/10 backdrop-blur-sm p-6 shadow-sm">
+                  <div className="flex items-center gap-2 mb-4 pb-2 border-b border-border/40">
+                    <FileText className="h-4 w-4 text-primary/70" />
+                    <p className="text-xs font-semibold text-muted-foreground/80 uppercase tracking-wider">消息正文</p>
+                  </div>
+                  <MarkdownContent className="prose-pre:bg-black/40 prose-pre:border prose-pre:border-border/50 prose-pre:rounded-xl">{message.body}</MarkdownContent>
                 </div>
-              ) : null}
 
-              <div className="rounded-xl border border-border bg-card p-5">
-                <p className="mb-3 text-sm font-medium text-foreground">消息正文</p>
-                <MarkdownContent>{message.body}</MarkdownContent>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {message.actions?.filter((action) => !action.requiresPermission || message.repositoryCanOperate).map((action) => {
-                  if (action.key === 'open_github' && message.externalUrl) {
-                    return (
-                      <Button key={action.key} variant="outline" className="gap-2" asChild>
-                        <a href={message.externalUrl} target="_blank" rel="noreferrer">
-                          <ExternalLink className="h-4 w-4" />
+                {/* Actions Section */}
+                <div className="flex flex-wrap items-center gap-2.5 pt-4 border-t border-border/40">
+                  {message.actions?.filter((action) => !action.requiresPermission || message.repositoryCanOperate).map((action) => {
+                    if (action.key === 'open_github' && message.externalUrl) {
+                      return (
+                        <Button key={action.key} variant="outline" className="gap-2 rounded-xl border-border/80 hover:bg-secondary transition-all" asChild>
+                          <a href={message.externalUrl} target="_blank" rel="noreferrer">
+                            <ExternalLink className="h-4 w-4" />
+                            {action.label}
+                          </a>
+                        </Button>
+                      );
+                    }
+                    if (action.key === 'agent_handle') {
+                      return (
+                        <Button
+                          key={action.key}
+                          className="gap-2 rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/95 hover:to-indigo-600/95 text-primary-foreground shadow-sm hover:shadow-[0_0_12px_rgba(139,92,246,0.3)] transition-all duration-200 border-0"
+                          onClick={() => onOpenAgent(`处理这条消息：${message.title}`)}
+                        >
+                          <Bot className="h-4 w-4" />
                           {action.label}
-                        </a>
-                      </Button>
-                    );
-                  }
-                  if (action.key === 'agent_handle') {
-                    return (
-                      <Button key={action.key} className="gap-2" onClick={() => onOpenAgent(`处理这条消息：${message.title}`)}>
-                        <Bot className="h-4 w-4" />
-                        {action.label}
-                      </Button>
-                    );
-                  }
-                  if (action.key === 'approve') {
-                    return (
-                      <Button
-                        key={action.key}
-                        variant="outline"
-                        className="gap-2 border-success/40 text-success-foreground hover:bg-success/10"
-                        disabled={approvalActionId === message.approvalId}
-                        onClick={() => onApproveMessage(message)}
-                      >
-                        <CheckSquare className="h-4 w-4" />
-                        {action.label}
-                      </Button>
-                    );
-                  }
-                  if (action.key === 'reject') {
-                    return (
-                      <Button
-                        key={action.key}
-                        variant="outline"
-                        className="gap-2 border-destructive/40 text-destructive hover:bg-destructive/10"
-                        disabled={approvalActionId === message.approvalId}
-                        onClick={() => onRejectMessage(message)}
-                      >
-                        <XCircle className="h-4 w-4" />
-                        {action.label}
-                      </Button>
-                    );
-                  }
-                  if (action.key === 'ai_analyze') {
-                    return (
-                      <Button key={action.key} variant="ghost" className="gap-2" onClick={() => toast.info(`AI 正在分析：${message.title}`)}>
-                        <Sparkles className="h-4 w-4" />
-                        {action.label}
-                      </Button>
-                    );
-                  }
-                  return null;
-                })}
+                        </Button>
+                      );
+                    }
+                    if (action.key === 'approve') {
+                      return (
+                        <Button
+                          key={action.key}
+                          variant="outline"
+                          className="gap-2 rounded-xl border-success/40 text-success hover:bg-success/10 hover:border-success hover:shadow-[0_0_12px_rgba(34,197,94,0.15)] transition-all duration-200"
+                          disabled={approvalActionId === message.approvalId}
+                          onClick={() => onApproveMessage(message)}
+                        >
+                          <CheckSquare className="h-4 w-4" />
+                          {action.label}
+                        </Button>
+                      );
+                    }
+                    if (action.key === 'reject') {
+                      return (
+                        <Button
+                          key={action.key}
+                          variant="outline"
+                          className="gap-2 rounded-xl border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive hover:shadow-[0_0_12px_rgba(239,68,68,0.15)] transition-all duration-200"
+                          disabled={approvalActionId === message.approvalId}
+                          onClick={() => onRejectMessage(message)}
+                        >
+                          <XCircle className="h-4 w-4" />
+                          {action.label}
+                        </Button>
+                      );
+                    }
+                    if (action.key === 'ai_analyze') {
+                      return (
+                        <Button
+                          key={action.key}
+                          variant="ghost"
+                          className="gap-2 rounded-xl text-primary/80 hover:text-primary hover:bg-primary/10 transition-all"
+                          onClick={() => toast.info(`AI 正在分析：${message.title}`)}
+                        >
+                          <Sparkles className="h-4 w-4" />
+                          {action.label}
+                        </Button>
+                      );
+                    }
+                    return null;
+                  })}
+                </div>
               </div>
             </div>
-          </>
+          </div>
         ) : null}
       </SheetContent>
     </Sheet>
   );
 }
+
 
 function ConversationSearchSheet({
   open,
@@ -2454,60 +2568,130 @@ function ConversationSearchSheet({
     () => new Map(repositories.map((repository) => [repository.id, repository])),
     [repositories],
   );
+
   const normalizedQuery = query.trim().toLowerCase();
+  const queryTerms = useMemo(() => normalizedQuery.split(/\s+/).filter(Boolean), [normalizedQuery]);
+
   const scopedMessages = selectedRepository
     ? messages.filter((message) => message.sourceRepositoryId === selectedRepository.id)
     : messages;
-  const results = normalizedQuery
-    ? scopedMessages.filter((message) => [
-        message.title,
-        message.body,
-        message.author,
-        message.branch ?? '',
-        message.eventTypeLabel ?? '',
-      ].join(' ').toLowerCase().includes(normalizedQuery)).slice(0, 50)
-    : scopedMessages.slice(0, 20);
+
+  const results = useMemo(() => {
+    if (queryTerms.length === 0) {
+      return scopedMessages.slice(0, 20);
+    }
+    return scopedMessages
+      .filter((message) => {
+        const searchContent = [
+          message.title,
+          message.body,
+          message.author,
+          message.branch ?? '',
+          message.eventTypeLabel ?? '',
+        ].join(' ').toLowerCase();
+
+        return queryTerms.every((term) => searchContent.includes(term));
+      })
+      .slice(0, 50);
+  }, [scopedMessages, queryTerms]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full overflow-y-auto border-border bg-background sm:max-w-xl">
-        <SheetHeader className="space-y-3 text-left">
-          <SheetTitle>搜索会话记录</SheetTitle>
-          <Input
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            placeholder={selectedRepository ? `搜索 ${selectedRepository.fullName}` : '搜索全部会话'}
-            autoFocus
-          />
-        </SheetHeader>
-        <div className="mt-5 space-y-2">
-          {results.length > 0 ? results.map((message) => {
-            const repository = message.sourceRepositoryId
-              ? repositoryMap.get(message.sourceRepositoryId)
-              : undefined;
+      <SheetContent side="right" className="w-full overflow-y-auto border-l border-border bg-background/95 backdrop-blur-md sm:max-w-xl p-0 shadow-2xl flex flex-col h-full">
+        {/* Header with gradient glow accent */}
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-purple-500 to-indigo-500 z-10" />
 
-            return (
-              <Link
-                key={message.id}
-                to={message.sourceRepositoryId ? `/workbench/repository/${message.sourceRepositoryId}` : '/workbench'}
-                className="block rounded-xl border border-border bg-card p-4 transition-colors hover:bg-secondary/50"
-                onClick={() => onOpenChange(false)}
-              >
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className={cn('rounded-full text-[11px]', getMessageKindBadgeClass(message))}>
-                    {getMessageKindLabel(message)}
-                  </Badge>
-                  <span className="min-w-0 truncate text-xs text-muted-foreground">
-                    {repository?.fullName ?? '未知仓库'} · {message.time}
-                  </span>
-                </div>
-                <p className="mt-2 truncate text-sm font-medium text-foreground">{message.title}</p>
-                <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{message.body}</p>
-              </Link>
-            );
-          }) : (
-            <div className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
-              没有匹配的真实消息。
+        <div className="px-6 py-6 border-b border-border/50 bg-secondary/10 mt-1">
+          <SheetHeader className="space-y-4 text-left">
+            <div className="flex items-center justify-between">
+              <SheetTitle className="text-lg font-bold tracking-tight text-foreground/90 flex items-center gap-2">
+                <Command className="h-4.5 w-4.5 text-primary" />
+                搜索会话记录
+              </SheetTitle>
+              {results.length > 0 && (
+                <span className="text-xs font-semibold text-muted-foreground/60 bg-secondary px-2.5 py-0.5 rounded-full border border-border/40">
+                  找到 {results.length} 条记录
+                </span>
+              )}
+            </div>
+
+            <div className="relative flex items-center">
+              <Search className="absolute left-3.5 h-4 w-4 text-muted-foreground/75" />
+              <Input
+                value={query}
+                onChange={(event) => onQueryChange(event.target.value)}
+                placeholder={selectedRepository ? `在 ${selectedRepository.fullName} 中搜索...` : '在所有会话中搜索关键词...'}
+                className="pl-10 pr-10 py-5 rounded-xl bg-secondary/40 border-border/70 hover:bg-secondary/60 focus-visible:ring-primary/40 focus-visible:bg-secondary/35 transition-all text-sm placeholder:text-muted-foreground/65"
+                autoFocus
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => onQueryChange('')}
+                  className="absolute right-3.5 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </SheetHeader>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3.5">
+          {results.length > 0 ? (
+            results.map((message) => {
+              const repository = message.sourceRepositoryId
+                ? repositoryMap.get(message.sourceRepositoryId)
+                : undefined;
+
+              return (
+                <Link
+                  key={message.id}
+                  to={message.sourceRepositoryId ? `/workbench/repository/${message.sourceRepositoryId}` : '/workbench'}
+                  className="relative block rounded-xl border border-border/50 bg-card/45 backdrop-blur-sm p-4.5 pl-6 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:bg-secondary/30 hover:border-primary/25 overflow-hidden group"
+                  onClick={() => onOpenChange(false)}
+                >
+                  {/* Left accent indicator strip matching message risk */}
+                  <div className={cn(
+                    "absolute left-0 top-0 bottom-0 w-1 transition-all group-hover:w-1.5",
+                    message.risk === 'high' ? 'bg-destructive' :
+                    message.risk === 'medium' ? 'bg-warning' :
+                    'bg-primary/70'
+                  )} />
+
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className={cn('rounded-full text-[10px] font-medium backdrop-blur-sm shadow-sm scale-95 origin-left', getMessageKindBadgeClass(message))}>
+                      {getMessageKindLabel(message)}
+                    </Badge>
+                    <span className="min-w-0 truncate text-xs text-muted-foreground/60 flex items-center gap-1.5">
+                      <Folder className="h-3 w-3 text-muted-foreground/45" />
+                      <span className="truncate hover:text-foreground/80 transition-colors">
+                        {repository?.fullName ?? '未知仓库'}
+                      </span>
+                      <span>·</span>
+                      <span>{message.time}</span>
+                    </span>
+                  </div>
+
+                  <p className="mt-2.5 truncate text-sm font-semibold text-foreground/90 group-hover:text-primary transition-colors">
+                    <HighlightText text={message.title} query={query} />
+                  </p>
+
+                  <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground/75 font-normal">
+                    <HighlightText text={message.body} query={query} />
+                  </p>
+                </Link>
+              );
+            })
+          ) : (
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/60 px-4 py-16 text-center shadow-inner bg-secondary/5 mt-4">
+              <div className="p-3 bg-secondary/40 rounded-full border border-border/40 text-muted-foreground/50 mb-3.5">
+                <Search className="h-6 w-6" />
+              </div>
+              <p className="text-sm font-semibold text-foreground/80">没有匹配的消息记录</p>
+              <p className="text-xs text-muted-foreground/65 mt-1 max-w-[280px]">
+                我们无法搜索到与 "{query}" 相关的任何消息。您可以尝试更改或缩减关键词。
+              </p>
             </div>
           )}
         </div>
@@ -2515,6 +2699,7 @@ function ConversationSearchSheet({
     </Sheet>
   );
 }
+
 
 function BranchMonitorSheet({
   open,
@@ -2539,67 +2724,172 @@ function BranchMonitorSheet({
 }) {
   const branchesQuery = useRepositoryBranchesQuery(repository?.id ?? '', Boolean(open && repository?.id));
   const isRepositoryMonitored = repository ? monitoredRepositoryIds.includes(repository.id) : false;
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Reset search query when sheet closes or repository changes
+  useEffect(() => {
+    if (!open) {
+      setSearchQuery('');
+    }
+  }, [open, repository?.id]);
+
+  const filteredBranches = useMemo(() => {
+    const data = branchesQuery.data ?? [];
+    if (!searchQuery.trim()) {
+      return data;
+    }
+    const normalized = searchQuery.toLowerCase().trim();
+    return data.filter((branch) => branch.name.toLowerCase().includes(normalized));
+  }, [branchesQuery.data, searchQuery]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full overflow-y-auto border-border bg-background sm:max-w-xl">
-        <SheetHeader className="space-y-2 text-left">
-          <SheetTitle>分支监控</SheetTitle>
-          <p className="text-sm text-muted-foreground">
-            {repository ? repository.fullName : '请先选择一个可编辑仓库。'}
-          </p>
-        </SheetHeader>
+      <SheetContent side="right" className="w-full overflow-y-auto border-l border-border bg-background/95 backdrop-blur-md sm:max-w-xl p-0 shadow-2xl flex flex-col h-full">
+        {/* Header with gradient glow accent */}
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-purple-500 to-indigo-500 z-10" />
+
+        <div className="px-6 py-6 border-b border-border/50 bg-secondary/10 mt-1">
+          <SheetHeader className="space-y-2 text-left">
+            <SheetTitle className="text-lg font-bold tracking-tight text-foreground/90 flex items-center gap-2">
+              <GitBranch className="h-4.5 w-4.5 text-primary" />
+              分支监控配置
+            </SheetTitle>
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5 font-medium">
+              <Folder className="h-3.5 w-3.5 text-muted-foreground/60" />
+              {repository ? repository.fullName : '未选择仓库'}
+            </p>
+          </SheetHeader>
+        </div>
+
         {repository ? (
-          <div className="mt-5 space-y-4">
+          <div className="flex-1 overflow-y-auto p-6 space-y-5">
+            {/* Join Monitoring Scope Switch Card */}
             <button
               type="button"
-              className="flex w-full items-center gap-3 rounded-xl border border-border bg-card p-4 text-left"
+              className={cn(
+                "flex w-full items-center justify-between gap-4 rounded-xl border p-4.5 text-left transition-all duration-200 shadow-sm",
+                isRepositoryMonitored
+                  ? "bg-primary/5 border-primary/20 hover:bg-primary/10"
+                  : "bg-secondary/15 border-border/60 hover:bg-secondary/20"
+              )}
               onClick={onToggleRepository}
               disabled={saving}
             >
-              <Checkbox checked={isRepositoryMonitored} className="pointer-events-none" />
-              <div>
-                <p className="text-sm font-medium text-foreground">加入监控范围</p>
-                <p className="text-xs text-muted-foreground">关闭后该仓库不会进入 Dashboard 监控范围。</p>
+              <div className="flex items-center gap-3">
+                <Checkbox checked={isRepositoryMonitored} className="pointer-events-none data-[state=checked]:bg-primary data-[state=checked]:border-primary" />
+                <div>
+                  <p className="text-sm font-semibold text-foreground/90">加入监控范围</p>
+                  <p className="text-xs text-muted-foreground/75 mt-0.5">关闭后，该仓库的数据、变更和推送事件将不会出现在仪表盘或收件箱中。</p>
+                </div>
               </div>
             </button>
 
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center justify-between gap-3">
+            {/* Branch Filtering Card */}
+            <div className={cn(
+              "rounded-2xl border border-border/50 bg-secondary/10 backdrop-blur-sm p-5 shadow-sm transition-all duration-200",
+              !isRepositoryMonitored && "opacity-50 pointer-events-none"
+            )}>
+              <div className="flex items-center justify-between gap-4 pb-3 border-b border-border/40">
                 <div>
-                  <p className="text-sm font-medium text-foreground">监控分支</p>
-                  <p className="text-xs text-muted-foreground">不选择分支时默认监控全部分支。</p>
+                  <p className="text-sm font-semibold text-foreground/90 flex items-center gap-1.5">
+                    <SlidersHorizontal className="h-4 w-4 text-primary/70" />
+                    监控特定分支
+                  </p>
+                  <p className="text-[11px] text-muted-foreground/75 mt-0.5">
+                    {selectedBranches.length > 0
+                      ? `已过滤监控 ${selectedBranches.length} 个分支`
+                      : '默认监控全部分支 (未做任何筛选)'}
+                  </p>
                 </div>
-                <Button variant="outline" size="sm" onClick={onResetBranches} disabled={saving || !isRepositoryMonitored}>
-                  全部分支
-                </Button>
-              </div>
-              <div className="mt-4 space-y-2">
-                {branchesQuery.isLoading ? (
-                  <p className="text-sm text-muted-foreground">正在加载分支...</p>
-                ) : branchesQuery.data && branchesQuery.data.length > 0 ? (
-                  branchesQuery.data.map((branch) => (
-                    <button
-                      key={branch.name}
-                      type="button"
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-secondary"
-                      onClick={() => onToggleBranch(branch.name)}
-                      disabled={saving || !isRepositoryMonitored}
-                    >
-                      <Checkbox checked={selectedBranches.includes(branch.name)} className="pointer-events-none" />
-                      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{branch.name}</span>
-                      {branch.isDefault ? (
-                        <Badge variant="secondary" className="rounded-full text-[11px]">默认</Badge>
-                      ) : null}
-                    </button>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground">暂无可用分支。</p>
+                {selectedBranches.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7.5 px-3 text-xs rounded-lg border-border hover:bg-secondary transition-all"
+                    onClick={onResetBranches}
+                    disabled={saving || !isRepositoryMonitored}
+                  >
+                    重置为全部
+                  </Button>
                 )}
               </div>
+
+              {isRepositoryMonitored && (
+                <div className="mt-4 space-y-3">
+                  {/* Branch Search Box */}
+                  <div className="relative flex items-center">
+                    <Search className="absolute left-3 h-3.5 w-3.5 text-muted-foreground/60" />
+                    <Input
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="搜索分支名称..."
+                      className="pl-9 pr-9 h-9 rounded-lg bg-secondary/30 border-border/50 hover:bg-secondary/40 focus-visible:ring-primary/30 text-xs transition-all"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-3 p-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Branch List */}
+                  <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
+                    {branchesQuery.isLoading ? (
+                      <div className="flex items-center gap-2 py-6 justify-center text-xs text-muted-foreground/75">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                        <span>正在加载分支列表...</span>
+                      </div>
+                    ) : filteredBranches.length > 0 ? (
+                      filteredBranches.map((branch) => {
+                        const isSelected = selectedBranches.includes(branch.name);
+                        return (
+                          <button
+                            key={branch.name}
+                            type="button"
+                            className={cn(
+                              "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-all duration-150 hover:bg-secondary/40 text-xs font-mono",
+                              isSelected ? "bg-primary/5 text-primary" : "text-muted-foreground hover:text-foreground"
+                            )}
+                            onClick={() => onToggleBranch(branch.name)}
+                            disabled={saving || !isRepositoryMonitored}
+                          >
+                            <Checkbox checked={isSelected} className="pointer-events-none scale-90 data-[state=checked]:bg-primary data-[state=checked]:border-primary" />
+                            <span className="min-w-0 flex-1 truncate">{branch.name}</span>
+                            {branch.isDefault ? (
+                              <Badge variant="secondary" className="rounded-full text-[9px] px-1.5 py-0 bg-secondary/80 text-secondary-foreground border border-border/40 font-sans font-medium">默认</Badge>
+                            ) : null}
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="py-8 text-center text-xs text-muted-foreground/60 border border-dashed border-border/50 rounded-xl bg-secondary/5">
+                        {searchQuery ? '未找到匹配的分支' : '暂无可用分支数据'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {!isRepositoryMonitored && (
+                <div className="mt-4 p-4 text-center text-xs text-muted-foreground/65 border border-dashed border-border/50 rounded-xl bg-secondary/5">
+                  请先开启仓库监控，以配置具体的分支过滤规则。
+                </div>
+              )}
             </div>
           </div>
-        ) : null}
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-muted-foreground/60 mt-10">
+            <SlidersHorizontal className="h-10 w-10 text-muted-foreground/30 mb-3" />
+            <p className="text-sm font-semibold text-foreground/80">未选择有效的仓库</p>
+            <p className="text-xs text-muted-foreground/65 mt-1 max-w-[240px]">
+              请先在左侧仓库列表中选择一个您拥有编辑权限的仓库。
+            </p>
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   );
@@ -4757,7 +5047,7 @@ function AgentRunView({
   // Scroll to bottom of messages
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeSession?.messages, activeSession?.workflowActivities]);
+  }, [activeSession?.messages, activeSession?.workflowActivities, activeSession?.status]);
 
   const updateRepoSessions = (repoId: string, updater: (prev: AgentSession[]) => AgentSession[]) => {
     setSessionsByRepo(prev => {
@@ -5971,6 +6261,48 @@ function AgentRunView({
                 />
               )}
 
+              {activeSession.status === 'running' && (
+                <div className="flex gap-3 animate-in fade-in-50 duration-200">
+                  <Avatar
+                    className="h-8 w-8 rounded-full border border-border/70 bg-background mt-0.5 shrink-0 shadow-sm ring-2 ring-background animate-pulse"
+                    title={assistantProviderLabel}
+                  >
+                    {assistantProviderLogo ? (
+                      <AvatarImage
+                        src={assistantProviderLogo}
+                        alt={assistantProviderLabel}
+                        className="rounded-full object-cover"
+                      />
+                    ) : null}
+                    <AvatarFallback className="rounded-full bg-primary/10 text-primary text-xs font-bold">
+                      AI
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-grow rounded-xl bg-card border border-border p-4 text-sm text-foreground flex items-center gap-2.5">
+                    <style>{`
+                      @keyframes agentThinkingGlow {
+                        0%, 100% {
+                          opacity: 0.45;
+                          text-shadow: 0 0 2px rgba(139, 92, 246, 0.2);
+                        }
+                        50% {
+                          opacity: 1;
+                          text-shadow: 0 0 8px rgba(139, 92, 246, 0.6);
+                          color: #c084fc;
+                        }
+                      }
+                      .agent-thinking-text {
+                        animation: agentThinkingGlow 2s infinite ease-in-out;
+                      }
+                    `}</style>
+                    <Sparkles className="h-4 w-4 text-primary animate-spin shrink-0" style={{ animationDuration: '3s' }} />
+                    <span className="font-semibold text-primary/90 agent-thinking-text">
+                      Agent 正在思考并执行中...
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div ref={messageEndRef} />
             </div>
           </div>
@@ -6954,6 +7286,8 @@ export function DesktopWorkbench() {
               onMarkAllRead={handleIgnoreAllVisibleFeedItems}
               onAddRepositoryClick={() => setIsAddRepositoryOpen(true)}
               onOpenContributors={() => setIsContributorsOpen(true)}
+              isMonitored={selectedRepository ? monitoredRepositoryIds.includes(selectedRepository.id) : false}
+              selectedRepositoryBranchesCount={selectedRepositoryBranches.length}
             />
           )}
           <main className="min-h-0 flex-1 overflow-hidden">
