@@ -256,7 +256,7 @@ describe('RepositoryService', () => {
     });
 
     it('throws ForbiddenException when user not a member', async () => {
-      mockAssertUserCanEditRepository.mockRejectedValueOnce(new ForbiddenException());
+      mockAssertUserCanAccessRepository.mockRejectedValueOnce(new ForbiddenException());
       await expect(service.delete('u1', 'r1')).rejects.toThrow(ForbiddenException);
     });
 

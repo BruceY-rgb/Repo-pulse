@@ -1,7 +1,7 @@
 import { apiClient } from './api-client';
 import type { ApiResponse, Event, RepositoryBranchScopeMap } from '@/types/api';
 
-export type NotificationChannel = 'EMAIL' | 'DINGTALK' | 'FEISHU' | 'WEBHOOK' | 'IN_APP';
+export type NotificationChannel = 'EMAIL' | 'DINGTALK' | 'FEISHU' | 'WECOM' | 'WECHAT' | 'WEBHOOK' | 'IN_APP';
 
 export interface NotificationPreferences {
   channels: NotificationChannel[];
@@ -12,6 +12,8 @@ export interface NotificationPreferences {
     weeklyReport: boolean;
   };
   webhookUrl?: string | null;
+  wecomWebhookUrl?: string | null;
+  wechatWebhookUrl?: string | null;
   email?: string | null;
 }
 

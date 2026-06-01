@@ -150,6 +150,10 @@ export function Settings() {
       analysisComplete: true,
       weeklyReport: false,
     },
+    webhookUrl: '',
+    wecomWebhookUrl: '',
+    wechatWebhookUrl: '',
+    email: '',
   });
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifSaving, setNotifSaving] = useState(false);
@@ -352,11 +356,49 @@ export function Settings() {
     setTimeout(() => setSaved(false), 3000);
   };
 
-  const toggleChannel = (channel: NotificationChannel) => {
+  const toggleChannel = async (channel: NotificationChannel) => {
     const channels = notifPrefs.channels.includes(channel)
       ? notifPrefs.channels.filter((c) => c !== channel)
       : [...notifPrefs.channels, channel];
-    setNotifPrefs({ ...notifPrefs, channels });
+    const nextPrefs = { ...notifPrefs, channels };
+    setNotifPrefs(nextPrefs);
+    
+    try {
+      await notificationService.updatePreferences(nextPrefs);
+      toast.success(t('settings.notifications.saved') || '通知设置已保存');
+    } catch (error) {
+      console.error('Failed to auto-save notification channel state:', error);
+      toast.error('保存通知渠道状态失败');
+    }
+  };
+
+  const handleImConnectionChange = async (provider: ImProvider, connected: boolean) => {
+    setImConnected((current) => ({ ...current, [provider]: connected }));
+
+    if (connected) {
+      const channelMap: Record<ImProvider, NotificationChannel> = {
+        feishu: 'FEISHU',
+        dingtalk: 'DINGTALK',
+        wecom: 'WECOM',
+        wechat: 'WECHAT',
+      };
+      const channel = channelMap[provider];
+      
+      if (channel && !notifPrefs.channels.includes(channel)) {
+        const nextPrefs = {
+          ...notifPrefs,
+          channels: [...notifPrefs.channels, channel]
+        };
+        setNotifPrefs(nextPrefs);
+        
+        try {
+          await notificationService.updatePreferences(nextPrefs);
+          toast.success(`${provider === 'feishu' ? '飞书' : provider === 'dingtalk' ? '钉钉' : provider === 'wecom' ? '企业微信' : '微信'}通知渠道已自动开启`);
+        } catch (error) {
+          console.error('Failed to auto-enable notification channel:', error);
+        }
+      }
+    }
   };
 
   const handleSelectTemplate = (template: NotificationTemplateValue) => {
@@ -599,7 +641,7 @@ export function Settings() {
                 </CardHeader>
                 <CardContent className="space-y-6">
                   {/* Channels Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {/* In App Channel */}
                     <div className={cn(
                       "rounded-xl border p-4 flex flex-col justify-between space-y-4 transition-all duration-200",
@@ -725,12 +767,12 @@ export function Settings() {
                     )}>
                       <div className="flex items-center justify-between">
                         <div className={cn(
-                          "flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200",
+                          "flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200 overflow-hidden",
                           notifPrefs.channels.includes('DINGTALK')
-                            ? "bg-primary/10 border-primary/20 text-primary"
-                            : "bg-white/5 border-border/40 text-muted-foreground"
+                            ? "bg-primary/10 border-primary/20"
+                            : "bg-white/5 border-border/40"
                         )}>
-                          <MessageSquare className="h-4.5 w-4.5" />
+                          <img src={dingtalkLogo} alt="DingTalk" className="h-4.5 w-4.5 brightness-110 filter" />
                         </div>
                         <Switch
                           checked={notifPrefs.channels.includes('DINGTALK')}
@@ -752,6 +794,92 @@ export function Settings() {
                               placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx"
                               value={notifPrefs.webhookUrl || ''}
                               onChange={(e) => setNotifPrefs({ ...notifPrefs, webhookUrl: e.target.value })}
+                              className="h-8 bg-background border-border/60 text-xs text-white rounded-lg focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* WeCom Channel */}
+                    <div className={cn(
+                      "rounded-xl border p-4 flex flex-col justify-between space-y-4 transition-all duration-200",
+                      notifPrefs.channels.includes('WECOM')
+                        ? "border-primary bg-primary/5 shadow-md shadow-primary/5 glow-orange"
+                        : "border-border/60 bg-card/40 hover:bg-white/5 hover:border-primary/20"
+                    )}>
+                      <div className="flex items-center justify-between">
+                        <div className={cn(
+                          "flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200 overflow-hidden",
+                          notifPrefs.channels.includes('WECOM')
+                            ? "bg-primary/10 border-primary/20"
+                            : "bg-white/5 border-border/40"
+                        )}>
+                          <img src={wecomLogo} alt="WeCom" className="h-4.5 w-4.5 brightness-110 filter" />
+                        </div>
+                        <Switch
+                          checked={notifPrefs.channels.includes('WECOM')}
+                          onCheckedChange={() => toggleChannel('WECOM')}
+                          className="data-[state=checked]:bg-primary"
+                        />
+                      </div>
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{t('settings.notifications.channels.wecom')}</p>
+                          <p className="text-xs text-muted-foreground mt-1 leading-normal">
+                            {t('settings.notifications.channels.wecomDesc')}
+                          </p>
+                        </div>
+                        {notifPrefs.channels.includes('WECOM') && (
+                          <div className="pt-3 border-t border-border/30 space-y-1.5 transition-all">
+                            <Label className="text-[10px] font-semibold text-muted-foreground">{t('settings.notifications.channels.webhookUrl')}</Label>
+                            <Input
+                              placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
+                              value={notifPrefs.wecomWebhookUrl || ''}
+                              onChange={(e) => setNotifPrefs({ ...notifPrefs, wecomWebhookUrl: e.target.value })}
+                              className="h-8 bg-background border-border/60 text-xs text-white rounded-lg focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* WeChat Channel */}
+                    <div className={cn(
+                      "rounded-xl border p-4 flex flex-col justify-between space-y-4 transition-all duration-200",
+                      notifPrefs.channels.includes('WECHAT')
+                        ? "border-primary bg-primary/5 shadow-md shadow-primary/5 glow-orange"
+                        : "border-border/60 bg-card/40 hover:bg-white/5 hover:border-primary/20"
+                    )}>
+                      <div className="flex items-center justify-between">
+                        <div className={cn(
+                          "flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200 overflow-hidden",
+                          notifPrefs.channels.includes('WECHAT')
+                            ? "bg-primary/10 border-primary/20"
+                            : "bg-white/5 border-border/40"
+                        )}>
+                          <img src={wechatLogo} alt="WeChat" className="h-4.5 w-4.5 brightness-110 filter" />
+                        </div>
+                        <Switch
+                          checked={notifPrefs.channels.includes('WECHAT')}
+                          onCheckedChange={() => toggleChannel('WECHAT')}
+                          className="data-[state=checked]:bg-primary"
+                        />
+                      </div>
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{t('settings.notifications.channels.wechat')}</p>
+                          <p className="text-xs text-muted-foreground mt-1 leading-normal">
+                            {t('settings.notifications.channels.wechatDesc')}
+                          </p>
+                        </div>
+                        {notifPrefs.channels.includes('WECHAT') && (
+                          <div className="pt-3 border-t border-border/30 space-y-1.5 transition-all">
+                            <Label className="text-[10px] font-semibold text-muted-foreground">{t('settings.notifications.channels.webhookUrl')}</Label>
+                            <Input
+                              placeholder="https://api.weixin.qq.com/... (optional)"
+                              value={notifPrefs.wechatWebhookUrl || ''}
+                              onChange={(e) => setNotifPrefs({ ...notifPrefs, wechatWebhookUrl: e.target.value })}
                               className="h-8 bg-background border-border/60 text-xs text-white rounded-lg focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary"
                             />
                           </div>
@@ -1108,8 +1236,7 @@ export function Settings() {
           <FeishuIntegrationDialog
             open={feishuDialogOpen}
             onOpenChange={setFeishuDialogOpen}
-            onConnectionChange={(connected) =>
-              setImConnected((current) => ({ ...current, feishu: connected }))}
+            onConnectionChange={(connected) => handleImConnectionChange('feishu', connected)}
           />
           {imDialogOpen ? (
             <ImChannelIntegrationDialog
@@ -1117,8 +1244,7 @@ export function Settings() {
               provider={imDialogOpen}
               open
               onOpenChange={(open) => setImDialogOpen(open ? imDialogOpen : null)}
-              onConnectionChange={(nextProvider, connected) =>
-                setImConnected((current) => ({ ...current, [nextProvider]: connected }))}
+              onConnectionChange={handleImConnectionChange}
             />
           ) : null}
 

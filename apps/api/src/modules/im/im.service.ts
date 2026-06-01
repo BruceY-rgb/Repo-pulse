@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, BadRequestException } from '@nestjs/common';
 import axios from 'axios';
 import { randomBytes } from 'crypto';
 import AiBot, { generateReqId, type WsFrame } from '@wecom/aibot-node-sdk';
@@ -76,34 +76,43 @@ export interface ImStageStatus {
 }
 
 interface FeishuConnectionPreferences {
+  id?: string;
   appId?: string;
   appSecret?: string;
   botName?: string;
+  isDefault?: boolean;
   state?: ImConnectionState;
   updatedAt?: string;
 }
 
 interface DingTalkConnectionPreferences {
+  id?: string;
   clientId?: string;
   clientSecret?: string;
   botName?: string;
+  isDefault?: boolean;
   state?: ImConnectionState;
   updatedAt?: string;
 }
 
 interface WecomConnectionPreferences {
+  id?: string;
   botId?: string;
   secret?: string;
   botName?: string;
+  isDefault?: boolean;
   state?: ImConnectionState;
   updatedAt?: string;
 }
 
 interface WechatConnectionPreferences {
+  id?: string;
   botToken?: string;
   ilinkBotId?: string;
   ilinkUserId?: string;
   baseUrl?: string;
+  botName?: string;
+  isDefault?: boolean;
   state?: ImConnectionState;
   updatedAt?: string;
 }
@@ -113,6 +122,10 @@ interface ImPreferences {
   dingtalk?: DingTalkConnectionPreferences;
   wecom?: WecomConnectionPreferences;
   wechat?: WechatConnectionPreferences;
+  feishuBots?: FeishuConnectionPreferences[];
+  dingtalkBots?: DingTalkConnectionPreferences[];
+  wecomBots?: WecomConnectionPreferences[];
+  wechatBots?: WechatConnectionPreferences[];
   subscriptions?: ImSubscriptionDto[];
   bindings?: Array<{
     provider?: ImProvider;
@@ -122,6 +135,7 @@ interface ImPreferences {
     robotCode?: string;
     contextToken?: string;
     boundAt: string;
+    robotId?: string;
   }>;
   pairingCodes?: Array<{
     code: string;
@@ -152,6 +166,38 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
   private readonly recentDingTalkEventIds = new Set<string>();
   private readonly recentWecomEventIds = new Set<string>();
 
+  private getFeishuBots(im: ImPreferences): FeishuConnectionPreferences[] {
+    const list = im.feishuBots || [];
+    if (list.length === 0 && im.feishu?.appId) {
+      return [{ ...im.feishu, id: im.feishu.appId, isDefault: true }];
+    }
+    return list.map(bot => ({ ...bot, id: bot.id || bot.appId }));
+  }
+
+  private getDingTalkBots(im: ImPreferences): DingTalkConnectionPreferences[] {
+    const list = im.dingtalkBots || [];
+    if (list.length === 0 && im.dingtalk?.clientId) {
+      return [{ ...im.dingtalk, id: im.dingtalk.clientId, isDefault: true }];
+    }
+    return list.map(bot => ({ ...bot, id: bot.id || bot.clientId }));
+  }
+
+  private getWecomBots(im: ImPreferences): WecomConnectionPreferences[] {
+    const list = im.wecomBots || [];
+    if (list.length === 0 && im.wecom?.botId) {
+      return [{ ...im.wecom, id: im.wecom.botId, isDefault: true }];
+    }
+    return list.map(bot => ({ ...bot, id: bot.id || bot.botId }));
+  }
+
+  private getWechatBots(im: ImPreferences): WechatConnectionPreferences[] {
+    const list = im.wechatBots || [];
+    if (list.length === 0 && im.wechat?.ilinkBotId) {
+      return [{ ...im.wechat, id: im.wechat.ilinkBotId, isDefault: true }];
+    }
+    return list.map(bot => ({ ...bot, id: bot.id || bot.ilinkBotId }));
+  }
+
   async onModuleInit() {
     await Promise.all([
       this.restoreFeishuBridges(),
@@ -162,54 +208,143 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
-    await Promise.all(
-      [
-        ...Array.from(this.feishuBridges.keys()).map((userId) => this.stopFeishuBridge(userId)),
-        ...Array.from(this.dingtalkBridges.keys()).map((userId) => this.stopDingTalkBridge(userId)),
-        ...Array.from(this.wecomBridges.keys()).map((userId) => this.stopWecomBridge(userId)),
-        ...Array.from(this.wechatBridges.keys()).map((userId) => this.stopWechatBridge(userId)),
-      ],
-    );
+    await Promise.all([
+      ...Array.from(this.feishuBridges.keys()).map((key) => {
+        const [userId, appId] = key.split(':');
+        return this.stopFeishuBridge(userId, appId);
+      }),
+      ...Array.from(this.dingtalkBridges.keys()).map((key) => {
+        const [userId, clientId] = key.split(':');
+        return this.stopDingTalkBridge(userId, clientId);
+      }),
+      ...Array.from(this.wecomBridges.keys()).map((key) => {
+        const [userId, botId] = key.split(':');
+        return this.stopWecomBridge(userId, botId);
+      }),
+      ...Array.from(this.wechatBridges.keys()).map((key) => {
+        const [userId, ilinkBotId] = key.split(':');
+        return this.stopWechatBridge(userId, ilinkBotId);
+      }),
+    ]);
   }
 
   async getStatus(userId: string) {
     const im = await this.getImPreferences(userId);
-    const feishu = im.feishu;
+    const feishuBots = this.getFeishuBots(im);
+    const dingtalkBots = this.getDingTalkBots(im);
+    const wecomBots = this.getWecomBots(im);
+    const wechatBots = this.getWechatBots(im);
+
+    const defaultFeishu = feishuBots.find(b => b.isDefault) || feishuBots[0] || im.feishu;
+    const defaultDingtalk = dingtalkBots.find(b => b.isDefault) || dingtalkBots[0] || im.dingtalk;
+    const defaultWecom = wecomBots.find(b => b.isDefault) || wecomBots[0] || im.wecom;
+    const defaultWechat = wechatBots.find(b => b.isDefault) || wechatBots[0] || im.wechat;
 
     return {
-      feishu: this.buildFeishuStatus(feishu, im, this.feishuBridges.get(userId)),
-      dingtalk: this.buildDingTalkStatus(im.dingtalk, im, this.dingtalkBridges.get(userId)),
-      wecom: this.buildWecomStatus(im.wecom, im, this.wecomBridges.get(userId)),
-      wechat: this.buildWechatStatus(im.wechat, im, this.wechatBridges.get(userId)),
+      feishu: {
+        ...this.buildFeishuStatus(defaultFeishu, im, defaultFeishu?.appId ? this.feishuBridges.get(`${userId}:${defaultFeishu.appId}`) : undefined),
+        bots: feishuBots.map(bot => this.buildFeishuStatus(bot, im, bot.appId ? this.feishuBridges.get(`${userId}:${bot.appId}`) : undefined)),
+      },
+      dingtalk: {
+        ...this.buildDingTalkStatus(defaultDingtalk, im, defaultDingtalk?.clientId ? this.dingtalkBridges.get(`${userId}:${defaultDingtalk.clientId}`) : undefined),
+        bots: dingtalkBots.map(bot => this.buildDingTalkStatus(bot, im, bot.clientId ? this.dingtalkBridges.get(`${userId}:${bot.clientId}`) : undefined)),
+      },
+      wecom: {
+        ...this.buildWecomStatus(defaultWecom, im, defaultWecom?.botId ? this.wecomBridges.get(`${userId}:${defaultWecom.botId}`) : undefined),
+        bots: wecomBots.map(bot => this.buildWecomStatus(bot, im, bot.botId ? this.wecomBridges.get(`${userId}:${bot.botId}`) : undefined)),
+      },
+      wechat: {
+        ...this.buildWechatStatus(defaultWechat, im, defaultWechat?.ilinkBotId ? this.wechatBridges.get(`${userId}:${defaultWechat.ilinkBotId}`) : undefined),
+        bots: wechatBots.map(bot => this.buildWechatStatus(bot, im, bot.ilinkBotId ? this.wechatBridges.get(`${userId}:${bot.ilinkBotId}`) : undefined)),
+      },
     };
   }
 
   async saveFeishuConnection(userId: string, dto: SaveFeishuConnectionDto) {
     const im = await this.getImPreferences(userId);
+    const appId = dto.appId.trim();
+    const botName = dto.botName?.trim() || '飞书机器人';
+
+    const currentBots = this.getFeishuBots(im);
+    const existingBot = currentBots.find(b => b.appId === appId);
+
+    const appSecret = dto.appSecret?.trim() || existingBot?.appSecret;
+    if (!appSecret) {
+      throw new BadRequestException('飞书 App Secret 不能为空');
+    }
+
     const nextFeishu: FeishuConnectionPreferences = {
-      ...im.feishu,
-      appId: dto.appId.trim(),
-      appSecret: dto.appSecret.trim(),
-      state: 'configured',
+      id: appId,
+      appId,
+      appSecret,
+      botName,
+      state: existingBot?.state || 'configured',
       updatedAt: new Date().toISOString(),
     };
 
-    await this.updateImPreferences(userId, {
-      ...im,
-      feishu: nextFeishu,
-    });
+    const existingIndex = currentBots.findIndex(b => b.appId === appId);
+    const nextBots = [...currentBots];
+    if (existingIndex > -1) {
+      nextBots[existingIndex] = { ...nextBots[existingIndex], ...nextFeishu };
+    } else {
+      nextBots.push({ ...nextFeishu, isDefault: currentBots.length === 0 });
+    }
 
-    this.logger.log(`feishu_connection_saved userId=${userId}`);
-    void this.startFeishuBridge(userId, { ...im, feishu: nextFeishu }).catch((error) => {
+    const nextIm: ImPreferences = {
+      ...im,
+      feishuBots: nextBots,
+      feishu: nextBots.find(b => b.isDefault) || nextFeishu,
+    };
+
+    await this.updateImPreferences(userId, nextIm);
+
+    this.logger.log(`feishu_connection_saved userId=${userId} appId=${appId}`);
+    void this.startFeishuBridge(userId, appId, nextIm).catch((error) => {
       const message = error instanceof Error ? error.message : 'unknown_error';
-      this.logger.warn(`feishu_bridge_start_after_save_failed userId=${userId} reason=${message}`);
+      this.logger.warn(`feishu_bridge_start_after_save_failed userId=${userId} appId=${appId} reason=${message}`);
     });
-    return this.buildFeishuStatus(nextFeishu, { ...im, feishu: nextFeishu }, this.feishuBridges.get(userId));
+    return this.buildFeishuStatus(nextFeishu, nextIm, this.feishuBridges.get(`${userId}:${appId}`));
+  }
+
+  async deleteFeishuConnection(userId: string, appId: string) {
+    const im = await this.getImPreferences(userId);
+    const currentBots = this.getFeishuBots(im);
+    const nextBots = currentBots.filter(b => b.appId !== appId);
+
+    await this.stopFeishuBridge(userId, appId);
+
+    const subscriptions = (im.subscriptions || []).filter(s => !(s.provider === 'feishu' && s.robotId === appId));
+    const bindings = (im.bindings || []).filter(b => !(b.provider === 'feishu' && b.robotId === appId));
+
+    if (nextBots.length > 0 && !nextBots.some(b => b.isDefault)) {
+      nextBots[0].isDefault = true;
+    }
+
+    const nextIm: ImPreferences = {
+      ...im,
+      feishuBots: nextBots,
+      feishu: nextBots.find(b => b.isDefault) || undefined,
+      subscriptions,
+      bindings,
+    };
+
+    await this.updateImPreferences(userId, nextIm);
+    return this.getStatus(userId);
   }
 
   async testFeishuConnection(userId: string, dto: SaveFeishuConnectionDto) {
     const appId = dto.appId.trim();
-    const appSecret = dto.appSecret.trim();
+    const appSecret = dto.appSecret?.trim() || '';
+
+    if (!appId || !appSecret) {
+      return this.buildTestResult({
+        success: false,
+        state: 'error',
+        message: '请填写 App ID 和 App Secret。',
+        nextStep: '检查 App ID / App Secret 是否正确。',
+        credentialState: 'missing',
+      });
+    }
 
     try {
       const tokenResponse = await axios.post(
@@ -262,33 +397,49 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       const botReachable = botInfoResponse.status >= 200 && botInfoResponse.status < 300 && botPayload.code === 0;
       const im = await this.getImPreferences(userId);
       const subscriptionReady = this.hasReadySubscription(im);
-      const nextIm = {
-        ...im,
-        feishu: {
-          ...im.feishu,
-          appId,
-          appSecret,
-          botName,
-          state: 'connected' as ImConnectionState,
-          updatedAt: new Date().toISOString(),
-        },
+      const currentBots = this.getFeishuBots(im);
+      const existing = currentBots.find(b => b.appId === appId);
+      const nextFeishu: FeishuConnectionPreferences = {
+        id: appId,
+        appId,
+        appSecret,
+        botName: botName || existing?.botName || '飞书机器人',
+        state: 'connected' as ImConnectionState,
+        isDefault: existing ? existing.isDefault : currentBots.length === 0,
+        updatedAt: new Date().toISOString(),
       };
 
-      await this.updateImPreferences(userId, {
-        ...nextIm,
-      });
+      let nextBots = [...currentBots];
+      const existingIndex = currentBots.findIndex(b => b.appId === appId);
+      if (existingIndex > -1) {
+        nextBots[existingIndex] = { ...nextBots[existingIndex], ...nextFeishu };
+      } else {
+        nextBots.push(nextFeishu);
+      }
 
-      const bridge = await this.startFeishuBridge(userId, nextIm);
+      const nextIm = {
+        ...im,
+        feishuBots: nextBots,
+        feishu: nextBots.find(b => b.isDefault) || nextFeishu,
+      };
+
+      await this.updateImPreferences(userId, nextIm);
+
+      const bridge = await this.startFeishuBridge(userId, appId, nextIm);
       const bridgeConnected = bridge.status === 'connected';
       const state: ImConnectionState = botReachable && bridgeConnected ? 'ready' : 'connected';
 
+      nextFeishu.state = state;
+      if (existingIndex > -1) {
+        nextBots[existingIndex].state = state;
+      } else {
+        nextBots[nextBots.length - 1].state = state;
+      }
+
       await this.updateImPreferences(userId, {
         ...nextIm,
-        feishu: {
-          ...nextIm.feishu,
-          state,
-          updatedAt: new Date().toISOString(),
-        },
+        feishuBots: nextBots,
+        feishu: nextBots.find(b => b.isDefault) || nextFeishu,
       });
 
       return this.buildTestResult({
@@ -318,32 +469,80 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
 
   async saveDingTalkConnection(userId: string, dto: SaveDingTalkConnectionDto) {
     const im = await this.getImPreferences(userId);
+    const clientId = dto.clientId.trim();
+    const botName = dto.botName?.trim() || '钉钉机器人';
+
+    const currentBots = this.getDingTalkBots(im);
+    const existingBot = currentBots.find(b => b.clientId === clientId);
+
+    const clientSecret = dto.clientSecret?.trim() || existingBot?.clientSecret;
+    if (!clientSecret) {
+      throw new BadRequestException('钉钉 Client Secret 不能为空');
+    }
+
     const nextDingTalk: DingTalkConnectionPreferences = {
-      ...im.dingtalk,
-      clientId: dto.clientId.trim(),
-      clientSecret: dto.clientSecret.trim(),
-      botName: dto.botName?.trim() || im.dingtalk?.botName || '钉钉机器人',
-      state: 'configured',
+      id: clientId,
+      clientId,
+      clientSecret,
+      botName,
+      state: existingBot?.state || 'configured',
       updatedAt: new Date().toISOString(),
     };
 
-    await this.updateImPreferences(userId, {
+    const existingIndex = currentBots.findIndex(b => b.clientId === clientId);
+    const nextBots = [...currentBots];
+    if (existingIndex > -1) {
+      nextBots[existingIndex] = { ...nextBots[existingIndex], ...nextDingTalk };
+    } else {
+      nextBots.push({ ...nextDingTalk, isDefault: currentBots.length === 0 });
+    }
+
+    const nextIm: ImPreferences = {
       ...im,
-      dingtalk: nextDingTalk,
-    });
+      dingtalkBots: nextBots,
+      dingtalk: nextBots.find(b => b.isDefault) || nextDingTalk,
+    };
 
-    this.logger.log(`dingtalk_connection_saved userId=${userId}`);
-    void this.startDingTalkBridge(userId, { ...im, dingtalk: nextDingTalk }).catch((error) => {
+    await this.updateImPreferences(userId, nextIm);
+
+    this.logger.log(`dingtalk_connection_saved userId=${userId} clientId=${clientId}`);
+    void this.startDingTalkBridge(userId, clientId, nextIm).catch((error) => {
       const message = error instanceof Error ? error.message : 'unknown_error';
-      this.logger.warn(`dingtalk_bridge_start_after_save_failed userId=${userId} reason=${message}`);
+      this.logger.warn(`dingtalk_bridge_start_after_save_failed userId=${userId} clientId=${clientId} reason=${message}`);
     });
 
-    return this.buildDingTalkStatus(nextDingTalk, { ...im, dingtalk: nextDingTalk }, this.dingtalkBridges.get(userId));
+    return this.buildDingTalkStatus(nextDingTalk, nextIm, this.dingtalkBridges.get(`${userId}:${clientId}`));
+  }
+
+  async deleteDingTalkConnection(userId: string, clientId: string) {
+    const im = await this.getImPreferences(userId);
+    const currentBots = this.getDingTalkBots(im);
+    const nextBots = currentBots.filter(b => b.clientId !== clientId);
+
+    await this.stopDingTalkBridge(userId, clientId);
+
+    const subscriptions = (im.subscriptions || []).filter(s => !(s.provider === 'dingtalk' && s.robotId === clientId));
+    const bindings = (im.bindings || []).filter(b => !(b.provider === 'dingtalk' && b.robotId === clientId));
+
+    if (nextBots.length > 0 && !nextBots.some(b => b.isDefault)) {
+      nextBots[0].isDefault = true;
+    }
+
+    const nextIm: ImPreferences = {
+      ...im,
+      dingtalkBots: nextBots,
+      dingtalk: nextBots.find(b => b.isDefault) || undefined,
+      subscriptions,
+      bindings,
+    };
+
+    await this.updateImPreferences(userId, nextIm);
+    return this.getStatus(userId);
   }
 
   async testDingTalkConnection(userId: string, dto: SaveDingTalkConnectionDto) {
     const clientId = dto.clientId.trim();
-    const clientSecret = dto.clientSecret.trim();
+    const clientSecret = dto.clientSecret?.trim() || '';
 
     if (!clientId || !clientSecret) {
       return this.buildTestResult({
@@ -356,30 +555,48 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     }
 
     const im = await this.getImPreferences(userId);
+    const currentBots = this.getDingTalkBots(im);
+    const existing = currentBots.find(b => b.clientId === clientId);
+    const nextDingTalk: DingTalkConnectionPreferences = {
+      id: clientId,
+      clientId,
+      clientSecret,
+      botName: dto.botName?.trim() || existing?.botName || '钉钉机器人',
+      state: 'connected' as ImConnectionState,
+      isDefault: existing ? existing.isDefault : currentBots.length === 0,
+      updatedAt: new Date().toISOString(),
+    };
+
+    let nextBots = [...currentBots];
+    const existingIndex = currentBots.findIndex(b => b.clientId === clientId);
+    if (existingIndex > -1) {
+      nextBots[existingIndex] = { ...nextBots[existingIndex], ...nextDingTalk };
+    } else {
+      nextBots.push(nextDingTalk);
+    }
+
     const nextIm = {
       ...im,
-      dingtalk: {
-        ...im.dingtalk,
-        clientId,
-        clientSecret,
-        botName: dto.botName?.trim() || im.dingtalk?.botName || '钉钉机器人',
-        state: 'connected' as ImConnectionState,
-        updatedAt: new Date().toISOString(),
-      },
+      dingtalkBots: nextBots,
+      dingtalk: nextBots.find(b => b.isDefault) || nextDingTalk,
     };
 
     await this.updateImPreferences(userId, nextIm);
-    const bridge = await this.startDingTalkBridge(userId, nextIm);
+    const bridge = await this.startDingTalkBridge(userId, clientId, nextIm);
     const connected = bridge.status === 'connected';
     const state: ImConnectionState = connected ? 'ready' : 'error';
 
+    nextDingTalk.state = state;
+    if (existingIndex > -1) {
+      nextBots[existingIndex].state = state;
+    } else {
+      nextBots[nextBots.length - 1].state = state;
+    }
+
     await this.updateImPreferences(userId, {
       ...nextIm,
-      dingtalk: {
-        ...nextIm.dingtalk,
-        state,
-        updatedAt: new Date().toISOString(),
-      },
+      dingtalkBots: nextBots,
+      dingtalk: nextBots.find(b => b.isDefault) || nextDingTalk,
     });
 
     return this.buildTestResult({
@@ -398,34 +615,88 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
 
   async saveWecomConnection(userId: string, dto: SaveWecomConnectionDto) {
     const im = await this.getImPreferences(userId);
+    const botId = dto.botId.trim();
+    const botName = dto.botName?.trim() || '企业微信机器人';
+
+    const currentBots = this.getWecomBots(im);
+    const existingBot = currentBots.find(b => b.botId === botId);
+
+    const secret = dto.secret?.trim() || existingBot?.secret;
+    if (!secret) {
+      throw new BadRequestException('企业微信机器人 Secret 不能为空');
+    }
+
     const nextWecom: WecomConnectionPreferences = {
-      ...im.wecom,
-      botId: dto.botId.trim(),
-      secret: dto.secret.trim(),
-      botName: dto.botName?.trim() || im.wecom?.botName || '企业微信机器人',
-      state: 'configured',
+      id: botId,
+      botId,
+      secret,
+      botName,
+      state: existingBot?.state || 'configured',
       updatedAt: new Date().toISOString(),
     };
 
-    await this.updateImPreferences(userId, {
-      ...im,
-      wecom: nextWecom,
-    });
+    const existingIndex = currentBots.findIndex(b => b.botId === botId);
+    const nextBots = [...currentBots];
+    if (existingIndex > -1) {
+      nextBots[existingIndex] = { ...nextBots[existingIndex], ...nextWecom };
+    } else {
+      nextBots.push({ ...nextWecom, isDefault: currentBots.length === 0 });
+    }
 
-    this.logger.log(`wecom_connection_saved userId=${userId}`);
-    void this.startWecomBridge(userId, { ...im, wecom: nextWecom }).catch((error) => {
+    const nextIm: ImPreferences = {
+      ...im,
+      wecomBots: nextBots,
+      wecom: nextBots.find(b => b.isDefault) || nextWecom,
+    };
+
+    await this.updateImPreferences(userId, nextIm);
+
+    this.logger.log(`wecom_connection_saved userId=${userId} botId=${botId}`);
+    void this.startWecomBridge(userId, botId, nextIm).catch((error) => {
       const message = error instanceof Error ? error.message : 'unknown_error';
-      this.logger.warn(`wecom_bridge_start_after_save_failed userId=${userId} reason=${message}`);
+      this.logger.warn(`wecom_bridge_start_after_save_failed userId=${userId} botId=${botId} reason=${message}`);
     });
-    return this.buildWecomStatus(nextWecom, { ...im, wecom: nextWecom }, this.wecomBridges.get(userId));
+    return this.buildWecomStatus(nextWecom, nextIm, this.wecomBridges.get(`${userId}:${botId}`));
   }
 
-  async startWecom(userId: string) {
+  async deleteWecomConnection(userId: string, botId: string) {
     const im = await this.getImPreferences(userId);
-    const runtime = await this.startWecomBridge(userId, im);
+    const currentBots = this.getWecomBots(im);
+    const nextBots = currentBots.filter(b => b.botId !== botId);
+
+    await this.stopWecomBridge(userId, botId);
+
+    const subscriptions = (im.subscriptions || []).filter(s => !(s.provider === 'wecom' && s.robotId === botId));
+    const bindings = (im.bindings || []).filter(b => !(b.provider === 'wecom' && b.robotId === botId));
+
+    if (nextBots.length > 0 && !nextBots.some(b => b.isDefault)) {
+      nextBots[0].isDefault = true;
+    }
+
+    const nextIm: ImPreferences = {
+      ...im,
+      wecomBots: nextBots,
+      wecom: nextBots.find(b => b.isDefault) || undefined,
+      subscriptions,
+      bindings,
+    };
+
+    await this.updateImPreferences(userId, nextIm);
+    return this.getStatus(userId);
+  }
+
+  async startWecom(userId: string, botId?: string) {
+    const im = await this.getImPreferences(userId);
+    const targetBotId = botId || im.wecom?.botId;
+    if (!targetBotId) {
+      return this.buildWecomStatus(im.wecom, im, undefined);
+    }
+    const runtime = await this.startWecomBridge(userId, targetBotId, im);
     await this.waitForWecomBridge(runtime, 6000);
     const latest = await this.getImPreferences(userId);
-    return this.buildWecomStatus(latest.wecom, latest, this.wecomBridges.get(userId));
+    const bots = this.getWecomBots(latest);
+    const targetBot = bots.find(b => b.botId === targetBotId) || latest.wecom;
+    return this.buildWecomStatus(targetBot, latest, this.wecomBridges.get(`${userId}:${targetBotId}`));
   }
 
   async generateWecomQrCode() {
@@ -555,15 +826,16 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async startWechatLogin(userId: string) {
-    await this.stopWechatBridge(userId);
+  async startWechatLogin(userId: string, ilinkBotId = 'wechat-default') {
+    const bridgeKey = `${userId}:${ilinkBotId}`;
+    await this.stopWechatBridge(userId, ilinkBotId);
 
     const runtime: WechatBridgeRuntime = {
       userId,
       status: 'waiting_scan',
       startedAt: new Date().toISOString(),
     };
-    this.wechatBridges.set(userId, runtime);
+    this.wechatBridges.set(bridgeKey, runtime);
 
     const response = await axios.get(WECHAT_QR_CODE_URL, {
       timeout: 10000,
@@ -584,11 +856,11 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     runtime.qrCodeKey = payload.qrcode;
     runtime.qrCodeUrl = payload.qrcode_img_content;
     runtime.loginAbortController = new AbortController();
-    void this.pollWechatLogin(userId, payload.qrcode, runtime.loginAbortController.signal).catch((error) => {
+    void this.pollWechatLogin(userId, ilinkBotId, payload.qrcode, runtime.loginAbortController.signal).catch((error) => {
       const message = error instanceof Error ? error.message : 'unknown_error';
       runtime.status = 'error';
       runtime.lastError = message;
-      this.logger.warn(`wechat_login_poll_failed userId=${userId} reason=${message}`);
+      this.logger.warn(`wechat_login_poll_failed userId=${userId} botId=${ilinkBotId} reason=${message}`);
     });
 
     return this.buildWechatStatus(undefined, undefined, runtime);
@@ -596,53 +868,128 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
 
   async saveWechatConnection(userId: string, dto: SaveWechatConnectionDto) {
     const im = await this.getImPreferences(userId);
+    const ilinkBotId = dto.ilinkBotId.trim();
+    const botName = dto.botName?.trim() || '微信机器人';
+
+    const currentBots = this.getWechatBots(im);
+    const existingBot = currentBots.find(b => b.ilinkBotId === ilinkBotId);
+
+    const botToken = dto.botToken?.trim() || existingBot?.botToken;
+    const ilinkUserId = dto.ilinkUserId?.trim() || existingBot?.ilinkUserId;
+
+    if (!botToken) {
+      throw new BadRequestException('微信 Bot Token 不能为空');
+    }
+    if (!ilinkUserId) {
+      throw new BadRequestException('微信 iLink User ID 不能为空');
+    }
+
     const nextWechat: WechatConnectionPreferences = {
-      ...im.wechat,
-      botToken: dto.botToken.trim(),
-      ilinkBotId: dto.ilinkBotId.trim(),
-      ilinkUserId: dto.ilinkUserId.trim(),
+      id: ilinkBotId,
+      botToken,
+      ilinkBotId,
+      ilinkUserId,
       baseUrl: dto.baseUrl?.trim() || WECHAT_DEFAULT_BASE_URL,
-      state: 'configured',
+      botName,
+      state: existingBot?.state || 'configured',
       updatedAt: new Date().toISOString(),
     };
 
-    await this.updateImPreferences(userId, {
-      ...im,
-      wechat: nextWechat,
-    });
+    const existingIndex = currentBots.findIndex(b => b.ilinkBotId === ilinkBotId);
+    const nextBots = [...currentBots];
+    if (existingIndex > -1) {
+      nextBots[existingIndex] = { ...nextBots[existingIndex], ...nextWechat };
+    } else {
+      nextBots.push({ ...nextWechat, isDefault: currentBots.length === 0 });
+    }
 
-    void this.startWechatBridge(userId, { ...im, wechat: nextWechat }).catch((error) => {
+    const nextIm: ImPreferences = {
+      ...im,
+      wechatBots: nextBots,
+      wechat: nextBots.find(b => b.isDefault) || nextWechat,
+    };
+
+    await this.updateImPreferences(userId, nextIm);
+
+    void this.startWechatBridge(userId, ilinkBotId, nextIm).catch((error) => {
       const message = error instanceof Error ? error.message : 'unknown_error';
-      this.logger.warn(`wechat_bridge_start_after_save_failed userId=${userId} reason=${message}`);
+      this.logger.warn(`wechat_bridge_start_after_save_failed userId=${userId} botId=${ilinkBotId} reason=${message}`);
     });
 
-    this.logger.log(`wechat_connection_saved userId=${userId}`);
-    return this.buildWechatStatus(nextWechat, { ...im, wechat: nextWechat }, this.wechatBridges.get(userId));
+    this.logger.log(`wechat_connection_saved userId=${userId} botId=${ilinkBotId}`);
+    return this.buildWechatStatus(nextWechat, nextIm, this.wechatBridges.get(`${userId}:${ilinkBotId}`));
   }
 
-  async startWechat(userId: string) {
+  async deleteWechatConnection(userId: string, ilinkBotId: string) {
     const im = await this.getImPreferences(userId);
-    const runtime = await this.startWechatBridge(userId, im);
-    return this.buildWechatStatus(im.wechat, im, runtime);
-  }
+    const currentBots = this.getWechatBots(im);
+    const nextBots = currentBots.filter(b => b.ilinkBotId !== ilinkBotId);
 
-  async stopWechat(userId: string) {
-    await this.stopWechatBridge(userId);
-    const im = await this.getImPreferences(userId);
-    return this.buildWechatStatus(im.wechat, im, this.wechatBridges.get(userId));
-  }
+    await this.stopWechatBridge(userId, ilinkBotId);
 
-  async logoutWechat(userId: string) {
-    await this.stopWechatBridge(userId);
-    const im = await this.getImPreferences(userId);
-    await this.updateImPreferences(userId, {
+    const subscriptions = (im.subscriptions || []).filter(s => !(s.provider === 'wechat' && s.robotId === ilinkBotId));
+    const bindings = (im.bindings || []).filter(b => !(b.provider === 'wechat' && b.robotId === ilinkBotId));
+
+    if (nextBots.length > 0 && !nextBots.some(b => b.isDefault)) {
+      nextBots[0].isDefault = true;
+    }
+
+    const nextIm: ImPreferences = {
       ...im,
-      wechat: {
-        state: 'not_configured',
-        updatedAt: new Date().toISOString(),
-      },
-    });
-    return this.buildWechatStatus({ state: 'not_configured' }, im, undefined);
+      wechatBots: nextBots,
+      wechat: nextBots.find(b => b.isDefault) || undefined,
+      subscriptions,
+      bindings,
+    };
+
+    await this.updateImPreferences(userId, nextIm);
+    return this.getStatus(userId);
+  }
+
+  async startWechat(userId: string, ilinkBotId?: string) {
+    const im = await this.getImPreferences(userId);
+    const targetId = ilinkBotId || im.wechat?.ilinkBotId;
+    if (!targetId) {
+      return this.buildWechatStatus(im.wechat, im, undefined);
+    }
+    const runtime = await this.startWechatBridge(userId, targetId, im);
+    const latest = await this.getImPreferences(userId);
+    const bots = this.getWechatBots(latest);
+    const bot = bots.find(b => b.ilinkBotId === targetId) || latest.wechat;
+    return this.buildWechatStatus(bot, latest, runtime);
+  }
+
+  async stopWechat(userId: string, ilinkBotId?: string) {
+    const im = await this.getImPreferences(userId);
+    const targetId = ilinkBotId || im.wechat?.ilinkBotId;
+    if (targetId) {
+      await this.stopWechatBridge(userId, targetId);
+    }
+    const latest = await this.getImPreferences(userId);
+    const bots = this.getWechatBots(latest);
+    const bot = bots.find(b => b.ilinkBotId === targetId) || latest.wechat;
+    return this.buildWechatStatus(bot, latest, targetId ? this.wechatBridges.get(`${userId}:${targetId}`) : undefined);
+  }
+
+  async logoutWechat(userId: string, ilinkBotId?: string) {
+    const im = await this.getImPreferences(userId);
+    const targetId = ilinkBotId || im.wechat?.ilinkBotId;
+    if (targetId) {
+      await this.stopWechatBridge(userId, targetId);
+    }
+
+    const currentBots = this.getWechatBots(im);
+    const nextBots = currentBots.map(b => b.ilinkBotId === targetId ? { ...b, state: 'not_configured' as ImConnectionState, updatedAt: new Date().toISOString() } : b);
+
+    const nextIm = {
+      ...im,
+      wechatBots: nextBots,
+      wechat: nextBots.find(b => b.isDefault) || undefined,
+    };
+    await this.updateImPreferences(userId, nextIm);
+
+    const bot = nextBots.find(b => b.ilinkBotId === targetId) || { state: 'not_configured' as ImConnectionState };
+    return this.buildWechatStatus(bot, nextIm, undefined);
   }
 
   async createPairingCode(userId: string, provider: ImProvider = 'feishu') {
@@ -671,15 +1018,16 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     return { code, expiresAt };
   }
 
-  async listSubscriptions(userId: string, provider: ImProvider = 'feishu') {
+  async listSubscriptions(userId: string, provider: ImProvider = 'feishu', robotId?: string) {
     const im = await this.getImPreferences(userId);
-    return this.getProviderSubscriptions(im, provider);
+    return this.getProviderSubscriptions(im, provider, robotId);
   }
 
   async saveSubscriptions(
     userId: string,
     providerOrSubscriptions: ImProvider | ImSubscriptionDto[],
     maybeSubscriptions?: ImSubscriptionDto[],
+    robotId?: string,
   ) {
     const provider: ImProvider = Array.isArray(providerOrSubscriptions) ? 'feishu' : providerOrSubscriptions;
     const subscriptions = Array.isArray(providerOrSubscriptions) ? providerOrSubscriptions : (maybeSubscriptions || []);
@@ -687,6 +1035,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     const normalized = subscriptions.map((subscription) => ({
       ...subscription,
       provider,
+      robotId,
       repositoryIds: Array.from(new Set(subscription.repositoryIds || [])),
       branches: Array.from(new Set(subscription.branches || [])),
       repositoryBranchScopes: this.normalizeRepositoryBranchScopes(subscription.repositoryBranchScopes),
@@ -696,7 +1045,11 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     await this.updateImPreferences(userId, {
       ...im,
       subscriptions: [
-        ...(im.subscriptions || []).filter((subscription) => this.getSubscriptionProvider(subscription) !== provider),
+        ...(im.subscriptions || []).filter((subscription) => {
+          const isSameProvider = this.getSubscriptionProvider(subscription) === provider;
+          const isSameRobot = robotId ? subscription.robotId === robotId : !subscription.robotId;
+          return !(isSameProvider && isSameRobot);
+        }),
         ...normalized,
       ],
     });
@@ -763,41 +1116,55 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     im: ImPreferences,
     event: RepositoryEventNotificationInput,
   ): Promise<{ sent: number; skippedReason?: string }> {
-    const appId = im.feishu?.appId?.trim();
-    const appSecret = im.feishu?.appSecret?.trim();
-    if (!appId || !appSecret) {
+    const bots = this.getFeishuBots(im);
+    if (bots.length === 0) {
       return { sent: 0, skippedReason: 'feishu_not_configured' };
     }
 
-    const chatIds = this.resolveFeishuNotificationChatIds(im, event);
-    if (chatIds.length === 0) {
-      return { sent: 0, skippedReason: 'feishu_chat_not_bound' };
+    let totalSent = 0;
+    const errors: string[] = [];
+
+    for (const bot of bots) {
+      const appId = bot.appId?.trim();
+      const appSecret = bot.appSecret?.trim();
+      if (!appId || !appSecret) continue;
+
+      const chatIds = this.resolveFeishuNotificationChatIds(im, event, appId);
+      if (chatIds.length === 0) continue;
+
+      const token = await this.getTenantAccessToken(appId, appSecret);
+      if (!token) {
+        errors.push(`token_unavailable:${appId}`);
+        continue;
+      }
+
+      const sent = await this.sendFeishuEventCardToChats({
+        token,
+        chatIds,
+        event,
+        logContext: `userId=${userId} appId=${appId} eventId=${event.eventId} source=event_notification`,
+      });
+      totalSent += sent;
     }
 
-    const token = await this.getTenantAccessToken(appId, appSecret);
-    if (!token) {
-      return { sent: 0, skippedReason: 'feishu_token_unavailable' };
-    }
-
-    const sent = await this.sendFeishuEventCardToChats({
-      token,
-      chatIds,
-      event,
-      logContext: `userId=${userId} eventId=${event.eventId} source=event_notification`,
-    });
-
-    return { sent };
+    return {
+      sent: totalSent,
+      skippedReason: totalSent > 0 ? undefined : (errors.length > 0 ? errors.join(',') : 'feishu_chat_not_bound')
+    };
   }
 
-  async sendFeishuTestNotification(userId: string): Promise<{ sent: number; message: string }> {
+  async sendFeishuTestNotification(userId: string, targetAppId?: string): Promise<{ sent: number; message: string }> {
     const im = await this.getImPreferences(userId);
-    const appId = im.feishu?.appId?.trim();
-    const appSecret = im.feishu?.appSecret?.trim();
+    const bots = this.getFeishuBots(im);
+    const bot = targetAppId ? bots.find(b => b.appId === targetAppId) : (bots.find(b => b.isDefault) || bots[0]);
+    
+    const appId = bot?.appId?.trim();
+    const appSecret = bot?.appSecret?.trim();
     if (!appId || !appSecret) {
       return { sent: 0, message: '飞书机器人未配置。' };
     }
 
-    const chatIds = this.resolveAllFeishuChatIds(im);
+    const chatIds = this.resolveAllFeishuChatIds(im, appId);
     if (chatIds.length === 0) {
       return { sent: 0, message: '还没有绑定飞书群聊。' };
     }
@@ -822,7 +1189,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
         targetBranch: 'main',
         externalUrl: 'https://github.com/',
       },
-      logContext: `userId=${userId} source=test_notification`,
+      logContext: `userId=${userId} appId=${appId} source=test_notification`,
     });
 
     return {
@@ -831,27 +1198,27 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async sendDingTalkTestNotification(userId: string): Promise<{ sent: number; message: string }> {
+  async sendDingTalkTestNotification(userId: string, targetRobotId?: string): Promise<{ sent: number; message: string }> {
     const im = await this.getImPreferences(userId);
-    const result = await this.sendDingTalkRepositoryEventNotification(userId, im, this.buildTestRepositoryEvent('dingtalk'));
+    const result = await this.sendDingTalkRepositoryEventNotification(userId, im, this.buildTestRepositoryEvent('dingtalk'), targetRobotId);
     return {
       sent: result.sent,
       message: result.sent > 0 ? '钉钉测试推送已发送。' : this.toSkippedMessage(result.skippedReason, '钉钉测试推送发送失败。'),
     };
   }
 
-  async sendWecomTestNotification(userId: string): Promise<{ sent: number; message: string }> {
+  async sendWecomTestNotification(userId: string, targetRobotId?: string): Promise<{ sent: number; message: string }> {
     const im = await this.getImPreferences(userId);
-    const result = await this.sendWecomRepositoryEventNotification(userId, im, this.buildTestRepositoryEvent('wecom'));
+    const result = await this.sendWecomRepositoryEventNotification(userId, im, this.buildTestRepositoryEvent('wecom'), targetRobotId);
     return {
       sent: result.sent,
       message: result.sent > 0 ? '企业微信测试推送已发送。' : this.toSkippedMessage(result.skippedReason, '企业微信测试推送暂未发送。'),
     };
   }
 
-  async sendWechatTestNotification(userId: string): Promise<{ sent: number; message: string }> {
+  async sendWechatTestNotification(userId: string, targetRobotId?: string): Promise<{ sent: number; message: string }> {
     const im = await this.getImPreferences(userId);
-    const result = await this.sendWechatRepositoryEventNotification(userId, im, this.buildTestRepositoryEvent('wechat'));
+    const result = await this.sendWechatRepositoryEventNotification(userId, im, this.buildTestRepositoryEvent('wechat'), targetRobotId);
     return {
       sent: result.sent,
       message: result.sent > 0 ? '微信测试推送已发送。' : this.toSkippedMessage(result.skippedReason, '微信测试推送发送失败。'),
@@ -1069,6 +1436,9 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       state,
       connected,
       ilinkBotId: wechat?.ilinkBotId,
+      botName: wechat?.botName,
+      ilinkUserId: wechat?.ilinkUserId,
+      baseUrl: wechat?.baseUrl,
       summary: bridge?.status === 'waiting_scan'
         ? '等待微信扫码。'
         : bridge?.status === 'scanned'
@@ -1266,12 +1636,14 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     await Promise.all(users.map(async (user) => {
       const prefs = (user.preferences as Record<string, unknown>) || {};
       const im = ((prefs.im || {}) as ImPreferences);
-      if (!im.feishu?.appId || !im.feishu?.appSecret) return;
-
-      await this.startFeishuBridge(user.id, im).catch((error) => {
-        const message = error instanceof Error ? error.message : 'unknown_error';
-        this.logger.warn(`feishu_bridge_restore_failed userId=${user.id} reason=${message}`);
-      });
+      const bots = this.getFeishuBots(im);
+      for (const bot of bots) {
+        if (!bot.appId || !bot.appSecret) continue;
+        await this.startFeishuBridge(user.id, bot.appId, im).catch((error) => {
+          const message = error instanceof Error ? error.message : 'unknown_error';
+          this.logger.warn(`feishu_bridge_restore_failed userId=${user.id} appId=${bot.appId} reason=${message}`);
+        });
+      }
     }));
   }
 
@@ -1286,12 +1658,14 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     await Promise.all(users.map(async (user) => {
       const prefs = (user.preferences as Record<string, unknown>) || {};
       const im = ((prefs.im || {}) as ImPreferences);
-      if (!im.dingtalk?.clientId || !im.dingtalk?.clientSecret) return;
-
-      await this.startDingTalkBridge(user.id, im).catch((error) => {
-        const message = error instanceof Error ? error.message : 'unknown_error';
-        this.logger.warn(`dingtalk_bridge_restore_failed userId=${user.id} reason=${message}`);
-      });
+      const bots = this.getDingTalkBots(im);
+      for (const bot of bots) {
+        if (!bot.clientId || !bot.clientSecret) continue;
+        await this.startDingTalkBridge(user.id, bot.clientId, im).catch((error) => {
+          const message = error instanceof Error ? error.message : 'unknown_error';
+          this.logger.warn(`dingtalk_bridge_restore_failed userId=${user.id} clientId=${bot.clientId} reason=${message}`);
+        });
+      }
     }));
   }
 
@@ -1306,13 +1680,48 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     await Promise.all(users.map(async (user) => {
       const prefs = (user.preferences as Record<string, unknown>) || {};
       const im = ((prefs.im || {}) as ImPreferences);
-      if (!im.wecom?.botId || !im.wecom?.secret) return;
-
-      await this.startWecomBridge(user.id, im).catch((error) => {
-        const message = error instanceof Error ? error.message : 'unknown_error';
-        this.logger.warn(`wecom_bridge_restore_failed userId=${user.id} reason=${message}`);
-      });
+      const bots = this.getWecomBots(im);
+      for (const bot of bots) {
+        if (!bot.botId || !bot.secret) continue;
+        await this.startWecomBridge(user.id, bot.botId, im).catch((error) => {
+          const message = error instanceof Error ? error.message : 'unknown_error';
+          this.logger.warn(`wecom_bridge_restore_failed userId=${user.id} botId=${bot.botId} reason=${message}`);
+        });
+      }
     }));
+  }
+
+  async sendWechatNotificationDirectly(userId: string, text: string): Promise<{ sent: number; skippedReason?: string }> {
+    const im = await this.getImPreferences(userId);
+    const bots = this.getWechatBots(im);
+    if (bots.length === 0) {
+      return { sent: 0, skippedReason: 'wechat_not_configured' };
+    }
+
+    let totalSent = 0;
+    const errors: string[] = [];
+
+    for (const bot of bots) {
+      const ilinkBotId = bot.ilinkBotId?.trim();
+      const botToken = bot.botToken?.trim();
+      if (!ilinkBotId || !botToken) continue;
+
+      const targets = this.resolveAllProviderTargets(im, 'wechat', ilinkBotId);
+      if (targets.length === 0) continue;
+
+      for (const target of targets) {
+        const contextToken = target.binding?.contextToken || '';
+        const ok = await this.sendWechatText(bot, target.chatId, text, contextToken)
+          .then(() => true)
+          .catch((error) => {
+            this.logger.warn(`wechat_direct_notification_failed userId=${userId} botId=	ext{${ilinkBotId}} chatId=${target.chatId} reason=${error.message}`);
+            return false;
+          });
+        if (ok) totalSent += 1;
+      }
+    }
+
+    return { sent: totalSent, skippedReason: totalSent > 0 ? undefined : (errors.length > 0 ? errors.join(',') : 'wechat_chat_not_bound') };
   }
 
   private async restoreWechatBridges(): Promise<void> {
@@ -1326,20 +1735,23 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     await Promise.all(users.map(async (user) => {
       const prefs = (user.preferences as Record<string, unknown>) || {};
       const im = ((prefs.im || {}) as ImPreferences);
-      if (!im.wechat?.botToken || !im.wechat?.ilinkBotId) return;
-
-      await this.startWechatBridge(user.id, im).catch((error) => {
-        const message = error instanceof Error ? error.message : 'unknown_error';
-        this.logger.warn(`wechat_bridge_restore_failed userId=${user.id} reason=${message}`);
-      });
+      const bots = this.getWechatBots(im);
+      for (const bot of bots) {
+        if (!bot.botToken || !bot.ilinkBotId) continue;
+        await this.startWechatBridge(user.id, bot.ilinkBotId, im).catch((error) => {
+          const message = error instanceof Error ? error.message : 'unknown_error';
+          this.logger.warn(`wechat_bridge_restore_failed userId=${user.id} botId=${bot.ilinkBotId} reason=${message}`);
+        });
+      }
     }));
   }
 
-  private async startFeishuBridge(userId: string, im: ImPreferences) {
-    const appId = im.feishu?.appId?.trim();
-    const appSecret = im.feishu?.appSecret?.trim();
+  private async startFeishuBridge(userId: string, appId: string, im: ImPreferences) {
+    const bots = this.getFeishuBots(im);
+    const bot = bots.find(b => b.appId === appId);
+    const appSecret = bot?.appSecret?.trim();
     if (!appId || !appSecret) {
-      await this.stopFeishuBridge(userId);
+      await this.stopFeishuBridge(userId, appId);
       return {
         userId,
         appId: appId || '',
@@ -1347,12 +1759,13 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    const current = this.feishuBridges.get(userId);
+    const bridgeKey = `${userId}:${appId}`;
+    const current = this.feishuBridges.get(bridgeKey);
     if (current?.status === 'connected' && current.appId === appId) {
       return current;
     }
 
-    await this.stopFeishuBridge(userId);
+    await this.stopFeishuBridge(userId, appId);
 
     const runtime: FeishuBridgeRuntime = {
       userId,
@@ -1360,7 +1773,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       status: 'connecting',
       startedAt: new Date().toISOString(),
     };
-    this.feishuBridges.set(userId, runtime);
+    this.feishuBridges.set(bridgeKey, runtime);
 
     try {
       const lark = await import('@larksuiteoapi/node-sdk');
@@ -1368,7 +1781,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
         'im.message.receive_v1': (data: Record<string, any>) => {
           void this.handleFeishuLongConnectionMessage(userId, appId, data).catch((error) => {
             const message = error instanceof Error ? error.message : 'unknown_error';
-            this.logger.error(`feishu_ws_message_handle_failed userId=${userId} reason=${message}`);
+            this.logger.error(`feishu_ws_message_handle_failed userId=${userId} appId=${appId} reason=${message}`);
           });
         },
       });
@@ -1389,30 +1802,32 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       const message = error instanceof Error ? error.message : 'unknown_error';
       runtime.status = 'error';
       runtime.lastError = message;
-      this.logger.warn(`feishu_ws_connect_failed userId=${userId} reason=${message}`);
+      this.logger.warn(`feishu_ws_connect_failed userId=${userId} appId=${appId} reason=${message}`);
       return runtime;
     }
   }
 
-  private async stopFeishuBridge(userId: string): Promise<void> {
-    const bridge = this.feishuBridges.get(userId);
+  private async stopFeishuBridge(userId: string, appId: string): Promise<void> {
+    const bridgeKey = `${userId}:${appId}`;
+    const bridge = this.feishuBridges.get(bridgeKey);
     if (!bridge) return;
 
     try {
       await bridge.wsClient?.close({ force: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown_error';
-      this.logger.warn(`feishu_ws_close_failed userId=${userId} reason=${message}`);
+      this.logger.warn(`feishu_ws_close_failed userId=${userId} appId=${appId} reason=${message}`);
     } finally {
-      this.feishuBridges.delete(userId);
+      this.feishuBridges.delete(bridgeKey);
     }
   }
 
-  private async startDingTalkBridge(userId: string, im: ImPreferences): Promise<DingTalkBridgeRuntime> {
-    const clientId = im.dingtalk?.clientId?.trim();
-    const clientSecret = im.dingtalk?.clientSecret?.trim();
+  private async startDingTalkBridge(userId: string, clientId: string, im: ImPreferences): Promise<DingTalkBridgeRuntime> {
+    const bots = this.getDingTalkBots(im);
+    const bot = bots.find(b => b.clientId === clientId);
+    const clientSecret = bot?.clientSecret?.trim();
     if (!clientId || !clientSecret) {
-      await this.stopDingTalkBridge(userId);
+      await this.stopDingTalkBridge(userId, clientId);
       return {
         userId,
         clientId: clientId || '',
@@ -1421,12 +1836,13 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    const current = this.dingtalkBridges.get(userId);
+    const bridgeKey = `${userId}:${clientId}`;
+    const current = this.dingtalkBridges.get(bridgeKey);
     if (current?.status === 'connected' && current.clientId === clientId) {
       return current;
     }
 
-    await this.stopDingTalkBridge(userId);
+    await this.stopDingTalkBridge(userId, clientId);
 
     const runtime: DingTalkBridgeRuntime = {
       userId,
@@ -1435,7 +1851,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       startedAt: new Date().toISOString(),
       webhookCache: new Map(),
     };
-    this.dingtalkBridges.set(userId, runtime);
+    this.dingtalkBridges.set(bridgeKey, runtime);
 
     try {
       const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<unknown>;
@@ -1462,15 +1878,15 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
         if (messageId) {
           client.send(messageId, { status: sdk.EventAck.SUCCESS });
         }
-        void this.handleDingTalkRobotMessage(userId, message).catch((error) => {
+        void this.handleDingTalkRobotMessage(userId, clientId, message).catch((error) => {
           const reason = error instanceof Error ? error.message : 'unknown_error';
-          this.logger.warn(`dingtalk_message_handle_failed userId=${userId} reason=${reason}`);
+          this.logger.warn(`dingtalk_message_handle_failed userId=${userId} clientId=${clientId} reason=${reason}`);
         });
       });
 
       client.registerAllEventListener((message: Record<string, any>) => {
         const eventType = String((message.headers as Record<string, any> | undefined)?.eventType || '').trim();
-        this.logger.log(`dingtalk_event_received userId=${userId} eventType=${eventType || '-'}`);
+        this.logger.log(`dingtalk_event_received userId=${userId} clientId=${clientId} eventType=${eventType || '-'}`);
         return { status: sdk.EventAck.SUCCESS };
       });
 
@@ -1486,30 +1902,32 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       runtime.lastError = message.includes('Cannot find module')
         ? '缺少 dingtalk-stream-sdk-nodejs，请安装依赖后重试。'
         : message;
-      this.logger.warn(`dingtalk_stream_connect_failed userId=${userId} reason=${runtime.lastError}`);
+      this.logger.warn(`dingtalk_stream_connect_failed userId=${userId} clientId=${clientId} reason=${runtime.lastError}`);
       return runtime;
     }
   }
 
-  private async stopDingTalkBridge(userId: string): Promise<void> {
-    const bridge = this.dingtalkBridges.get(userId);
+  private async stopDingTalkBridge(userId: string, clientId: string): Promise<void> {
+    const bridgeKey = `${userId}:${clientId}`;
+    const bridge = this.dingtalkBridges.get(bridgeKey);
     if (!bridge) return;
 
     try {
       bridge.client?.disconnect();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown_error';
-      this.logger.warn(`dingtalk_stream_disconnect_failed userId=${userId} reason=${message}`);
+      this.logger.warn(`dingtalk_stream_disconnect_failed userId=${userId} clientId=${clientId} reason=${message}`);
     } finally {
-      this.dingtalkBridges.delete(userId);
+      this.dingtalkBridges.delete(bridgeKey);
     }
   }
 
-  private async startWecomBridge(userId: string, im: ImPreferences): Promise<WecomBridgeRuntime> {
-    const botId = im.wecom?.botId?.trim();
-    const secret = im.wecom?.secret?.trim();
+  private async startWecomBridge(userId: string, botId: string, im: ImPreferences): Promise<WecomBridgeRuntime> {
+    const bots = this.getWecomBots(im);
+    const bot = bots.find(b => b.botId === botId);
+    const secret = bot?.secret?.trim();
     if (!botId || !secret) {
-      await this.stopWecomBridge(userId);
+      await this.stopWecomBridge(userId, botId);
       return {
         userId,
         botId: botId || '',
@@ -1517,12 +1935,13 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    const current = this.wecomBridges.get(userId);
+    const bridgeKey = `${userId}:${botId}`;
+    const current = this.wecomBridges.get(bridgeKey);
     if (current?.status === 'connected' && current.botId === botId) {
       return current;
     }
 
-    await this.stopWecomBridge(userId);
+    await this.stopWecomBridge(userId, botId);
 
     const runtime: WecomBridgeRuntime = {
       userId,
@@ -1530,7 +1949,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       status: 'connecting',
       startedAt: new Date().toISOString(),
     };
-    this.wecomBridges.set(userId, runtime);
+    this.wecomBridges.set(bridgeKey, runtime);
 
     try {
       const client = new AiBot.WSClient({
@@ -1553,7 +1972,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
         this.logger.log(`wecom_ws_authenticated userId=${userId} botId=${botId}`);
         void this.markProviderStateFromRuntime(userId, 'wecom').catch((error) => {
           const message = error instanceof Error ? error.message : 'unknown_error';
-          this.logger.warn(`wecom_state_update_failed userId=${userId} reason=${message}`);
+          this.logger.warn(`wecom_state_update_failed userId=${userId} botId=${botId} reason=${message}`);
         });
       });
 
@@ -1570,13 +1989,13 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       client.on('error', (error: Error) => {
         runtime.status = 'error';
         runtime.lastError = error.message || '企业微信长连接错误。';
-        this.logger.warn(`wecom_ws_error userId=${userId} reason=${runtime.lastError}`);
+        this.logger.warn(`wecom_ws_error userId=${userId} botId=${botId} reason=${runtime.lastError}`);
       });
 
       client.on('message', (frame: WsFrame<Record<string, any>>) => {
-        void this.handleWecomMessage(userId, frame).catch((error) => {
+        void this.handleWecomMessage(userId, botId, frame).catch((error) => {
           const reason = error instanceof Error ? error.message : 'unknown_error';
-          this.logger.warn(`wecom_message_handle_failed userId=${userId} reason=${reason}`);
+          this.logger.warn(`wecom_message_handle_failed userId=${userId} botId=${botId} reason=${reason}`);
         });
       });
 
@@ -1586,7 +2005,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
           text: { content: '欢迎接入 Repo-Pulse。请在设置页生成配对码后发送 /bind 配对码完成绑定。' },
         }).catch((error) => {
           const reason = error instanceof Error ? error.message : 'unknown_error';
-          this.logger.warn(`wecom_welcome_reply_failed userId=${userId} reason=${reason}`);
+          this.logger.warn(`wecom_welcome_reply_failed userId=${userId} botId=${botId} reason=${reason}`);
         });
       });
 
@@ -1597,32 +2016,33 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       const message = error instanceof Error ? error.message : 'unknown_error';
       runtime.status = 'error';
       runtime.lastError = message;
-      this.logger.warn(`wecom_ws_connect_failed userId=${userId} reason=${message}`);
+      this.logger.warn(`wecom_ws_connect_failed userId=${userId} botId=${botId} reason=${message}`);
       return runtime;
     }
   }
 
-  private async stopWecomBridge(userId: string): Promise<void> {
-    const bridge = this.wecomBridges.get(userId);
+  private async stopWecomBridge(userId: string, botId: string): Promise<void> {
+    const bridgeKey = `${userId}:${botId}`;
+    const bridge = this.wecomBridges.get(bridgeKey);
     if (!bridge) return;
 
     try {
       bridge.client?.disconnect();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown_error';
-      this.logger.warn(`wecom_ws_disconnect_failed userId=${userId} reason=${message}`);
+      this.logger.warn(`wecom_ws_disconnect_failed userId=${userId} botId=${botId} reason=${message}`);
     } finally {
-      this.wecomBridges.delete(userId);
+      this.wecomBridges.delete(bridgeKey);
     }
   }
 
-  private async ensureWecomBridgeReady(userId: string, im: ImPreferences): Promise<WecomBridgeRuntime> {
-    let runtime = this.wecomBridges.get(userId);
+  private async ensureWecomBridgeReady(userId: string, botId: string, im: ImPreferences): Promise<WecomBridgeRuntime> {
+    let runtime = this.wecomBridges.get(`${userId}:${botId}`);
     if (runtime?.status === 'connected' && runtime.client) {
       return runtime;
     }
 
-    runtime = await this.startWecomBridge(userId, im);
+    runtime = await this.startWecomBridge(userId, botId, im);
     await this.waitForWecomBridge(runtime, 6000);
     return runtime;
   }
@@ -1643,17 +2063,19 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     await this.updateImPreferences(userId, this.withProviderState(im, provider, nextState));
   }
 
-  private async startWechatBridge(userId: string, im: ImPreferences): Promise<WechatBridgeRuntime> {
-    const wechat = im.wechat;
-    if (!wechat?.botToken || !wechat.ilinkBotId) {
-      await this.stopWechatBridge(userId);
+  private async startWechatBridge(userId: string, ilinkBotId: string, im: ImPreferences): Promise<WechatBridgeRuntime> {
+    const bots = this.getWechatBots(im);
+    const bot = bots.find(b => b.ilinkBotId === ilinkBotId);
+    const botToken = bot?.botToken?.trim();
+    if (!ilinkBotId || !botToken) {
+      await this.stopWechatBridge(userId, ilinkBotId);
       return {
         userId,
         status: 'stopped',
       };
     }
 
-    await this.stopWechatBridge(userId);
+    await this.stopWechatBridge(userId, ilinkBotId);
     const pollAbortController = new AbortController();
     const runtime: WechatBridgeRuntime = {
       userId,
@@ -1662,28 +2084,30 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       pollAbortController,
       syncCursor: '',
     };
-    this.wechatBridges.set(userId, runtime);
+    const bridgeKey = `${userId}:${ilinkBotId}`;
+    this.wechatBridges.set(bridgeKey, runtime);
     runtime.status = 'connected';
 
-    void this.pollWechatMessages(userId, pollAbortController.signal).catch((error) => {
+    void this.pollWechatMessages(userId, ilinkBotId, pollAbortController.signal).catch((error) => {
       const message = error instanceof Error ? error.message : 'unknown_error';
       runtime.status = 'error';
       runtime.lastError = message;
-      this.logger.warn(`wechat_poll_failed userId=${userId} reason=${message}`);
+      this.logger.warn(`wechat_poll_failed userId=${userId} botId=${ilinkBotId} reason=${message}`);
     });
 
-    this.logger.log(`wechat_polling_started userId=${userId} ilinkBotId=${wechat.ilinkBotId}`);
+    this.logger.log(`wechat_polling_started userId=${userId} ilinkBotId=${ilinkBotId}`);
     return runtime;
   }
 
-  private async stopWechatBridge(userId: string): Promise<void> {
-    const bridge = this.wechatBridges.get(userId);
+  private async stopWechatBridge(userId: string, ilinkBotId: string): Promise<void> {
+    const bridgeKey = `${userId}:${ilinkBotId}`;
+    const bridge = this.wechatBridges.get(bridgeKey);
     if (!bridge) return;
 
     bridge.loginAbortController?.abort();
     bridge.pollAbortController?.abort();
-    this.wechatBridges.delete(userId);
-    this.logger.log(`wechat_bridge_stopped userId=${userId}`);
+    this.wechatBridges.delete(bridgeKey);
+    this.logger.log(`wechat_bridge_stopped userId=${userId} botId=${ilinkBotId}`);
   }
 
   private async handleFeishuLongConnectionMessage(
@@ -1734,7 +2158,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async handleDingTalkRobotMessage(userId: string, message: Record<string, any>): Promise<void> {
+  private async handleDingTalkRobotMessage(userId: string, clientId: string, message: Record<string, any>): Promise<void> {
     const headers = (message.headers || {}) as Record<string, any>;
     const messageId = String(headers.messageId || '').trim();
     if (messageId && this.recentDingTalkEventIds.has(messageId)) return;
@@ -1760,7 +2184,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     const text = this.extractDingTalkMessageText(data);
     const code = this.extractBindCode(text);
 
-    const runtime = this.dingtalkBridges.get(userId);
+    const runtime = this.dingtalkBridges.get(`${userId}:${clientId}`);
     if (runtime && chatId && sessionWebhook) {
       runtime.webhookCache.set(chatId, sessionWebhook);
       if (runtime.webhookCache.size > 200) {
@@ -1770,7 +2194,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.logger.log(
-      `dingtalk_message_received userId=${userId} chatId=${chatId || '-'} openId=${openId || '-'} sender=${senderNick || '-'} hasBindCode=${Boolean(code)}`,
+      `dingtalk_message_received userId=${userId} clientId=${clientId} chatId=${chatId || '-'} openId=${openId || '-'} sender=${senderNick || '-'} hasBindCode=${Boolean(code)}`,
     );
 
     if (!code) return;
@@ -1782,6 +2206,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       chatId,
       chatName: senderNick || undefined,
       robotCode: robotCode || undefined,
+      robotId: clientId,
     });
 
     if (sessionWebhook) {
@@ -1792,7 +2217,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async handleWecomMessage(userId: string, frame: WsFrame<Record<string, any>>): Promise<void> {
+  private async handleWecomMessage(userId: string, botId: string, frame: WsFrame<Record<string, any>>): Promise<void> {
     const body = (frame.body || {}) as Record<string, any>;
     const msgId = String(body.msgid || '').trim();
     if (msgId && this.recentWecomEventIds.has(msgId)) return;
@@ -1807,7 +2232,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     const code = this.extractBindCode(text);
 
     this.logger.log(
-      `wecom_message_received userId=${userId} msgId=${msgId || '-'} chatId=${chatId || '-'} openId=${openId || '-'} chatType=${chatType || '-'} hasBindCode=${Boolean(code)}`,
+      `wecom_message_received userId=${userId} botId=${botId} msgId=${msgId || '-'} chatId=${chatId || '-'} openId=${openId || '-'} chatType=${chatType || '-'} hasBindCode=${Boolean(code)}`,
     );
 
     if (!code) return;
@@ -1817,10 +2242,11 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       code,
       openId: openId || chatId,
       chatId,
+      robotId: botId,
       chatName: chatType === 'group' ? '企业微信群聊' : '企业微信单聊',
     });
 
-    const runtime = this.wecomBridges.get(userId);
+    const runtime = this.wecomBridges.get(`${userId}:${botId}`);
     if (runtime?.client) {
       await runtime.client.replyStream(
         frame,
@@ -1834,10 +2260,10 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async pollWechatLogin(userId: string, qrCodeKey: string, signal: AbortSignal): Promise<void> {
+  private async pollWechatLogin(userId: string, ilinkBotId: string, qrCodeKey: string, signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
       const response = await axios.get(
-        `${WECHAT_QR_STATUS_URL}${encodeURIComponent(qrCodeKey)}`,
+        `${WECHAT_QR_STATUS_URL}${qrCodeKey}`,
         {
           timeout: 40_000,
           signal,
@@ -1852,7 +2278,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
         ilink_user_id?: string;
       };
 
-      const runtime = this.wechatBridges.get(userId);
+      const runtime = this.wechatBridges.get(`${userId}:${ilinkBotId}`);
       if (!runtime) return;
 
       if (payload.status === 'scaned') {
@@ -1862,7 +2288,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
         runtime.lastError = '微信二维码已过期，请重新扫码。';
         return;
       } else if (payload.status === 'confirmed') {
-        if (!payload.bot_token || !payload.ilink_bot_id || !payload.ilink_user_id) {
+        if (!payload.bot_token || !payload.ilink_bot_id) {
           runtime.status = 'error';
           runtime.lastError = '微信扫码成功，但未返回完整凭证。';
           return;
@@ -1871,8 +2297,9 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
         await this.saveWechatConnection(userId, {
           botToken: payload.bot_token,
           ilinkBotId: payload.ilink_bot_id,
-          ilinkUserId: payload.ilink_user_id,
+          ilinkUserId: payload.ilink_user_id || '',
           baseUrl: payload.baseurl || WECHAT_DEFAULT_BASE_URL,
+          botName: '微信机器人',
         });
         return;
       }
@@ -1881,16 +2308,18 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async pollWechatMessages(userId: string, signal: AbortSignal): Promise<void> {
-    const runtime = this.wechatBridges.get(userId);
+  private async pollWechatMessages(userId: string, ilinkBotId: string, signal: AbortSignal): Promise<void> {
+    const bridgeKey = `${userId}:${ilinkBotId}`;
+    const runtime = this.wechatBridges.get(bridgeKey);
     if (!runtime) return;
 
     let failures = 0;
     while (!signal.aborted) {
       try {
         const im = await this.getImPreferences(userId);
-        const wechat = im.wechat;
-        if (!wechat?.botToken || !wechat.ilinkBotId) {
+        const bots = this.getWechatBots(im);
+        const bot = bots.find(b => b.ilinkBotId === ilinkBotId);
+        if (!bot?.botToken || !bot.ilinkBotId) {
           runtime.status = 'error';
           runtime.lastError = '微信凭证缺失，请重新扫码登录。';
           return;
@@ -1903,7 +2332,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
           msgs?: Array<Record<string, any>>;
           get_updates_buf?: string;
         }>(
-          wechat,
+          bot,
           '/ilink/bot/getupdates',
           {
             get_updates_buf: runtime.syncCursor || '',
@@ -1914,25 +2343,44 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
         );
 
         failures = 0;
+
+        if (response.errcode === -14) {
+          if (runtime.syncCursor) {
+            this.logger.warn(`wechat_session_expired_reset_cursor userId=${userId} botId=${ilinkBotId}`);
+            runtime.syncCursor = '';
+          } else {
+            runtime.status = 'error';
+            runtime.lastError = '微信会话已过期，请重新扫码登录。';
+            return;
+          }
+          await this.sleep(5000);
+          continue;
+        }
+
+        if (response.ret !== 0 && response.errcode) {
+          this.logger.warn(`wechat_api_error userId=${userId} botId=${ilinkBotId} ret=${response.ret} errcode=${response.errcode} errmsg=${response.errmsg}`);
+          continue;
+        }
+
         if (response.get_updates_buf) {
           runtime.syncCursor = response.get_updates_buf;
         }
 
         for (const message of response.msgs || []) {
-          await this.handleWechatMessage(userId, message);
+          await this.handleWechatMessage(userId, ilinkBotId, message);
         }
       } catch (error) {
         if (signal.aborted) return;
         failures += 1;
         const delay = Math.min(3000 * failures, 60_000);
         const message = error instanceof Error ? error.message : 'unknown_error';
-        this.logger.warn(`wechat_poll_retry userId=${userId} failures=${failures} delay=${delay} reason=${message}`);
+        this.logger.warn(`wechat_poll_retry userId=${userId} botId=${ilinkBotId} failures=${failures} delay=${delay} reason=${message}`);
         await this.sleep(delay);
       }
     }
   }
 
-  private async handleWechatMessage(userId: string, message: Record<string, any>): Promise<void> {
+  private async handleWechatMessage(userId: string, ilinkBotId: string, message: Record<string, any>): Promise<void> {
     if (message.message_type !== WECHAT_MESSAGE_TYPE.USER) return;
     if (message.message_state !== WECHAT_MESSAGE_STATE.FINISH) return;
 
@@ -1945,7 +2393,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       .trim();
     const code = this.extractBindCode(text);
 
-    this.logger.log(`wechat_message_received userId=${userId} chatId=${chatId || '-'} hasBindCode=${Boolean(code)}`);
+    this.logger.log(`wechat_message_received userId=${userId} botId=${ilinkBotId} chatId=${chatId || '-'} hasBindCode=${Boolean(code)}`);
     if (!code) return;
 
     const bindResult = await this.bindProviderUser({
@@ -1953,14 +2401,17 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       code,
       openId: chatId,
       chatId,
+      robotId: ilinkBotId,
       contextToken,
     });
 
     const im = await this.getImPreferences(userId);
-    if (im.wechat) {
-      await this.sendWechatText(im.wechat, chatId, bindResult.message, contextToken).catch((error) => {
+    const bots = this.getWechatBots(im);
+    const bot = bots.find(b => b.ilinkBotId === ilinkBotId);
+    if (bot) {
+      await this.sendWechatText(bot, chatId, bindResult.message, contextToken).catch((error) => {
         const reason = error instanceof Error ? error.message : 'unknown_error';
-        this.logger.warn(`wechat_bind_reply_failed userId=${userId} reason=${reason}`);
+        this.logger.warn(`wechat_bind_reply_failed userId=${userId} botId=${ilinkBotId} reason=${reason}`);
       });
     }
   }
@@ -2042,8 +2493,9 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
   private resolveFeishuNotificationChatIds(
     im: ImPreferences,
     event: RepositoryEventNotificationInput,
+    robotId?: string,
   ): string[] {
-    return this.resolveProviderNotificationChatIds(im, 'feishu', event)
+    return this.resolveProviderNotificationChatIds(im, 'feishu', event, robotId)
       .map((target) => target.chatId);
   }
 
@@ -2051,9 +2503,10 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     im: ImPreferences,
     provider: ImProvider,
     event: RepositoryEventNotificationInput,
+    robotId?: string,
   ): Array<{ chatId: string; binding?: NonNullable<ImPreferences['bindings']>[number] }> {
     const targets = new Map<string, { chatId: string; binding?: NonNullable<ImPreferences['bindings']>[number] }>();
-    const allSubscriptions = this.getProviderSubscriptions(im, provider);
+    const allSubscriptions = this.getProviderSubscriptions(im, provider, robotId);
     const subscriptions = allSubscriptions.filter((subscription) => {
       return matchesFeishuSubscription(subscription, event);
     });
@@ -2070,7 +2523,9 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     if (allSubscriptions.length === 0) {
       for (const binding of im.bindings || []) {
         if (binding.chatId && this.getBindingProvider(binding) === provider) {
-          targets.set(binding.chatId, { chatId: binding.chatId, binding });
+          if (!robotId || !binding.robotId || binding.robotId === robotId) {
+            targets.set(binding.chatId, { chatId: binding.chatId, binding });
+          }
         }
       }
     }
@@ -2078,16 +2533,17 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     return Array.from(targets.values());
   }
 
-  private resolveAllFeishuChatIds(im: ImPreferences): string[] {
-    return this.resolveAllProviderTargets(im, 'feishu').map((target) => target.chatId);
+  private resolveAllFeishuChatIds(im: ImPreferences, robotId?: string): string[] {
+    return this.resolveAllProviderTargets(im, 'feishu', robotId).map((target) => target.chatId);
   }
 
   private resolveAllProviderTargets(
     im: ImPreferences,
     provider: ImProvider,
+    robotId?: string,
   ): Array<{ chatId: string; binding?: NonNullable<ImPreferences['bindings']>[number] }> {
     const targets = new Map<string, { chatId: string; binding?: NonNullable<ImPreferences['bindings']>[number] }>();
-    for (const subscription of this.getProviderSubscriptions(im, provider)) {
+    for (const subscription of this.getProviderSubscriptions(im, provider, robotId)) {
       if (subscription.enabled && subscription.chatId) {
         targets.set(subscription.chatId, {
           chatId: subscription.chatId,
@@ -2097,7 +2553,9 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     }
     for (const binding of im.bindings || []) {
       if (binding.chatId && this.getBindingProvider(binding) === provider) {
-        targets.set(binding.chatId, { chatId: binding.chatId, binding });
+        if (!robotId || !binding.robotId || binding.robotId === robotId) {
+          targets.set(binding.chatId, { chatId: binding.chatId, binding });
+        }
       }
     }
     return Array.from(targets.values());
@@ -2107,107 +2565,140 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     userId: string,
     im: ImPreferences,
     event: RepositoryEventNotificationInput,
+    targetRobotId?: string,
   ): Promise<{ sent: number; skippedReason?: string }> {
-    const clientId = im.dingtalk?.clientId?.trim();
-    const clientSecret = im.dingtalk?.clientSecret?.trim();
-    if (!clientId || !clientSecret) {
+    const bots = this.getDingTalkBots(im).filter(b => !targetRobotId || b.clientId === targetRobotId);
+    if (bots.length === 0) {
       return { sent: 0, skippedReason: 'dingtalk_not_configured' };
     }
 
-    const targets = this.resolveProviderNotificationChatIds(im, 'dingtalk', event);
-    if (targets.length === 0) {
-      return { sent: 0, skippedReason: 'dingtalk_chat_not_bound' };
-    }
+    let totalSent = 0;
+    const errors: string[] = [];
 
-    const accessToken = await this.getDingTalkAccessToken(clientId, clientSecret);
-    if (!accessToken) {
-      return { sent: 0, skippedReason: 'dingtalk_token_unavailable' };
-    }
+    for (const bot of bots) {
+      const clientId = bot.clientId?.trim();
+      const clientSecret = bot.clientSecret?.trim();
+      if (!clientId || !clientSecret) continue;
 
-    let sent = 0;
-    for (const target of targets) {
-      const robotCode = target.binding?.robotCode || clientId;
-      const ok = await this.sendDingTalkGroupMarkdown({
-        accessToken,
-        robotCode,
-        chatId: target.chatId,
-        event,
-      });
-      if (ok) {
-        sent += 1;
-        this.logger.log(`dingtalk_event_sent userId=${userId} chatId=${target.chatId} eventId=${event.eventId}`);
+      const targets = this.resolveProviderNotificationChatIds(im, 'dingtalk', event, clientId);
+      if (targets.length === 0) continue;
+
+      const accessToken = await this.getDingTalkAccessToken(clientId, clientSecret);
+      if (!accessToken) {
+        errors.push(`token_unavailable:${clientId}`);
+        continue;
+      }
+
+      for (const target of targets) {
+        const robotCode = target.binding?.robotCode || clientId;
+        const ok = await this.sendDingTalkGroupMarkdown({
+          accessToken,
+          robotCode,
+          chatId: target.chatId,
+          event,
+        });
+        if (ok) {
+          totalSent += 1;
+          this.logger.log(`dingtalk_event_sent userId=${userId} clientId=${clientId} chatId=${target.chatId} eventId=${event.eventId}`);
+        }
       }
     }
 
-    return { sent, skippedReason: sent > 0 ? undefined : 'dingtalk_send_failed' };
+    return {
+      sent: totalSent,
+      skippedReason: totalSent > 0 ? undefined : (errors.length > 0 ? errors.join(',') : 'dingtalk_chat_not_bound')
+    };
   }
 
   private async sendWecomRepositoryEventNotification(
     userId: string,
     im: ImPreferences,
     event: RepositoryEventNotificationInput,
+    targetRobotId?: string,
   ): Promise<{ sent: number; skippedReason?: string }> {
-    if (!im.wecom?.botId || !im.wecom?.secret) {
+    const bots = this.getWecomBots(im).filter(b => !targetRobotId || b.botId === targetRobotId);
+    if (bots.length === 0) {
       return { sent: 0, skippedReason: 'wecom_not_configured' };
     }
 
-    const targets = this.resolveProviderNotificationChatIds(im, 'wecom', event);
-    if (targets.length === 0) {
-      return { sent: 0, skippedReason: 'wecom_chat_not_bound' };
-    }
+    let totalSent = 0;
+    const errors: string[] = [];
 
-    const runtime = await this.ensureWecomBridgeReady(userId, im);
-    if (!runtime.client || runtime.status !== 'connected') {
-      return { sent: 0, skippedReason: 'wecom_connection_unavailable' };
-    }
+    for (const bot of bots) {
+      const botId = bot.botId?.trim();
+      const secret = bot.secret?.trim();
+      if (!botId || !secret) continue;
 
-    let sent = 0;
-    const markdown = formatFeishuRepositoryEventText(event);
-    for (const target of targets) {
-      const ok = await runtime.client.sendMessage(target.chatId, {
-        msgtype: 'markdown',
-        markdown: { content: markdown },
-      }).then(() => true).catch((error) => {
-        const message = error instanceof Error ? error.message : 'unknown_error';
-        this.logger.warn(`wecom_event_send_failed userId=${userId} chatId=${target.chatId} eventId=${event.eventId} reason=${message}`);
-        return false;
-      });
-      if (ok) {
-        sent += 1;
-        this.logger.log(`wecom_event_sent userId=${userId} chatId=${target.chatId} eventId=${event.eventId}`);
+      const targets = this.resolveProviderNotificationChatIds(im, 'wecom', event, botId);
+      if (targets.length === 0) continue;
+
+      const runtime = await this.ensureWecomBridgeReady(userId, botId, im);
+      if (!runtime.client || runtime.status !== 'connected') {
+        errors.push(`bridge_unavailable:${botId}`);
+        continue;
+      }
+
+      const markdown = formatFeishuRepositoryEventText(event);
+      for (const target of targets) {
+        const ok = await runtime.client.sendMessage(target.chatId, {
+          msgtype: 'markdown',
+          markdown: { content: markdown },
+        }).then(() => true).catch((error) => {
+          const message = error instanceof Error ? error.message : 'unknown_error';
+          this.logger.warn(`wecom_event_send_failed userId=${userId} botId=${botId} chatId=${target.chatId} eventId=${event.eventId} reason=${message}`);
+          return false;
+        });
+        if (ok) {
+          totalSent += 1;
+          this.logger.log(`wecom_event_sent userId=${userId} botId=${botId} chatId=${target.chatId} eventId=${event.eventId}`);
+        }
       }
     }
 
-    return { sent, skippedReason: sent > 0 ? undefined : 'wecom_send_failed' };
+    return {
+      sent: totalSent,
+      skippedReason: totalSent > 0 ? undefined : (errors.length > 0 ? errors.join(',') : 'wecom_chat_not_bound')
+    };
   }
 
   private async sendWechatRepositoryEventNotification(
     userId: string,
     im: ImPreferences,
     event: RepositoryEventNotificationInput,
+    targetRobotId?: string,
   ): Promise<{ sent: number; skippedReason?: string }> {
-    if (!im.wechat?.botToken || !im.wechat?.ilinkBotId) {
+    const bots = this.getWechatBots(im).filter(b => !targetRobotId || b.ilinkBotId === targetRobotId);
+    if (bots.length === 0) {
       return { sent: 0, skippedReason: 'wechat_not_configured' };
     }
 
-    const targets = this.resolveProviderNotificationChatIds(im, 'wechat', event);
-    if (targets.length === 0) {
-      return { sent: 0, skippedReason: 'wechat_chat_not_bound' };
+    let totalSent = 0;
+    const errors: string[] = [];
+
+    for (const bot of bots) {
+      const ilinkBotId = bot.ilinkBotId?.trim();
+      const botToken = bot.botToken?.trim();
+      if (!ilinkBotId || !botToken) continue;
+
+      const targets = this.resolveProviderNotificationChatIds(im, 'wechat', event, ilinkBotId);
+      if (targets.length === 0) continue;
+
+      const text = formatFeishuRepositoryEventText(event);
+      for (const target of targets) {
+        const contextToken = target.binding?.contextToken || '';
+        const ok = await this.sendWechatText(bot, target.chatId, text, contextToken).then(() => true).catch((error) => {
+          const message = error instanceof Error ? error.message : 'unknown_error';
+          this.logger.warn(`wechat_event_send_failed userId=${userId} botId=${ilinkBotId} chatId=${target.chatId} eventId=${event.eventId} reason=${message}`);
+          return false;
+        });
+        if (ok) totalSent += 1;
+      }
     }
 
-    let sent = 0;
-    const text = formatFeishuRepositoryEventText(event);
-    for (const target of targets) {
-      const contextToken = target.binding?.contextToken || '';
-      const ok = await this.sendWechatText(im.wechat, target.chatId, text, contextToken).then(() => true).catch((error) => {
-        const message = error instanceof Error ? error.message : 'unknown_error';
-        this.logger.warn(`wechat_event_send_failed userId=${userId} chatId=${target.chatId} eventId=${event.eventId} reason=${message}`);
-        return false;
-      });
-      if (ok) sent += 1;
-    }
-
-    return { sent, skippedReason: sent > 0 ? undefined : 'wechat_send_failed' };
+    return {
+      sent: totalSent,
+      skippedReason: totalSent > 0 ? undefined : (errors.length > 0 ? errors.join(',') : 'wechat_chat_not_bound')
+    };
   }
 
   private async sendFeishuEventCardToChats(params: {
@@ -2459,7 +2950,8 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
   }
 
   private generateWechatUin(): string {
-    return randomBytes(4).readUInt32LE(0).toString(10);
+    const n = randomBytes(4).readUInt32LE(0);
+    return Buffer.from(String(n)).toString('base64');
   }
 
   private sleep(ms: number): Promise<void> {
@@ -2495,6 +2987,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     chatName?: string;
     robotCode?: string;
     contextToken?: string;
+    robotId?: string;
   }): Promise<{ ok: boolean; message: string; userId?: string }> {
     if (!params.openId || !params.chatId) {
       return { ok: false, message: `绑定失败：缺少${this.getProviderDisplayName(params.provider)}用户或群聊信息。` };
@@ -2537,6 +3030,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
           robotCode: params.robotCode,
           contextToken: params.contextToken,
           boundAt: new Date().toISOString(),
+          robotId: params.robotId,
         },
       ];
 
@@ -2622,8 +3116,13 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
     return binding.provider || 'feishu';
   }
 
-  private getProviderSubscriptions(im: ImPreferences, provider: ImProvider): ImSubscriptionDto[] {
-    return (im.subscriptions || []).filter((subscription) => this.getSubscriptionProvider(subscription) === provider);
+  private getProviderSubscriptions(im: ImPreferences, provider: ImProvider, robotId?: string): ImSubscriptionDto[] {
+    return (im.subscriptions || []).filter((subscription) => {
+      const isSameProvider = this.getSubscriptionProvider(subscription) === provider;
+      if (!isSameProvider) return false;
+      if (robotId) return subscription.robotId === robotId;
+      return !subscription.robotId;
+    });
   }
 
   private withProviderState(im: ImPreferences, provider: ImProvider, state: ImConnectionState): ImPreferences {

@@ -52,6 +52,20 @@ export class UpdateNotificationPreferencesDto {
   webhookUrl?: string;
 
   @IsOptional()
+  @IsUrl({
+    require_tld: false,
+    require_protocol: true,
+  })
+  wecomWebhookUrl?: string;
+
+  @IsOptional()
+  @IsUrl({
+    require_tld: false,
+    require_protocol: true,
+  })
+  wechatWebhookUrl?: string;
+
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   email?: string;

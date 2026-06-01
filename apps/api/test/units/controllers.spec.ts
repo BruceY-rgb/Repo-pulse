@@ -213,20 +213,20 @@ describe('ImController', () => {
 
   it('createPairingCode delegates to service', async () => {
     const result = await controller.createPairingCode(user, {} as any);
-    expect(service.createPairingCode).toHaveBeenCalledWith('u1');
+    expect(service.createPairingCode).toHaveBeenCalledWith('u1', undefined);
     expect(result).toHaveProperty('code');
   });
 
   it('listSubscriptions delegates to service', async () => {
     const result = await controller.listSubscriptions(user);
-    expect(service.listSubscriptions).toHaveBeenCalledWith('u1');
+    expect(service.listSubscriptions).toHaveBeenCalledWith('u1', 'feishu', undefined);
     expect(Array.isArray(result)).toBe(true);
   });
 
   it('saveSubscriptions delegates to service', async () => {
     const body = { subscriptions: [{ chatId: 'c1' }] } as any;
     await controller.saveSubscriptions(user, body);
-    expect(service.saveSubscriptions).toHaveBeenCalledWith('u1', [{ chatId: 'c1' }]);
+    expect(service.saveSubscriptions).toHaveBeenCalledWith('u1', undefined, [{ chatId: 'c1' }], undefined);
   });
 });
 

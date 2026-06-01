@@ -71,6 +71,8 @@ enum NotificationChannel {
   FEISHU
   WEBHOOK
   IN_APP
+  WECOM
+  WECHAT
 }
 
 enum NotificationStatus {

@@ -18,9 +18,13 @@ export class SaveFeishuConnectionDto {
   @IsNotEmpty()
   appId!: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  appSecret!: string;
+  appSecret?: string;
+
+  @IsOptional()
+  @IsString()
+  botName?: string;
 }
 
 export class SaveDingTalkConnectionDto {
@@ -28,9 +32,9 @@ export class SaveDingTalkConnectionDto {
   @IsNotEmpty()
   clientId!: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  clientSecret!: string;
+  clientSecret?: string;
 
   @IsOptional()
   @IsString()
@@ -42,9 +46,9 @@ export class SaveWecomConnectionDto {
   @IsNotEmpty()
   botId!: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  secret!: string;
+  secret?: string;
 
   @IsOptional()
   @IsString()
@@ -52,21 +56,25 @@ export class SaveWecomConnectionDto {
 }
 
 export class SaveWechatConnectionDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  botToken!: string;
+  botToken?: string;
 
   @IsString()
   @IsNotEmpty()
   ilinkBotId!: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  ilinkUserId!: string;
+  ilinkUserId?: string;
 
   @IsOptional()
   @IsString()
   baseUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  botName?: string;
 }
 
 export class CreatePairingCodeDto {
@@ -92,6 +100,10 @@ export class ImSubscriptionDto {
   @IsOptional()
   @IsString()
   chatId?: string;
+
+  @IsOptional()
+  @IsString()
+  robotId?: string;
 
   @IsArray()
   @IsString({ each: true })

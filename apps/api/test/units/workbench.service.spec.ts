@@ -3,6 +3,7 @@ import { WorkbenchService } from '../../src/modules/workbench/workbench.service'
 
 // ── mock prisma & utils ────────────────────────────────────────────────────
 const mockUserRepoFindMany = jest.fn();
+const mockUserFindUnique = jest.fn();
 const mockConversationStateFindMany = jest.fn();
 const mockConversationStateUpsert = jest.fn();
 const mockConversationStateFindUnique = jest.fn();
@@ -41,6 +42,7 @@ jest.mock('@repo-pulse/database', () => ({
   },
   prisma: {
     userRepository: { findMany: (...a: any[]) => mockUserRepoFindMany(...a) },
+    user: { findUnique: (...a: any[]) => mockUserFindUnique(...a) },
     userRepositoryConversationState: {
       findMany: (...a: any[]) => mockConversationStateFindMany(...a),
       upsert: (...a: any[]) => mockConversationStateUpsert(...a),
@@ -88,6 +90,7 @@ describe('WorkbenchService — 私有辅助方法', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUserFindUnique.mockResolvedValue({ githubAccessToken: 'mock-token' });
     mockRepositoryService = {
       create: jest.fn(),
     };
@@ -310,6 +313,7 @@ describe('WorkbenchService — 私有辅助方法', () => {
         accessLevel: 'READ',
         role: 'VIEWER',
         isStarred: true,
+        userOAuthToken: 'mock-token',
       });
       expect(result).toEqual(
         expect.objectContaining({

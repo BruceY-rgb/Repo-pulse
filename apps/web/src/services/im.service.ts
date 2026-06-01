@@ -22,7 +22,11 @@ export interface FeishuConnectionStatus {
   botName?: string;
   summary?: string;
   nextStep?: string;
+  ilinkUserId?: string;
+  baseUrl?: string;
+  isDefault?: boolean;
   stages?: ImStageStatus[];
+  bots?: FeishuConnectionStatus[];
 }
 
 export type ImConnectionStatus = FeishuConnectionStatus;
@@ -56,6 +60,7 @@ export interface SaveWechatConnectionInput {
   ilinkBotId: string;
   ilinkUserId: string;
   baseUrl?: string;
+  botName?: string;
 }
 
 export interface FeishuConnectionTestResult {
@@ -100,6 +105,7 @@ export interface PairingCodeResult {
 export interface ImSubscription {
   id: string;
   provider?: ImProvider;
+  robotId?: string;
   chatName?: string;
   chatId?: string;
   repositoryIds: string[];
@@ -275,51 +281,73 @@ export const imService = {
     return unwrap(data);
   },
 
-  async sendFeishuTestNotification(): Promise<FeishuTestNotificationResult> {
+  async sendFeishuTestNotification(appId?: string): Promise<FeishuTestNotificationResult> {
     const { data } = await apiClient.post<ApiResponse<FeishuTestNotificationResult> | FeishuTestNotificationResult>(
       '/im/feishu/test-notification',
+      { appId },
     );
     return unwrap(data);
   },
 
-  async sendProviderTestNotification(provider: ImProvider): Promise<ImTestNotificationResult> {
-    if (provider === 'feishu') return this.sendFeishuTestNotification();
+  async sendProviderTestNotification(provider: ImProvider, robotId?: string): Promise<ImTestNotificationResult> {
+    if (provider === 'feishu') return this.sendFeishuTestNotification(robotId);
     const { data } = await apiClient.post<ApiResponse<ImTestNotificationResult> | ImTestNotificationResult>(
       `/im/${provider}/test-notification`,
+      { robotId },
     );
     return unwrap(data);
   },
 
-  async listSubscriptions(provider: ImProvider = 'feishu'): Promise<ImSubscription[]> {
-    const now = Date.now();
-    const cached = subscriptionReadCache.get(provider);
-    if (cached && cached.expiresAt > now) {
-      return cached.promise;
-    }
-
-    const promise = apiClient
-      .get<ApiResponse<ImSubscription[]> | ImSubscription[]>(
-        '/im/subscriptions',
-        { params: { provider } },
-      )
-      .then(({ data }) => unwrap(data))
-      .catch((error) => {
-        if (subscriptionReadCache.get(provider)?.promise === promise) {
-          subscriptionReadCache.delete(provider);
-        }
-        throw error;
-      });
-
-    subscriptionReadCache.set(provider, { expiresAt: now + READ_CACHE_TTL_MS, promise });
-    return promise;
+  async listSubscriptions(provider: ImProvider = 'feishu', robotId?: string): Promise<ImSubscription[]> {
+    const { data } = await apiClient.get<ApiResponse<ImSubscription[]> | ImSubscription[]>(
+      '/im/subscriptions',
+      { params: { provider, robotId } },
+    );
+    return unwrap(data);
   },
 
-  async saveSubscriptions(input: SaveSubscriptionsInput, provider: ImProvider = 'feishu'): Promise<ImSubscription[]> {
+  async saveSubscriptions(input: SaveSubscriptionsInput, provider: ImProvider = 'feishu', robotId?: string): Promise<ImSubscription[]> {
     const { data } = await apiClient.post<ApiResponse<ImSubscription[]> | ImSubscription[]>(
       '/im/subscriptions',
-      { provider, ...input },
+      { provider, robotId, ...input },
     );
     clearImReadCache(provider);
+    return unwrap(data);
+  },
+
+  async deleteFeishuConnection(appId: string): Promise<ImStatus> {
+    const { data } = await apiClient.post<ApiResponse<ImStatus> | ImStatus>(
+      '/im/feishu/connections/delete',
+      { appId },
+    );
+    clearImReadCache('feishu');
+    return unwrap(data);
+  },
+
+  async deleteDingTalkConnection(clientId: string): Promise<ImStatus> {
+    const { data } = await apiClient.post<ApiResponse<ImStatus> | ImStatus>(
+      '/im/dingtalk/connections/delete',
+      { clientId },
+    );
+    clearImReadCache('dingtalk');
+    return unwrap(data);
+  },
+
+  async deleteWecomConnection(botId: string): Promise<ImStatus> {
+    const { data } = await apiClient.post<ApiResponse<ImStatus> | ImStatus>(
+      '/im/wecom/connections/delete',
+      { botId },
+    );
+    clearImReadCache('wecom');
+    return unwrap(data);
+  },
+
+  async deleteWechatConnection(ilinkBotId: string): Promise<ImStatus> {
+    const { data } = await apiClient.post<ApiResponse<ImStatus> | ImStatus>(
+      '/im/wechat/connections/delete',
+      { ilinkBotId },
+    );
+    clearImReadCache('wechat');
     return unwrap(data);
   },
 };

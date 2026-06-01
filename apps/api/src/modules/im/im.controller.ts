@@ -82,8 +82,11 @@ export class ImController {
 
   @Post('dingtalk/test-notification')
   @ApiOperation({ summary: '发送钉钉测试推送' })
-  async sendDingTalkTestNotification(@CurrentUser() user: { sub: string }) {
-    return this.imService.sendDingTalkTestNotification(user.sub);
+  async sendDingTalkTestNotification(
+    @CurrentUser() user: { sub: string },
+    @Body() body: { robotId?: string },
+  ) {
+    return this.imService.sendDingTalkTestNotification(user.sub, body?.robotId);
   }
 
   @Post('wecom/connections')
@@ -113,8 +116,11 @@ export class ImController {
 
   @Post('wecom/test-notification')
   @ApiOperation({ summary: '发送企业微信测试推送' })
-  async sendWecomTestNotification(@CurrentUser() user: { sub: string }) {
-    return this.imService.sendWecomTestNotification(user.sub);
+  async sendWecomTestNotification(
+    @CurrentUser() user: { sub: string },
+    @Body() body: { robotId?: string },
+  ) {
+    return this.imService.sendWecomTestNotification(user.sub, body?.robotId);
   }
 
   @Post('wecom/start')
@@ -158,8 +164,47 @@ export class ImController {
 
   @Post('wechat/test-notification')
   @ApiOperation({ summary: '发送微信测试推送' })
-  async sendWechatTestNotification(@CurrentUser() user: { sub: string }) {
-    return this.imService.sendWechatTestNotification(user.sub);
+  async sendWechatTestNotification(
+    @CurrentUser() user: { sub: string },
+    @Body() body: { robotId?: string },
+  ) {
+    return this.imService.sendWechatTestNotification(user.sub, body?.robotId);
+  }
+
+  @Post('feishu/connections/delete')
+  @ApiOperation({ summary: '删除飞书机器人配置' })
+  async deleteFeishuConnection(
+    @CurrentUser() user: { sub: string },
+    @Body() body: { appId: string },
+  ) {
+    return this.imService.deleteFeishuConnection(user.sub, body.appId);
+  }
+
+  @Post('dingtalk/connections/delete')
+  @ApiOperation({ summary: '删除钉钉机器人配置' })
+  async deleteDingTalkConnection(
+    @CurrentUser() user: { sub: string },
+    @Body() body: { clientId: string },
+  ) {
+    return this.imService.deleteDingTalkConnection(user.sub, body.clientId);
+  }
+
+  @Post('wecom/connections/delete')
+  @ApiOperation({ summary: '删除企业微信机器人配置' })
+  async deleteWecomConnection(
+    @CurrentUser() user: { sub: string },
+    @Body() body: { botId: string },
+  ) {
+    return this.imService.deleteWecomConnection(user.sub, body.botId);
+  }
+
+  @Post('wechat/connections/delete')
+  @ApiOperation({ summary: '删除微信机器人配置' })
+  async deleteWechatConnection(
+    @CurrentUser() user: { sub: string },
+    @Body() body: { ilinkBotId: string },
+  ) {
+    return this.imService.deleteWechatConnection(user.sub, body.ilinkBotId);
   }
 
   @Public()
@@ -186,16 +231,17 @@ export class ImController {
   async listSubscriptions(
     @CurrentUser() user: { sub: string },
     @Query('provider') provider?: ImProvider,
+    @Query('robotId') robotId?: string,
   ) {
-    return this.imService.listSubscriptions(user.sub, provider || 'feishu');
+    return this.imService.listSubscriptions(user.sub, provider || 'feishu', robotId);
   }
 
   @Post('subscriptions')
   @ApiOperation({ summary: '保存 IM 群订阅' })
   async saveSubscriptions(
     @CurrentUser() user: { sub: string },
-    @Body() body: SaveSubscriptionsDto,
+    @Body() body: SaveSubscriptionsDto & { robotId?: string },
   ) {
-    return this.imService.saveSubscriptions(user.sub, body.provider, body.subscriptions);
+    return this.imService.saveSubscriptions(user.sub, body.provider, body.subscriptions, body.robotId);
   }
 }

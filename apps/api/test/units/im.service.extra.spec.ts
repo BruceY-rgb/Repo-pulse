@@ -155,7 +155,7 @@ describe('ImService - additional coverage', () => {
       mockAxios.post.mockResolvedValueOnce({ status: 401, data: { code: 1 } });
 
       const result = await service.sendRepositoryEventNotification('u1', makeEvent());
-      expect(result.skippedReason).toBe('feishu_token_unavailable');
+      expect(result.skippedReason).toBe('token_unavailable:aid');
     });
 
     it('sends to chat when token available and binding matches', async () => {
@@ -179,7 +179,7 @@ describe('ImService - additional coverage', () => {
     it('returns feishu_token_unavailable message when token fails', async () => {
       mockUserFindUnique.mockResolvedValue(makePrefs({
         feishu: { appId: 'aid', appSecret: 'sec' },
-        subscriptions: [{ id: 's1', chatId: 'c1', enabled: true, repositoryIds: [], branches: [], events: [], repositoryBranchScopes: {} }],
+        subscriptions: [{ id: 's1', robotId: 'aid', provider: 'feishu', chatId: 'c1', enabled: true, repositoryIds: [], branches: [], events: [], repositoryBranchScopes: {} }],
       }));
       mockAxios.post.mockResolvedValueOnce({ status: 401, data: { code: 1 } });
 
@@ -191,7 +191,7 @@ describe('ImService - additional coverage', () => {
     it('sends test notification when token available', async () => {
       mockUserFindUnique.mockResolvedValue(makePrefs({
         feishu: { appId: 'aid', appSecret: 'sec' },
-        subscriptions: [{ id: 's1', chatId: 'c1', enabled: true, repositoryIds: [], branches: [], events: [], repositoryBranchScopes: {} }],
+        subscriptions: [{ id: 's1', robotId: 'aid', provider: 'feishu', chatId: 'c1', enabled: true, repositoryIds: [], branches: [], events: [], repositoryBranchScopes: {} }],
       }));
       mockAxios.post
         .mockResolvedValueOnce({ status: 200, data: { code: 0, tenant_access_token: 'tok' } })
@@ -205,7 +205,7 @@ describe('ImService - additional coverage', () => {
     it('returns failed message when send fails', async () => {
       mockUserFindUnique.mockResolvedValue(makePrefs({
         feishu: { appId: 'aid', appSecret: 'sec' },
-        subscriptions: [{ id: 's1', chatId: 'c1', enabled: true, repositoryIds: [], branches: [], events: [], repositoryBranchScopes: {} }],
+        subscriptions: [{ id: 's1', robotId: 'aid', provider: 'feishu', chatId: 'c1', enabled: true, repositoryIds: [], branches: [], events: [], repositoryBranchScopes: {} }],
       }));
       mockAxios.post
         .mockResolvedValueOnce({ status: 200, data: { code: 0, tenant_access_token: 'tok' } })

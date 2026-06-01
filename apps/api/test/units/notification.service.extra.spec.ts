@@ -34,8 +34,10 @@ import { EmailChannel } from '@modules/notification/channels/email.channel';
 import { DingTalkChannel } from '@modules/notification/channels/dingtalk.channel';
 import { FeishuChannel } from '@modules/notification/channels/feishu.channel';
 import { WebhookChannel } from '@modules/notification/channels/webhook.channel';
+import { WecomChannel } from '@modules/notification/channels/wecom.channel';
+import { WechatChannel } from '@modules/notification/channels/wechat.channel';
 
-async function makeService(channelMocks: { email?: any; dingtalk?: any; feishu?: any; webhook?: any } = {}) {
+async function makeService(channelMocks: { email?: any; dingtalk?: any; feishu?: any; webhook?: any; wecom?: any; wechat?: any } = {}) {
   const moduleRef: TestingModule = await Test.createTestingModule({
     providers: [
       NotificationService,
@@ -43,6 +45,8 @@ async function makeService(channelMocks: { email?: any; dingtalk?: any; feishu?:
       { provide: DingTalkChannel, useValue: channelMocks.dingtalk ?? { send: jest.fn().mockResolvedValue({ success: true }) } },
       { provide: FeishuChannel, useValue: channelMocks.feishu ?? { send: jest.fn().mockResolvedValue({ success: true }) } },
       { provide: WebhookChannel, useValue: channelMocks.webhook ?? { send: jest.fn().mockResolvedValue({ success: true }) } },
+      { provide: WecomChannel, useValue: channelMocks.wecom ?? { send: jest.fn().mockResolvedValue({ success: true }) } },
+      { provide: WechatChannel, useValue: channelMocks.wechat ?? { send: jest.fn().mockResolvedValue({ success: true }) } },
     ],
   }).compile();
   return moduleRef.get(NotificationService);
