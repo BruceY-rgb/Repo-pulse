@@ -58,7 +58,14 @@ export function matchesFeishuSubscription(
   subscription: ImSubscriptionDto,
   event: Pick<RepositoryEventNotificationInput, 'repositoryId' | 'eventType' | 'branch' | 'sourceBranch' | 'targetBranch'>,
 ): boolean {
-  if (!subscription.enabled || !subscription.chatId) return false;
+  if (!subscription.enabled) return false;
+
+  if (!subscription.chatId) {
+    const provider = subscription.provider;
+    if (provider !== 'wechat' && provider !== 'wecom') {
+      return false;
+    }
+  }
 
   const repositoryIds = Array.isArray(subscription.repositoryIds) ? subscription.repositoryIds : [];
   const branches = Array.isArray(subscription.branches) ? subscription.branches : [];

@@ -2517,6 +2517,16 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
           chatId: subscription.chatId,
           binding: this.findBindingByChatId(im, provider, subscription.chatId),
         });
+      } else {
+        // 如果订阅本身没有指定特定的 chatId（例如微信/企业微信长连接订阅中，是在机器人级别做的全局订阅配置）
+        // 那么应该分发给所有绑定到此机器人（robotId）的 chatId 会话！
+        for (const binding of im.bindings || []) {
+          if (binding.chatId && this.getBindingProvider(binding) === provider) {
+            if (!robotId || !binding.robotId || binding.robotId === robotId) {
+              targets.set(binding.chatId, { chatId: binding.chatId, binding });
+            }
+          }
+        }
       }
     }
 
