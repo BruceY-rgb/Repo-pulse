@@ -52,6 +52,14 @@
     --info-foreground:    213 100% 68%;
 
     /* ─── 圆角 ──────────────────────────────────────────────────────── */
+    /* GitHub 兼容变量 */
+    --github-accent: 16 100% 50%;
+    --github-bg: 220 13% 8%;
+    --github-border: 220 13% 20%;
+    --github-surface: 220 13% 16%;
+    --github-text: 210 20% 96%;
+    --github-text-secondary: 215 14% 60%;
+
     --radius: 0.75rem;
   }
 }
@@ -150,6 +158,31 @@
     @apply bg-card rounded-lg p-4 text-sm overflow-x-auto;
   }
 
+  .desktop-drag {
+    -webkit-app-region: drag;
+  }
+
+  .desktop-window-drag-strip {
+    position: fixed;
+    top: 0;
+    left: 92px;
+    right: 92px;
+    z-index: 60;
+    height: 12px;
+    -webkit-app-region: drag;
+  }
+
+  .desktop-no-drag,
+  .desktop-shell a,
+  .desktop-shell button,
+  .desktop-shell input,
+  .desktop-shell textarea,
+  .desktop-shell select,
+  .desktop-shell [role='button'],
+  .desktop-shell [data-radix-popper-content-wrapper] {
+    -webkit-app-region: no-drag;
+  }
+
   /* ─── 动画工具 ───────────────────────────────────────────────────── */
   .animate-float {
     animation: float 6s ease-in-out infinite;
@@ -171,3 +204,33 @@
   outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
 }
+
+/* ─── Radix ScrollArea viewport 内层修正 ─────────────────────────────── */
+/* Radix v1.2.x 在 Viewport 内部包裹了一层 display:table; min-width:100%
+   的 div，导致子元素宽度按内容撑开而非受限于容器宽度，
+   文本 truncate / flex 约束全部失效。强制改回 block 布局修复此问题。 */
+[data-radix-scroll-area-viewport] > div {
+  display: block !important;
+}
+
+
+/* ─── Custom Refresh Animation (Weibo-like ease-in-out elastic snap) ─── */
+@keyframes refresh-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-refresh {
+  animation: refresh-spin 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.refresh-transition {
+  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), 
+              opacity 0.4s ease-out, 
+              top 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+

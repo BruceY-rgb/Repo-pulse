@@ -55,7 +55,7 @@ const templateDefinitions: Record<
     summaryKey: 'notifications.settings.templates.items.ignoreLowRisk.summary',
   },
   ignoreComments: {
-    conditions: [{ field: 'eventType', operator: 'in', value: ['ISSUE_COMMENT', 'PR_REVIEW'] }],
+    conditions: [{ field: 'eventType', operator: 'in', value: ['ISSUE_OPENED', 'ISSUE_CLOSED', 'ISSUE_COMMENT'] }],
     draftDescriptionKey: 'notifications.settings.templates.items.ignoreComments.draftDescription',
     draftNameKey: 'notifications.settings.templates.items.ignoreComments.draftName',
     summaryKey: 'notifications.settings.templates.items.ignoreComments.summary',

@@ -3,7 +3,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import * as bcrypt from 'bcrypt';
 import cookieParser from 'cookie-parser';
-import { PrismaClient, Platform } from '@repo-pulse/database';
+import { PrismaClient, Platform, RepositoryAccessLevel } from '@repo-pulse/database';
 import { AppModule } from '../src/app.module';
 import { GithubService } from '../src/modules/repository/services/github.service';
 import { AIService } from '../src/modules/ai/ai.service';
@@ -30,7 +30,7 @@ describe('Repository sync (e2e)', () => {
     getCommits: jest.fn(),
     getPullRequests: jest.fn(),
     getIssues: jest.fn(),
-    getBranches: jest.fn().mockResolvedValue(['main']),
+    getBranches: jest.fn().mockResolvedValue([{ name: 'main' }]),
     searchRepositories: jest.fn(),
     getUserRepositories: jest.fn(),
     getStarredRepos: jest.fn(),
@@ -59,7 +59,12 @@ describe('Repository sync (e2e)', () => {
     testRepoId = repo.id;
 
     await prisma.userRepository.create({
-      data: { userId: testUserId, repositoryId: testRepoId, role: 'ADMIN' },
+      data: {
+        userId: testUserId,
+        repositoryId: testRepoId,
+        role: 'ADMIN',
+        accessLevel: RepositoryAccessLevel.WRITE,
+      },
     });
 
     githubServiceMock.getCommits.mockResolvedValue([
@@ -73,7 +78,7 @@ describe('Repository sync (e2e)', () => {
         author: { login: 'sync-bot', avatar_url: 'https://avatar/1.png' },
       },
     ]);
-    githubServiceMock.getBranches.mockResolvedValue(['main']);
+    githubServiceMock.getBranches.mockResolvedValue([{ name: 'main' }]);
     githubServiceMock.getPullRequests.mockResolvedValue([
       {
         id: 101,

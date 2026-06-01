@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https: http://127.0.0.1:* http://localhost:*; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; worker-src 'self' blob:; media-src 'self' blob: data:;"
+    />
     <title>Repo-Pulse</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -10,6 +14,24 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      if (
+        location.protocol !== 'file:' &&
+        (location.hostname === '127.0.0.1' || location.hostname === 'localhost') &&
+        !window.__REACT_DEVTOOLS_GLOBAL_HOOK__
+      ) {
+        window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+          isDisabled: true,
+          supportsFiber: true,
+          inject: function () {
+            return 0;
+          },
+          checkDCE: function () {},
+          onCommitFiberRoot: function () {},
+          onCommitFiberUnmount: function () {}
+        };
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

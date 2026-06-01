@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { CircleHelp, Github } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
@@ -33,10 +33,12 @@ import {
   useGithubOAuthConfigMutation,
   useGithubOAuthRuntimeConfigQuery,
   useGithubOAuthLogin,
+  useDesktopGithubLoginMutation,
   useLoginMutation,
 } from '@/hooks/queries/use-auth-queries';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { ApiClientError } from '@/lib/query-hooks';
+import { isDesktopRuntime } from '@/lib/desktop';
 
 interface LoginFormValues {
   email: string;
@@ -49,8 +51,11 @@ export function Login() {
   const { t } = useLanguage();
   const loginWithGithub = useGithubOAuthLogin();
   const loginMutation = useLoginMutation();
+  const desktopGithubLoginMutation = useDesktopGithubLoginMutation();
   const oauthConfigMutation = useGithubOAuthConfigMutation();
   const oauthRuntimeConfigQuery = useGithubOAuthRuntimeConfigQuery();
+  const isDesktop = isDesktopRuntime();
+  const didAttemptDesktopLoginRef = useRef(false);
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [githubConfigHint, setGithubConfigHint] = useState<string | null>(null);
@@ -81,7 +86,7 @@ export function Login() {
   const onSubmit = async (values: LoginFormValues) => {
     try {
       await loginMutation.mutateAsync(values);
-      navigate('/dashboard', { replace: true });
+      navigate('/workbench', { replace: true });
     } catch {
       // Form-level error is rendered below.
     }
@@ -123,7 +128,26 @@ export function Login() {
     loginWithGithub();
   };
 
+  const onDesktopGithubLogin = async () => {
+    try {
+      await desktopGithubLoginMutation.mutateAsync(undefined);
+      navigate('/workbench', { replace: true });
+    } catch {
+      // Error is rendered below.
+    }
+  };
+
+  useEffect(() => {
+    if (!isDesktop || didAttemptDesktopLoginRef.current) {
+      return;
+    }
+
+    didAttemptDesktopLoginRef.current = true;
+    void onDesktopGithubLogin();
+  }, [isDesktop]);
+
   const loginErrorMessage = getLoginErrorMessage(loginMutation.error, t);
+  const desktopLoginErrorMessage = getDesktopGithubLoginErrorMessage(desktopGithubLoginMutation.error, t);
   const oauthConfigErrorMessage = getOAuthConfigErrorMessage(oauthConfigMutation.error, t);
   const oauthConfigSuccessMessage = oauthConfigMutation.isSuccess
     ? t('auth.login.oauthConfig.success')
@@ -150,6 +174,31 @@ export function Login() {
         </CardHeader>
 
         <CardContent className="space-y-4">
+          {isDesktop && (
+            <div className="space-y-3 rounded-lg border border-border/80 bg-muted/30 p-3">
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">{t('auth.login.desktop.title')}</p>
+                <p className="text-xs text-muted-foreground">{t('auth.login.desktop.description')}</p>
+              </div>
+              <Button
+                type="button"
+                onClick={onDesktopGithubLogin}
+                className="w-full gap-2"
+                size="lg"
+                disabled={desktopGithubLoginMutation.isPending}
+              >
+                <Github className="h-4 w-4" />
+                {desktopGithubLoginMutation.isPending
+                  ? t('auth.login.desktop.submitting')
+                  : t('auth.login.desktop.submit')}
+              </Button>
+              {desktopLoginErrorMessage && (
+                <p className="text-xs text-destructive">{desktopLoginErrorMessage}</p>
+              )}
+            </div>
+          )}
+
+          {!isDesktop && (
           <div className="space-y-3 rounded-lg border border-border/80 bg-muted/30 p-3">
             <div className="flex items-center justify-between gap-2">
               <p className="text-sm font-medium text-foreground">{t('auth.login.oauthConfig.title')}</p>
@@ -234,7 +283,9 @@ export function Login() {
               <p className="text-xs text-muted-foreground">{oauthRuntimeConfigError}</p>
             )}
           </div>
+          )}
 
+          {!isDesktop && (
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField
@@ -295,13 +346,17 @@ export function Login() {
               </Button>
             </form>
           </Form>
+          )}
 
+          {!isDesktop && (
           <div className="flex items-center gap-3">
             <div className="h-px flex-1 bg-border" />
             <span className="text-xs text-muted-foreground">{t('auth.login.form.or')}</span>
             <div className="h-px flex-1 bg-border" />
           </div>
+          )}
 
+          {!isDesktop && (
           <Button
             type="button"
             onClick={onGithubLogin}
@@ -312,14 +367,38 @@ export function Login() {
             <Github className="h-4 w-4" />
             {t('auth.login.github')}
           </Button>
+          )}
 
           <p className="text-center text-xs text-muted-foreground">
-            {t('auth.login.notice')}
+            {isDesktop ? t('auth.login.desktop.notice') : t('auth.login.notice')}
           </p>
         </CardContent>
       </Card>
     </div>
   );
+}
+
+function getDesktopGithubLoginErrorMessage(
+  error: ApiClientError | null,
+  t: (key: string) => string,
+): string | null {
+  if (!error) {
+    return null;
+  }
+
+  if (error.statusCode === 401) {
+    return t('auth.login.desktop.error.token');
+  }
+
+  if (typeof error.statusCode === 'number' && error.statusCode >= 500) {
+    return t('auth.login.form.error.server');
+  }
+
+  if (error.statusCode === undefined) {
+    return t('auth.login.form.error.network');
+  }
+
+  return error.message || t('auth.login.form.error.generic');
 }
 
 function getLoginErrorMessage(

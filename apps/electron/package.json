@@ -1,0 +1,63 @@
+{
+  "name": "@repo-pulse/electron",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "concurrently -k -n API,WEB,ELECTRON -c green,cyan,magenta \"cross-env FRONTEND_URL=http://127.0.0.1:5173 DESKTOP_AUTH_MODE=env pnpm --filter @repo-pulse/api dev\" \"pnpm --filter @repo-pulse/web exec vite --host 127.0.0.1\" \"wait-on tcp:3001 tcp:5173 && pnpm build:main && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "install:electron": "install-electron --no",
+    "build": "pnpm run build:main && cross-env VITE_DESKTOP=true pnpm --filter @repo-pulse/web build",
+    "build:main": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "package": "pnpm run build && electron-builder",
+    "start": "electron ."
+  },
+  "build": {
+    "appId": "com.repopulse.desktop",
+    "productName": "Repo Pulse",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../web/dist",
+        "to": "web/dist"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development"
+    }
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.129"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^42.1.0",
+    "electron-builder": "^26.8.1",
+    "typescript": "~5.9.3",
+    "wait-on": "^9.0.10"
+  }
+}

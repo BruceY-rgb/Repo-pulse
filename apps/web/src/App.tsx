@@ -1,43 +1,50 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import { Layout } from '@/components/ui-custom/Layout';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { Dashboard } from '@/pages/Dashboard';
-import { Repositories } from '@/pages/Repositories';
-import { AIAnalysis } from '@/pages/AIAnalysis';
-import { Notifications } from '@/pages/Notifications';
-import { Reports } from '@/pages/Reports';
-import { Settings } from '@/pages/Settings';
-import { Approvals } from '@/pages/Approvals';
 import { Landing } from '@/pages/Landing';
 import { Login } from '@/pages/Login';
 import { AuthCallback } from '@/pages/AuthCallback';
+import { DesktopWorkbench } from '@/pages/DesktopWorkbench';
+import { isDesktopRuntime } from '@/lib/desktop';
+
+function LegacyWorkbenchRedirect({ to }: { to: string }) {
+  const { search } = useLocation();
+  return <Navigate to={`${to}${search}`} replace />;
+}
 
 function App() {
+  const isDesktop = isDesktopRuntime();
+  const Router = isDesktop && window.location.protocol === 'file:' ? HashRouter : BrowserRouter;
+  const defaultRoute = isDesktop ? '/workbench' : '/landing';
+
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Navigate to="/landing" replace />} />
-        <Route path="/landing" element={<Landing />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/auth/callback" element={<AuthCallback />} />
+    <Router>
+      <div className={isDesktop ? 'desktop-shell' : undefined}>
+        {isDesktop ? <div className="desktop-window-drag-strip" aria-hidden="true" /> : null}
+        <Routes>
+          <Route path="/" element={<Navigate to={defaultRoute} replace />} />
+          <Route path="/landing" element={isDesktop ? <Navigate to="/workbench" replace /> : <Landing />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
 
-        <Route element={<ProtectedRoute />}>
-          <Route element={<Layout />}>
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/repositories" element={<Repositories />} />
-            <Route path="/analysis" element={<AIAnalysis />} />
-            <Route path="/notifications" element={<Notifications />} />
-            <Route path="/reports" element={<Reports />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/approvals" element={<Approvals />} />
+          <Route element={<ProtectedRoute />}>
+            <Route path="/workbench" element={<DesktopWorkbench />} />
+            <Route path="/workbench/:view" element={<DesktopWorkbench />} />
+            <Route path="/workbench/repository/:repositoryId" element={<DesktopWorkbench />} />
+            <Route path="/dashboard" element={<LegacyWorkbenchRedirect to="/workbench/dashboard" />} />
+            <Route path="/repositories" element={<LegacyWorkbenchRedirect to="/workbench/repositories" />} />
+            <Route path="/reports" element={<LegacyWorkbenchRedirect to="/workbench/reports" />} />
+            <Route path="/settings" element={<LegacyWorkbenchRedirect to="/workbench/settings" />} />
+            <Route path="/analysis" element={<LegacyWorkbenchRedirect to="/workbench" />} />
+            <Route path="/notifications" element={<LegacyWorkbenchRedirect to="/workbench" />} />
+            <Route path="/approvals" element={<LegacyWorkbenchRedirect to="/workbench" />} />
           </Route>
-        </Route>
 
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-      <Toaster theme="dark" position="top-right" richColors />
-    </BrowserRouter>
+          <Route path="*" element={<Navigate to={defaultRoute} replace />} />
+        </Routes>
+        <Toaster theme="dark" position="top-right" richColors />
+      </div>
+    </Router>
   );
 }
 

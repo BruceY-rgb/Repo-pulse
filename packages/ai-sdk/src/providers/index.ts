@@ -9,6 +9,7 @@ import { PROVIDER_PRESETS, type ProviderPreset } from './presets';
 import { AnthropicProvider } from './anthropic';
 import { OpenAICompatibleProvider } from './openai-compatible';
 import { GeminiProvider } from './gemini';
+import { OllamaProvider } from './ollama';
 
 /**
  * 创建 DeepSeek Provider
@@ -145,10 +146,26 @@ export function createCustomProvider(
 }
 
 /**
+ * 创建 Ollama Provider
+ */
+export function createOllamaProvider(
+  apiKey: string,
+  options?: Partial<AIProviderConfig>
+): OllamaProvider {
+  const preset = PROVIDER_PRESETS.ollama;
+  return new OllamaProvider({
+    apiKey,
+    baseUrl: options?.baseUrl ?? preset.baseUrl,
+    model: options?.model ?? preset.defaultModel,
+    ...options,
+  });
+}
+
+/**
  * 根据 provider 类型创建 Provider
  */
 export function createProvider(
-  provider: Exclude<ProviderType, 'google' | 'anthropic' | 'deepseek'>,
+  provider: Exclude<ProviderType, 'google' | 'anthropic' | 'deepseek' | 'ollama'>,
   apiKey: string,
   options?: Partial<AIProviderConfig>
 ): OpenAICompatibleProvider;
@@ -162,6 +179,11 @@ export function createProvider(
   apiKey: string,
   options?: Partial<AIProviderConfig>
 ): AnthropicProvider;
+export function createProvider(
+  provider: 'ollama',
+  apiKey: string,
+  options?: Partial<AIProviderConfig>
+): OllamaProvider;
 export function createProvider(
   provider: ProviderType,
   apiKey: string,
@@ -189,6 +211,15 @@ export function createProvider(
 
   if (provider === 'google') {
     return new GeminiProvider({
+      apiKey,
+      ...options,
+      baseUrl: options?.baseUrl ?? preset.baseUrl,
+      model: options?.model ?? preset.defaultModel,
+    });
+  }
+
+  if (provider === 'ollama') {
+    return new OllamaProvider({
       apiKey,
       ...options,
       baseUrl: options?.baseUrl ?? preset.baseUrl,

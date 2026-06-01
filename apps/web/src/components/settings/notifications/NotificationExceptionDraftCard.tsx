@@ -46,22 +46,28 @@ export function NotificationExceptionDraftCard({
   }
 
   return (
-    <div className="space-y-4 rounded-lg border border-primary/30 bg-primary/10 p-4">
-      <div className="space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge className="bg-[var(--github-accent)] text-white">
+    <div className="space-y-4 rounded-xl border border-primary/40 bg-primary/5 p-5 shadow-md shadow-primary/5 glow-orange">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <Badge className="bg-primary/20 text-primary border-none rounded-full px-2 py-0 text-[10px] font-semibold uppercase tracking-wider">
             {t('notifications.settings.draft.badge')}
           </Badge>
+          <button
+            onClick={onClear}
+            className="text-xs text-muted-foreground hover:text-white transition-colors"
+          >
+            {t('notifications.settings.draft.actions.clear')}
+          </button>
         </div>
         <div className="flex items-start gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10">
-            <FilePenLine className="h-4 w-4 text-white" />
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/20 shrink-0">
+            <FilePenLine className="h-4 w-4" />
           </div>
           <div className="space-y-1">
-            <p className="text-sm font-medium text-white">
+            <p className="text-sm font-semibold text-white">
               {t('notifications.settings.draft.title')}
             </p>
-            <p className="text-xs text-[var(--github-text-secondary)]">
+            <p className="text-xs text-muted-foreground leading-relaxed">
               {t('notifications.settings.draft.description')}
             </p>
           </div>
@@ -70,11 +76,11 @@ export function NotificationExceptionDraftCard({
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
-          <Label className="text-sm text-white" htmlFor="draft-rule-name">
+          <Label className="text-xs font-semibold text-muted-foreground" htmlFor="draft-rule-name">
             {t('notifications.settings.draft.fields.name')}
           </Label>
           <Input
-            className="bg-[var(--github-surface)] border-[var(--github-border)]"
+            className="bg-background border-border/60 rounded-lg text-sm text-white focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary transition-all"
             id="draft-rule-name"
             onChange={(event) => onNameChange(event.target.value)}
             value={draft.name}
@@ -82,21 +88,21 @@ export function NotificationExceptionDraftCard({
         </div>
 
         <div className="space-y-2">
-          <Label className="text-sm text-white">
+          <Label className="text-xs font-semibold text-muted-foreground">
             {t('notifications.settings.draft.fields.action')}
           </Label>
           <Select
             onValueChange={(value) => onActionChange(value as NotificationExceptionAction)}
             value={draft.action}
           >
-            <SelectTrigger className="bg-[var(--github-surface)] border-[var(--github-border)]">
+            <SelectTrigger className="bg-background border-border/60 rounded-lg text-sm text-white focus:ring-1 focus:ring-primary focus:border-primary transition-all">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="exclude">
+            <SelectContent className="bg-[#151922] border-border text-white">
+              <SelectItem value="exclude" className="focus:bg-primary/10 focus:text-primary">
                 {t('notifications.settings.draft.actions.exclude')}
               </SelectItem>
-              <SelectItem value="include">
+              <SelectItem value="include" className="focus:bg-primary/10 focus:text-primary">
                 {t('notifications.settings.draft.actions.include')}
               </SelectItem>
             </SelectContent>
@@ -105,51 +111,64 @@ export function NotificationExceptionDraftCard({
       </div>
 
       <div className="space-y-2">
-        <Label className="text-sm text-white" htmlFor="draft-rule-description">
+        <Label className="text-xs font-semibold text-muted-foreground" htmlFor="draft-rule-description">
           {t('notifications.settings.draft.fields.description')}
         </Label>
         <Input
-          className="bg-[var(--github-surface)] border-[var(--github-border)]"
+          className="bg-background border-border/60 rounded-lg text-sm text-white focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary transition-all"
           id="draft-rule-description"
           onChange={(event) => onDescriptionChange(event.target.value)}
           value={draft.description}
         />
       </div>
 
-      <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
+      {/* Preview Section */}
+      <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-1.5">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-primary/80">
           {t('notifications.settings.draft.previewLabel')}
         </p>
-        <p className="mt-2 text-sm text-white">
+        <p className="text-sm font-semibold text-white leading-relaxed">
           {draft.summary}
         </p>
-        <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
+        <p className="text-xs text-muted-foreground leading-relaxed">
           {draft.action === 'exclude'
             ? t('notifications.settings.draft.previewExclude')
             : t('notifications.settings.draft.previewInclude')}
         </p>
       </div>
 
-      <div className="flex flex-col gap-3 rounded-lg border border-[var(--github-border)] bg-white/5 p-4 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-white">
+      <div className="flex flex-col gap-3 rounded-lg border border-border/50 bg-background/30 p-4 md:flex-row md:items-center md:justify-between">
+        <div className="space-y-0.5">
+          <p className="text-xs font-semibold text-white">
             {t('notifications.settings.draft.fields.enabled')}
           </p>
-          <p className="text-xs text-[var(--github-text-secondary)]">
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
             {t('notifications.settings.draft.enabledHint')}
           </p>
         </div>
         <Switch
           checked={draft.enabled}
           onCheckedChange={onEnabledChange}
+          className="data-[state=checked]:bg-primary"
         />
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Button disabled={isSaving} onClick={onClear} size="sm" variant="outline">
+      <div className="flex justify-end gap-2.5 pt-2">
+        <Button 
+          disabled={isSaving} 
+          onClick={onClear} 
+          size="sm" 
+          variant="outline"
+          className="h-9 text-xs font-medium border-border hover:bg-white/5 hover:border-primary/30 rounded-lg"
+        >
           {t('notifications.settings.draft.actions.clear')}
         </Button>
-        <Button disabled={isSaving} onClick={onSave} size="sm">
+        <Button 
+          disabled={isSaving} 
+          onClick={onSave} 
+          size="sm"
+          className="h-9 text-xs font-semibold bg-primary hover:bg-primary/95 text-white rounded-lg border-none"
+        >
           {draft.id
             ? t('notifications.settings.draft.actions.update')
             : t('notifications.settings.draft.actions.next')}

@@ -1,10 +1,23 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { prisma, Approval, ApprovalStatus, RiskLevel } from '@repo-pulse/database';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  prisma,
+  Approval,
+  ApprovalStatus,
+  RepositoryAccessLevel,
+  RiskLevel,
+} from '@repo-pulse/database';
+import { RepositoryOperationForbiddenException } from '../../common/exceptions/repository-operation-forbidden.exception';
 import {
   buildEventScopeWhere,
   normalizeRepositoryBranchScopes,
   parseRepositoryBranchScopesParam,
 } from '../../common/utils/repository-branch-scope';
+import { getAccessibleRepositoryIds } from '../../common/utils/repository-access';
 
 export interface CreateApprovalDto {
   eventId: string;
@@ -24,15 +37,11 @@ export class ApprovalService {
   private async resolveRepositoryIds(
     userId: string,
     repositoryIdsParam?: string,
+    options?: { editableOnly?: boolean },
   ): Promise<string[]> {
-    const userRepos = await prisma.userRepository.findMany({
-      where: { userId },
-      select: { repositoryId: true },
+    const accessibleRepositoryIds = await getAccessibleRepositoryIds(userId, {
+      editableOnly: options?.editableOnly,
     });
-
-    const accessibleRepositoryIds = userRepos.map(
-      (repository: { repositoryId: string }) => repository.repositoryId,
-    );
 
     if (!repositoryIdsParam) {
       return accessibleRepositoryIds;
@@ -51,9 +60,50 @@ export class ApprovalService {
     return requestedRepositoryIds.filter((repositoryId) => accessibleRepositoryIdSet.has(repositoryId));
   }
 
-  /**
-   * 获取用户的审批列表
-   */
+  private async getApprovalWithRepository(approvalId: string) {
+    return prisma.approval.findUnique({
+      where: { id: approvalId },
+      include: {
+        event: {
+          select: {
+            id: true,
+            repositoryId: true,
+          },
+        },
+      },
+    });
+  }
+
+  private async assertApprovalReadable(userId: string, approvalId: string) {
+    const approval = await this.getApprovalWithRepository(approvalId);
+    if (!approval) {
+      throw new NotFoundException(`Approval not found: ${approvalId}`);
+    }
+
+    const accessibleRepositoryIds = await getAccessibleRepositoryIds(userId);
+    if (!accessibleRepositoryIds.includes(approval.event.repositoryId)) {
+      throw new RepositoryOperationForbiddenException();
+    }
+
+    return approval;
+  }
+
+  private async assertApprovalEditable(userId: string, approvalId: string) {
+    const approval = await this.getApprovalWithRepository(approvalId);
+    if (!approval) {
+      throw new NotFoundException(`Approval not found: ${approvalId}`);
+    }
+
+    const editableRepositoryIds = await getAccessibleRepositoryIds(userId, {
+      editableOnly: true,
+    });
+    if (!editableRepositoryIds.includes(approval.event.repositoryId)) {
+      throw new RepositoryOperationForbiddenException();
+    }
+
+    return approval;
+  }
+
   async getApprovals(
     userId: string,
     options?: {
@@ -62,34 +112,16 @@ export class ApprovalService {
       offset?: number;
     },
   ): Promise<{ approvals: Approval[]; total: number }> {
-    const where: Record<string, unknown> = {};
-
-    // 查找用户有权限审批的事件
-    const userRepos = await prisma.userRepository.findMany({
-      where: { userId },
-      select: { repositoryId: true },
-    });
-
-    const repoIds = userRepos.map((r: { repositoryId: string }) => r.repositoryId);
-
-    // 如果用户没有任何仓库，返回空结果
+    const repoIds = await getAccessibleRepositoryIds(userId, { editableOnly: true });
     if (repoIds.length === 0) {
       return { approvals: [], total: 0 };
     }
 
-    // 获取用户仓库对应的事件
-    const events = await prisma.event.findMany({
-      where: { repositoryId: { in: repoIds } },
-      select: { id: true },
-    });
-    const eventIds = events.map((e: { id: string }) => e.id);
-
-    // 如果没有事件，返回空结果
-    if (eventIds.length === 0) {
-      return { approvals: [], total: 0 };
-    }
-
-    where.eventId = { in: eventIds };
+    const where: Record<string, unknown> = {
+      event: {
+        repositoryId: { in: repoIds },
+      },
+    };
 
     if (options?.status) {
       where.status = options.status;
@@ -116,21 +148,19 @@ export class ApprovalService {
     return { approvals, total };
   }
 
-  /**
-   * 获取待审批数量
-   */
   async getPendingCount(
     userId: string,
     repositoryIdsParam?: string,
     repositoryBranchScopesParam?: string,
   ): Promise<number> {
-    const repoIds = await this.resolveRepositoryIds(userId, repositoryIdsParam);
+    const repoIds = await this.resolveRepositoryIds(userId, repositoryIdsParam, {
+      editableOnly: true,
+    });
     const repositoryBranchScopes = normalizeRepositoryBranchScopes(
       repoIds,
       parseRepositoryBranchScopesParam(repositoryBranchScopesParam),
     );
 
-    // 如果用户没有任何仓库，返回 0
     if (repoIds.length === 0) {
       return 0;
     }
@@ -143,11 +173,7 @@ export class ApprovalService {
     });
   }
 
-  /**
-   * 根据事件创建审批记录（由 AI 分析触发）
-   */
   async createFromAIAnalysis(eventId: string): Promise<Approval> {
-    // 获取事件及其 AI 分析结果
     const event = await prisma.event.findUnique({
       where: { id: eventId },
       include: {
@@ -156,16 +182,37 @@ export class ApprovalService {
           orderBy: { createdAt: 'desc' },
           take: 1,
         },
+        repository: {
+          include: {
+            users: {
+              where: {
+                accessMode: 'EDITABLE',
+                accessLevel: {
+                  in: [
+                    RepositoryAccessLevel.OWNER,
+                    RepositoryAccessLevel.ADMIN,
+                    RepositoryAccessLevel.MAINTAIN,
+                    RepositoryAccessLevel.WRITE,
+                  ],
+                },
+              },
+              select: { userId: true },
+            },
+          },
+        },
       },
     });
 
     if (!event) {
-      throw new Error(`Event not found: ${eventId}`);
+      throw new NotFoundException(`Event not found: ${eventId}`);
+    }
+
+    if (event.repository.users.length === 0) {
+      this.logger.log(`Skipping approval for monitor-only repository event: ${eventId}`);
+      return null as unknown as Approval;
     }
 
     const latestAnalysis = event.analyses[0];
-
-    // 只有 HIGH 或 CRITICAL 风险等级才需要审批
     if (
       latestAnalysis &&
       (latestAnalysis.riskLevel === RiskLevel.HIGH ||
@@ -190,24 +237,14 @@ export class ApprovalService {
     return null as unknown as Approval;
   }
 
-  /**
-   * 审批通过
-   */
   async approve(
     approvalId: string,
     reviewerId: string,
     comment?: string,
   ): Promise<Approval> {
-    const approval = await prisma.approval.findUnique({
-      where: { id: approvalId },
-    });
-
-    if (!approval) {
-      throw new Error(`Approval not found: ${approvalId}`);
-    }
-
+    const approval = await this.assertApprovalEditable(reviewerId, approvalId);
     if (approval.status !== ApprovalStatus.PENDING) {
-      throw new Error(`Approval is not pending: ${approvalId}`);
+      throw new ForbiddenException(`Approval is not pending: ${approvalId}`);
     }
 
     return prisma.approval.update({
@@ -221,24 +258,14 @@ export class ApprovalService {
     });
   }
 
-  /**
-   * 审批拒绝
-   */
   async reject(
     approvalId: string,
     reviewerId: string,
     comment?: string,
   ): Promise<Approval> {
-    const approval = await prisma.approval.findUnique({
-      where: { id: approvalId },
-    });
-
-    if (!approval) {
-      throw new Error(`Approval not found: ${approvalId}`);
-    }
-
+    const approval = await this.assertApprovalEditable(reviewerId, approvalId);
     if (approval.status !== ApprovalStatus.PENDING) {
-      throw new Error(`Approval is not pending: ${approvalId}`);
+      throw new ForbiddenException(`Approval is not pending: ${approvalId}`);
     }
 
     return prisma.approval.update({
@@ -252,25 +279,15 @@ export class ApprovalService {
     });
   }
 
-  /**
-   * 编辑后审批
-   */
   async editAndApprove(
     approvalId: string,
     reviewerId: string,
     editedContent: string,
     comment?: string,
   ): Promise<Approval> {
-    const approval = await prisma.approval.findUnique({
-      where: { id: approvalId },
-    });
-
-    if (!approval) {
-      throw new Error(`Approval not found: ${approvalId}`);
-    }
-
+    const approval = await this.assertApprovalEditable(reviewerId, approvalId);
     if (approval.status !== ApprovalStatus.PENDING) {
-      throw new Error(`Approval is not pending: ${approvalId}`);
+      throw new ForbiddenException(`Approval is not pending: ${approvalId}`);
     }
 
     return prisma.approval.update({
@@ -285,18 +302,14 @@ export class ApprovalService {
     });
   }
 
-  /**
-   * 删除审批记录
-   */
-  async delete(approvalId: string): Promise<void> {
+  async delete(userId: string, approvalId: string): Promise<void> {
+    await this.assertApprovalEditable(userId, approvalId);
     await prisma.approval.delete({ where: { id: approvalId } });
     this.logger.log(`approval_deleted id=${approvalId}`);
   }
 
-  /**
-   * 获取审批详情
-   */
-  async getById(approvalId: string): Promise<Approval | null> {
+  async getById(userId: string, approvalId: string): Promise<Approval | null> {
+    await this.assertApprovalReadable(userId, approvalId);
     return prisma.approval.findUnique({
       where: { id: approvalId },
       include: {

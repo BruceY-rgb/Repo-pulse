@@ -1,5 +1,6 @@
 import { apiClient } from './api-client';
 import type { ApiResponse, User } from '@/types/api';
+import { toApiUrl } from '@/lib/desktop';
 
 /**
  * 前端认证服务
@@ -18,12 +19,21 @@ export const authService = {
     return data.data;
   },
 
+  async loginWithDesktopGithub(): Promise<void> {
+    await apiClient.post('/auth/desktop/github');
+  },
+
   /**
    * 获取当前登录用户信息（依赖 Cookie 中的 access_token）
    */
   async getMe(): Promise<User> {
     const { data } = await apiClient.get<ApiResponse<User>>('/auth/me');
     return data.data;
+  },
+
+  async getSession(): Promise<User | null> {
+    const { data } = await apiClient.get<ApiResponse<User | null>>('/auth/session');
+    return data.data ?? null;
   },
 
   async updatePreferences(preferences: Record<string, unknown>): Promise<User> {
@@ -45,7 +55,7 @@ export const authService = {
    * 获取 GitHub OAuth 登录 URL
    */
   getGithubAuthUrl(): string {
-    return '/api/auth/github';
+    return toApiUrl('/auth/github');
   },
 
   /**

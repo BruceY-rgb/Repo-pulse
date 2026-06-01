@@ -5,6 +5,8 @@ import { EmailChannel } from '@modules/notification/channels/email.channel';
 import { DingTalkChannel } from '@modules/notification/channels/dingtalk.channel';
 import { FeishuChannel } from '@modules/notification/channels/feishu.channel';
 import { WebhookChannel } from '@modules/notification/channels/webhook.channel';
+import { WecomChannel } from '@modules/notification/channels/wecom.channel';
+import { WechatChannel } from '@modules/notification/channels/wechat.channel';
 
 // 内存 fake：替代 prisma 的 user / notification 操作
 const userStore = new Map<string, { id: string; preferences: Record<string, unknown> }>();
@@ -92,6 +94,14 @@ describe('NotificationService (unit)', () => {
         },
         {
           provide: WebhookChannel,
+          useValue: { send: jest.fn(async () => ({ success: true })) },
+        },
+        {
+          provide: WecomChannel,
+          useValue: { send: jest.fn(async () => ({ success: true })) },
+        },
+        {
+          provide: WechatChannel,
           useValue: { send: jest.fn(async () => ({ success: true })) },
         },
       ],

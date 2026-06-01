@@ -8,6 +8,7 @@ import { AIModule } from '../ai/ai.module';
 import { FilterModule } from '../filter/filter.module';
 import { NotificationModule } from '../notification/notification.module';
 import { ApprovalModule } from '../approval/approval.module';
+import { ImModule } from '../im/im.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ApprovalModule } from '../approval/approval.module';
     FilterModule,
     NotificationModule,
     ApprovalModule,
+    ImModule,
   ],
   controllers: [EventController],
   providers: [EventGateway, EventService, EventProcessor],

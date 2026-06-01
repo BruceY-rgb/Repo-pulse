@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { DashboardService } from './dashboard.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -50,5 +50,22 @@ export class DashboardController {
     @Query('branchScopes') branchScopes?: string,
   ) {
     return this.dashboardService.getRecentActivity(user.sub, limit, repositoryIds, branchScopes);
+  }
+
+  /**
+   * 获取 project-river 风格仓库看板数据
+   */
+  @Get('project-river/:repositoryId')
+  @ApiOperation({ summary: '获取 project-river 风格仓库看板数据' })
+  async getProjectRiverRepositoryDashboard(
+    @CurrentUser() user: { sub: string },
+    @Param('repositoryId') repositoryId: string,
+    @Query('branchScopes') branchScopes?: string,
+  ) {
+    return this.dashboardService.getProjectRiverRepositoryDashboard(
+      user.sub,
+      repositoryId,
+      branchScopes,
+    );
   }
 }

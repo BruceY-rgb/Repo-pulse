@@ -59,14 +59,18 @@ const TYPE_TITLE_KEY: Record<string, string> = {
   team: 'reports.title.team',
 };
 
-export function Reports() {
+export function Reports({
+  scopedRepositoryId,
+}: {
+  scopedRepositoryId?: string;
+} = {}) {
   const { t } = useLanguage();
   const [selectedId, setSelectedId] = useState(1);
   const [exporting, setExporting] = useState(false);
 
   const reportQuery = useApiQuery({
-    queryKey: ['reports'],
-    queryFn: () => reportService.getReportData(),
+    queryKey: ['reports', scopedRepositoryId],
+    queryFn: () => reportService.getReportData(scopedRepositoryId ? [scopedRepositoryId] : undefined),
     staleTime: 60 * 1000,
   });
 
@@ -105,7 +109,7 @@ export function Reports() {
             onClick={async () => {
               setExporting(true);
               try {
-                await reportService.generatePdf();
+                await reportService.generatePdf(scopedRepositoryId ? [scopedRepositoryId] : undefined);
               } finally {
                 setExporting(false);
               }
@@ -228,19 +232,19 @@ export function Reports() {
                     <TabsList className="bg-[var(--github-surface)] border border-[var(--github-border)]">
                       <TabsTrigger
                         value="activity"
-                        className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+                        className=""
                       >
                         {t('reports.charts.activity')}
                       </TabsTrigger>
                       <TabsTrigger
                         value="issues"
-                        className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+                        className=""
                       >
                         {t('reports.charts.issues')}
                       </TabsTrigger>
                       <TabsTrigger
                         value="trends"
-                        className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+                        className=""
                       >
                         {t('reports.charts.trends')}
                       </TabsTrigger>

@@ -24,6 +24,8 @@ export enum EventType {
   RELEASE = 'RELEASE',
   BRANCH_CREATED = 'BRANCH_CREATED',
   BRANCH_DELETED = 'BRANCH_DELETED',
+  BRANCH_SYNC_ALERT = 'BRANCH_SYNC_ALERT',
+  UPSTREAM_SYNC_ALERT = 'UPSTREAM_SYNC_ALERT',
 }
 
 export enum RiskLevel {
@@ -155,6 +157,7 @@ export type AIProvider =
   | 'minimax'
   | 'doubao'
   | 'qwen'
+  | 'ollama'
   | 'custom';
 
 export const PROVIDER_DEFAULT_URLS: Record<AIProvider, string> = {
@@ -167,6 +170,7 @@ export const PROVIDER_DEFAULT_URLS: Record<AIProvider, string> = {
   minimax: 'https://api.minimax.chat/v1',
   doubao: 'https://ark.cn-beijing.volces.com/api/v3',
   qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  ollama: 'http://localhost:11434',
   custom: '',
 };
 
@@ -180,6 +184,7 @@ export const PROVIDER_LABELS: Record<AIProvider, string> = {
   minimax: 'MiniMax',
   doubao: '豆包',
   qwen: '通义千问',
+  ollama: 'Ollama (Local)',
   custom: '自定义端点',
 };
 
@@ -193,6 +198,7 @@ export const PROVIDER_DEFAULT_MODELS: Record<AIProvider, string> = {
   minimax: 'MiniMax-M2.1',
   doubao: 'doubao-pro-32k',
   qwen: 'qwen-turbo',
+  ollama: 'llama3',
   custom: '',
 };
 
@@ -206,6 +212,7 @@ export const PROVIDER_CHAT_PATHS: Record<AIProvider, string> = {
   minimax: '/chat/completions',
   doubao: '/chat/completions',
   qwen: '/chat/completions',
+  ollama: '/api/chat',
   custom: '/chat/completions',
 };
 

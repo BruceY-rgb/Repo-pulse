@@ -27,6 +27,8 @@ export class AIEventNormalizer {
     EventType.PUSH,
     EventType.PR_OPENED,
     EventType.ISSUE_OPENED,
+    EventType.BRANCH_SYNC_ALERT,
+    EventType.UPSTREAM_SYNC_ALERT,
   ];
 
   /**

@@ -44,7 +44,23 @@ export class AIController {
     @Param('eventId') eventId: string,
     @Body('force') force?: boolean,
   ) {
-    await this.aiService.triggerAnalysis(eventId, force ?? false);
+    const event = await prisma.event.findFirst({
+      where: {
+        id: eventId,
+        repository: {
+          users: {
+            some: { userId: user.sub },
+          },
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+
+    await this.aiService.triggerAnalysis(eventId, force ?? false, { source: 'manual' });
     return { success: true, message: 'Analysis job triggered' };
   }
 

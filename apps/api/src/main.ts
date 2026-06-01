@@ -4,14 +4,19 @@ import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import { json } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
+import { join } from 'path';
 
 async function bootstrap() {
   // 保留 Raw Body 供 Webhook 验签使用
   const app = await NestFactory.create(AppModule, {
     rawBody: true,
+    bodyParser: false,
   });
+
+  app.use(json({ limit: '20mb' }));
 
   const configService = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
@@ -24,8 +29,24 @@ async function bootstrap() {
 
   // CORS — 使用 FRONTEND_URL，允许携带 Cookie
   const frontendUrl = configService.get<string>('FRONTEND_URL', 'http://localhost:5173');
+  const allowedCorsOrigins = new Set([
+    frontendUrl,
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:5174',
+    'null',
+  ]);
   app.enableCors({
-    origin: frontendUrl,
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      if (!origin || allowedCorsOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      logger.warn(`CORS request rejected from origin: ${origin}`);
+      callback(null, false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],

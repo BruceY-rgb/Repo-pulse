@@ -15,6 +15,18 @@ export interface GithubRepoResponse {
     login: string;
     avatar_url: string;
   };
+  permissions?: {
+    admin?: boolean;
+    maintain?: boolean;
+    push?: boolean;
+    triage?: boolean;
+    pull?: boolean;
+  };
+  fork?: boolean;
+  parent?: {
+    full_name: string;
+    default_branch: string;
+  };
 }
 
 export interface GithubSearchResult {
@@ -152,6 +164,29 @@ export class GithubService {
     });
   }
 
+  private formatErrorForLog(error: unknown): string {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const method = error.config?.method?.toUpperCase();
+      const url = error.config?.url;
+      const data = error.response?.data as { message?: unknown } | undefined;
+      const githubMessage = typeof data?.message === 'string' ? data.message : undefined;
+      return [
+        `AxiosError: ${error.message}`,
+        status ? `status=${status}` : undefined,
+        method ? `method=${method}` : undefined,
+        url ? `url=${url}` : undefined,
+        githubMessage ? `githubMessage=${githubMessage}` : undefined,
+      ].filter(Boolean).join(' ');
+    }
+
+    if (error instanceof Error) {
+      return `${error.name}: ${error.message}`;
+    }
+
+    return String(error);
+  }
+
   /**
    * 获取仓库基本信息
    * @param userToken 可选的用户 OAuth Token，用于访问私有仓库
@@ -162,7 +197,7 @@ export class GithubService {
       const response = await client.get<GithubRepoResponse>(`/repos/${owner}/${repo}`);
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch repository ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch repository ${owner}/${repo}`, this.formatErrorForLog(error));
       throw new Error(`无法获取仓库 ${owner}/${repo}，请检查仓库名称和权限`);
     }
   }
@@ -209,7 +244,7 @@ export class GithubService {
       this.logger.log(`Webhook created for ${owner}/${repo}, id: ${response.data.id}`);
       return response.data.id;
     } catch (error) {
-      this.logger.error(`Failed to create webhook for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to create webhook for ${owner}/${repo}`, this.formatErrorForLog(error));
       // 不抛出异常，让调用方决定如何处理
       return null;
     }
@@ -221,7 +256,7 @@ export class GithubService {
       await client.delete(`/repos/${owner}/${repo}/hooks/${webhookId}`);
       this.logger.log(`Webhook ${webhookId} deleted for ${owner}/${repo}`);
     } catch (error) {
-      this.logger.error(`Failed to delete webhook for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to delete webhook for ${owner}/${repo}`, this.formatErrorForLog(error));
     }
   }
 
@@ -241,7 +276,7 @@ export class GithubService {
       const response = await client.get(`/repos/${owner}/${repo}/commits`, { params });
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch commits for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch commits for ${owner}/${repo}`, this.formatErrorForLog(error));
       return [];
     }
   }
@@ -257,7 +292,7 @@ export class GithubService {
       const response = await client.get<GithubCommitResponse>(`/repos/${owner}/${repo}/commits/${sha}`);
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch commit ${sha} for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch commit ${sha} for ${owner}/${repo}`, this.formatErrorForLog(error));
       return null;
     }
   }
@@ -280,7 +315,7 @@ export class GithubService {
           lastCommitSha: branch.commit?.sha,
         }));
     } catch (error) {
-      this.logger.error(`Failed to fetch branches for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch branches for ${owner}/${repo}`, this.formatErrorForLog(error));
       return [];
     }
   }
@@ -298,7 +333,7 @@ export class GithubService {
       });
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch PRs for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch PRs for ${owner}/${repo}`, this.formatErrorForLog(error));
       return [];
     }
   }
@@ -316,7 +351,7 @@ export class GithubService {
       );
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch PR #${pullNumber} for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch PR #${pullNumber} for ${owner}/${repo}`, this.formatErrorForLog(error));
       return null;
     }
   }
@@ -334,7 +369,7 @@ export class GithubService {
       });
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch issues for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch issues for ${owner}/${repo}`, this.formatErrorForLog(error));
       return [];
     }
   }
@@ -352,7 +387,7 @@ export class GithubService {
       );
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch issue #${issueNumber} for ${owner}/${repo}`, error);
+      this.logger.error(`Failed to fetch issue #${issueNumber} for ${owner}/${repo}`, this.formatErrorForLog(error));
       return null;
     }
   }
@@ -370,7 +405,7 @@ export class GithubService {
       });
       return response.data.items;
     } catch (error) {
-      this.logger.error(`Failed to search repositories: ${query}`, error);
+      this.logger.error(`Failed to search repositories: ${query}`, this.formatErrorForLog(error));
       return [];
     }
   }
@@ -380,24 +415,38 @@ export class GithubService {
     refreshToken?: string,
   ): Promise<GithubRepoResponse[]> {
     const maxRetries = 3;
+    let currentUserToken = userToken;
+    let currentRefreshToken = refreshToken;
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const client = this.createUserClient(userToken);
-        const response = await client.get<GithubRepoResponse[]>('/user/repos', {
-          params: {
-            sort: 'updated',
-            per_page: 100,
-            affiliation: 'owner,collaborator,organization_member',
-          },
-        });
-        return response.data;
+        const client = this.createUserClient(currentUserToken);
+        const allRepos: GithubRepoResponse[] = [];
+        let page = 1;
+        const perPage = 100;
+        while (true) {
+          const response = await client.get<GithubRepoResponse[]>('/user/repos', {
+            params: {
+              sort: 'updated',
+              per_page: perPage,
+              page,
+              affiliation: 'owner,collaborator,organization_member',
+            },
+          });
+          allRepos.push(...response.data);
+          if (response.data.length < perPage) {
+            break;
+          }
+          page++;
+        }
+        return allRepos;
       } catch (error: any) {
         // 如果是 401 错误且有 refreshToken，尝试刷新
-        if (error.response?.status === 401 && refreshToken && attempt === 1) {
+        if (error.response?.status === 401 && currentRefreshToken && attempt === 1) {
           try {
-            const newTokens = await this.refreshGithubToken(refreshToken);
-            userToken = newTokens.accessToken;
-            refreshToken = newTokens.refreshToken;
+            const newTokens = await this.refreshGithubToken(currentRefreshToken);
+            currentUserToken = newTokens.accessToken;
+            currentRefreshToken = newTokens.refreshToken;
             this.logger.log('GitHub token 刷新成功，重试请求');
             continue;
           } catch (refreshError) {
@@ -406,7 +455,7 @@ export class GithubService {
         }
         this.logger.warn(`Attempt ${attempt}/${maxRetries} failed: getUserRepositories`);
         if (attempt === maxRetries) {
-          this.logger.error('Failed to fetch user repositories after max retries', error);
+          this.logger.error('Failed to fetch user repositories after max retries', this.formatErrorForLog(error));
           return [];
         }
         await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
@@ -418,22 +467,36 @@ export class GithubService {
   async getStarredRepos(
     userToken: string,
     refreshToken?: string,
+    options?: { throwOnError?: boolean },
   ): Promise<GithubRepoResponse[]> {
     const maxRetries = 3;
+    let currentUserToken = userToken;
+    let currentRefreshToken = refreshToken;
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const client = this.createUserClient(userToken);
-        const response = await client.get<GithubRepoResponse[]>('/user/starred', {
-          params: { per_page: 100 },
-        });
-        return response.data;
+        const client = this.createUserClient(currentUserToken);
+        const allRepos: GithubRepoResponse[] = [];
+        let page = 1;
+        const perPage = 100;
+        while (true) {
+          const response = await client.get<GithubRepoResponse[]>('/user/starred', {
+            params: { per_page: perPage, page },
+          });
+          allRepos.push(...response.data);
+          if (response.data.length < perPage) {
+            break;
+          }
+          page++;
+        }
+        return allRepos;
       } catch (error: any) {
         // 如果是 401 错误且有 refreshToken，尝试刷新
-        if (error.response?.status === 401 && refreshToken && attempt === 1) {
+        if (error.response?.status === 401 && currentRefreshToken && attempt === 1) {
           try {
-            const newTokens = await this.refreshGithubToken(refreshToken);
-            userToken = newTokens.accessToken;
-            refreshToken = newTokens.refreshToken;
+            const newTokens = await this.refreshGithubToken(currentRefreshToken);
+            currentUserToken = newTokens.accessToken;
+            currentRefreshToken = newTokens.refreshToken;
             this.logger.log('GitHub token 刷新成功，重试请求');
             continue;
           } catch (refreshError) {
@@ -442,7 +505,10 @@ export class GithubService {
         }
         this.logger.warn(`Attempt ${attempt}/${maxRetries} failed: getStarredRepos`);
         if (attempt === maxRetries) {
-          this.logger.error('Failed to fetch starred repositories after max retries', error);
+          this.logger.error('Failed to fetch starred repositories after max retries', this.formatErrorForLog(error));
+          if (options?.throwOnError) {
+            throw error;
+          }
           return [];
         }
         await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
@@ -463,5 +529,66 @@ export class GithubService {
     // 需要用户重新进行 OAuth 授权
     this.logger.warn('GitHub OAuth 不支持 token 刷新，请引导用户重新授权');
     throw new Error('GitHub OAuth 不支持 token 刷新，请重新登录授权');
+  }
+
+  async getContributors(owner: string, repo: string, userToken?: string): Promise<Array<{ login: string; avatar_url: string; html_url: string }>> {
+    try {
+      const client = this.createUserClient(userToken);
+      const response = await client.get<Array<{ login: string; avatar_url: string; html_url: string }>>(`/repos/${owner}/${repo}/contributors`, {
+        params: { per_page: 100 },
+      });
+      return Array.isArray(response.data) ? response.data : [];
+    } catch (error) {
+      this.logger.error(`Failed to fetch contributors for ${owner}/${repo}`, this.formatErrorForLog(error));
+      return [];
+    }
+  }
+
+  /**
+   * 对比两个分支
+   * @param base 基准分支
+   * @param head 对比分支
+   */
+  async compareBranches(
+    owner: string,
+    repo: string,
+    base: string,
+    head: string,
+    userToken?: string,
+  ): Promise<any> {
+    try {
+      const client = this.createUserClient(userToken);
+      const response = await client.get(`/repos/${owner}/${repo}/compare/${base}...${head}`);
+      return response.data;
+    } catch (error) {
+      this.logger.error(
+        `Failed to compare branches ${base}...${head} for ${owner}/${repo}`,
+        this.formatErrorForLog(error),
+      );
+      return null;
+    }
+  }
+
+  async starRepository(
+    owner: string,
+    repo: string,
+    userToken: string,
+  ): Promise<boolean> {
+    try {
+      const client = this.createUserClient(userToken);
+      await client.put(`/user/starred/${owner}/${repo}`, null, {
+        headers: {
+          'Content-Length': '0',
+        },
+      });
+      this.logger.log(`Starred repository ${owner}/${repo} successfully`);
+      return true;
+    } catch (error) {
+      this.logger.error(
+        `Failed to star repository ${owner}/${repo}`,
+        this.formatErrorForLog(error),
+      );
+      return false;
+    }
   }
 }

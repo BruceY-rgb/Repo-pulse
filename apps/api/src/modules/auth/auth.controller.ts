@@ -67,6 +67,16 @@ export class AuthController {
     return { userId: user.id, email: user.email, name: user.name };
   }
 
+  @Post('desktop/github')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '桌面端使用环境变量 GITHUB_TOKEN 登录' })
+  async desktopGithubLogin(@Res({ passthrough: true }) res: Response) {
+    const tokens = await this.authService.handleGithubEnvTokenAuth();
+    this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
+    return { message: 'Desktop GitHub login successful' };
+  }
+
   /**
    * 刷新 Token — 从 Cookie 读取 Refresh Token，写入新 Token
    */
@@ -94,8 +104,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '登出，清除 Cookie' })
   async logout(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie('access_token', { path: '/' });
-    res.clearCookie('refresh_token', { path: '/' });
+    this.clearTokenCookies(res);
     return { message: '已成功登出' };
   }
 
@@ -204,6 +213,48 @@ export class AuthController {
     return this.userService.findById(user.sub);
   }
 
+  /**
+   * 静默读取当前会话。
+   *
+   * 用于前端路由守卫：未登录、Cookie 缺失或 Token 无效时返回 null，
+   * 避免把正常未登录态表现为浏览器控制台里的 401 网络错误。
+   */
+  @Get('session')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '静默获取当前会话' })
+  async session(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const accessToken = req.cookies?.access_token as string | undefined;
+    const refreshToken = req.cookies?.refresh_token as string | undefined;
+
+    const accessPayload = accessToken
+      ? await this.authService.verifyToken(accessToken)
+      : null;
+
+    if (accessPayload) {
+      return this.userService.findById(accessPayload.sub);
+    }
+
+    if (!refreshToken) {
+      return null;
+    }
+
+    const refreshPayload = await this.authService.verifyToken(refreshToken);
+    if (!refreshPayload) {
+      this.clearTokenCookies(res);
+      return null;
+    }
+
+    const tokens = await this.authService.generateTokens({
+      sub: refreshPayload.sub,
+      email: refreshPayload.email,
+      role: refreshPayload.role,
+    });
+    this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
+
+    return this.userService.findById(refreshPayload.sub);
+  }
+
   // ─── 私有方法 ────────────────────────────────────────────────────────────────
 
   private setTokenCookies(res: Response, accessToken: string, refreshToken: string) {
@@ -215,5 +266,10 @@ export class AuthController {
       ...COOKIE_OPTIONS,
       maxAge: REFRESH_TOKEN_MAX_AGE,
     });
+  }
+
+  private clearTokenCookies(res: Response) {
+    res.clearCookie('access_token', { path: '/' });
+    res.clearCookie('refresh_token', { path: '/' });
   }
 }

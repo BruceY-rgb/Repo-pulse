@@ -19,6 +19,13 @@ export interface User {
   preferences: UserPreferences;
   createdAt: string;
   updatedAt: string;
+  // TODO: 生产环境移除 - 用于 WebSocket 测试
+  accessToken?: string;
+  githubAccessToken?: string;
+  githubId?: string;
+  username?: string;
+  company?: string | null;
+  bio?: string | null;
 }
 
 export interface DashboardPreferences {
@@ -63,9 +70,154 @@ export interface Repository {
   lastSyncAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** 用户对该仓库的访问级别 */
+  accessLevel?: RepositoryAccessLevel;
+  /** 用户是否可操作该仓库（可编辑/写入） */
+  canOperate?: boolean;
+  /** 该仓库是否为可编辑仓库 */
+  isEditable?: boolean;
+  /** 该仓库是否为只读监控仓库 */
+  isMonitored?: boolean;
   _count?: {
     events: number;
   };
+}
+
+export type RepositoryAccessLevel =
+  | 'owner'
+  | 'admin'
+  | 'maintain'
+  | 'write'
+  | 'triage'
+  | 'read'
+  | 'none';
+
+export type RepositoryChatKind = 'editable' | 'monitored-readonly';
+
+/** 消息操作按钮（由后端返回） */
+export interface MessageAction {
+  key: string;
+  label: string;
+  method: 'POST' | 'GET';
+  endpoint?: string;
+  requiresConfirmation: boolean;
+  /** 是否需要操作权限（canOperate=true 时才渲染） */
+  requiresPermission: boolean;
+}
+
+/** 风险等级 */
+export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+/** 风险分布计数 */
+export interface RiskCounts {
+  LOW: number;
+  MEDIUM: number;
+  HIGH: number;
+  CRITICAL: number;
+}
+
+/** 侧边栏仓库聊天项 */
+export interface ChatRepositoryItem {
+  repository: Repository;
+  kind: RepositoryChatKind;
+  lastReadAt: string | null;
+  latestMessageAt: string | null;
+  latestMessageType: string | null;
+  latestMessagePreview: string | null;
+  unreadCount: number;
+  unreadRiskLevel: RiskLevel | null;
+  unreadRiskCounts: RiskCounts;
+  highRiskCount: number;
+  hasPendingApproval: boolean;
+  pendingApprovalCount: number;
+  hasPendingAgentAction: boolean;
+  pendingAgentActionCount: number;
+  requiresAttention: boolean;
+}
+
+/** 工作台仓库列表响应 */
+export interface ChatRepositoriesResponse {
+  editableRepositories: ChatRepositoryItem[];
+  monitoredRepositories: ChatRepositoryItem[];
+}
+
+/** 会话状态（来自 Workbench API） */
+export interface WorkbenchConversationState {
+  repositoryId: string;
+  lastReadAt: string | null;
+  unreadCount: number;
+  unreadRiskLevel: RiskLevel | null;
+  unreadRiskCounts: RiskCounts;
+  hasPendingApproval: boolean;
+  pendingApprovalCount: number;
+  hasPendingAgentAction: boolean;
+  pendingAgentActionCount: number;
+}
+
+/** 会话消息（来自 Workbench API） */
+export interface WorkbenchConversationMessage {
+  id: string;
+  repositoryId: string;
+  repositoryAccessLevel: RepositoryAccessLevel;
+  repositoryCanOperate: boolean;
+  type: 'issue' | 'pull_request' | 'push' | 'release' | 'security' | 'approval' | 'agent' | 'notification';
+  title: string;
+  body: string;
+  author: string;
+  authorAvatar?: string;
+  createdAt: string;
+  externalUrl?: string;
+  actions?: MessageAction[];
+  /** 风险等级（由后端统一计算） */
+  riskLevel?: RiskLevel;
+  /** 是否未读 */
+  isUnread?: boolean;
+  /** 是否有待审批动作 */
+  hasPendingApprovalAction?: boolean;
+  /** 是否有待 Agent 动作 */
+  hasPendingAgentAction?: boolean;
+  /** 关联审批 ID */
+  approvalId?: string;
+  /** 审批状态 */
+  approvalStatus?: string;
+}
+
+/** 会话消息响应 */
+export interface ConversationMessagesResponse {
+  conversation: WorkbenchConversationState;
+  messages: WorkbenchConversationMessage[];
+}
+
+/** 标记已读请求体 */
+export interface MarkConversationReadDto {
+  readAt?: string;
+  upToMessageAt?: string;
+}
+
+/** Watch Feed 事件类型 */
+export type WatchFeedEventType = 'issue' | 'pull_request' | 'push' | 'release' | 'security';
+
+/** Watch Feed 单项 */
+export interface WatchFeedItem {
+  id: string;
+  repositoryId: string;
+  repositoryFullName: string;
+  repositoryAvatar?: string;
+  type: WatchFeedEventType;
+  title: string;
+  summary: string;
+  author: string;
+  authorAvatar?: string;
+  occurredAt: string;
+  externalUrl?: string;
+  aiInsight?: string;
+  canAddToMonitoring: boolean;
+}
+
+/** Watch Feed 分页响应 */
+export interface WatchFeedResponse {
+  items: WatchFeedItem[];
+  nextCursor: string | null;
 }
 
 export interface CreateRepositoryDto {
@@ -158,6 +310,21 @@ export interface SearchResult {
     avatarUrl: string;
   };
   platform: Platform;
+}
+
+export interface WatchRepositoryItem {
+  id: string;
+  name: string;
+  fullName: string;
+  platform: Platform;
+  externalId: string;
+  url: string;
+  defaultBranch: string;
+  isActive: boolean;
+  lastSyncAt: string | null;
+  eventCount: number;
+  isMonitored: boolean;
+  canAddToMonitoring: boolean;
 }
 
 export interface RepositoryBranchScopeOption {

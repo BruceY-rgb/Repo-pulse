@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { ApprovalService, UpdateApprovalDto } from './approval.service';
+import { ApprovalService } from './approval.service';
 import type { Approval, ApprovalStatus } from '@repo-pulse/database';
 
 @Controller('approvals')
@@ -54,9 +54,10 @@ export class ApprovalController {
    */
   @Get(':id')
   async getById(
+    @CurrentUser() user: { sub: string },
     @Param('id') approvalId: string,
   ): Promise<Approval | null> {
-    return this.approvalService.getById(approvalId);
+    return this.approvalService.getById(user.sub, approvalId);
   }
 
   /**
@@ -87,10 +88,10 @@ export class ApprovalController {
    * 删除审批记录
    */
   @Delete(':id')
-  async delete(@Param('id') approvalId: string) {
-    const approval = await this.approvalService.getById(approvalId);
+  async delete(@CurrentUser() user: { sub: string }, @Param('id') approvalId: string) {
+    const approval = await this.approvalService.getById(user.sub, approvalId);
     if (!approval) throw new NotFoundException('Approval not found');
-    await this.approvalService.delete(approvalId);
+    await this.approvalService.delete(user.sub, approvalId);
     return { success: true };
   }
 

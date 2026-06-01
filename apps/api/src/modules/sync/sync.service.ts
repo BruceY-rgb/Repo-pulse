@@ -1,7 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { prisma, EventType, Platform } from '@repo-pulse/database';
+import {
+  EventType,
+  Platform,
+  RepositoryAccessLevel,
+  RepositoryAccessMode,
+  Role,
+  prisma,
+} from '@repo-pulse/database';
 import { GithubService } from '../repository/services/github.service';
 import { RepositoryService } from '../repository/repository.service';
+import { BranchSyncService } from './branch-sync.service';
 
 @Injectable()
 export class SyncService {
@@ -10,19 +18,61 @@ export class SyncService {
   constructor(
     private readonly githubService: GithubService,
     private readonly repositoryService: RepositoryService,
+    private readonly branchSyncService: BranchSyncService,
   ) {}
 
-  /**
-   * 同步用户的所有仓库（自己的 + starred）
-   * 登录后自动调用
-   */
+  private resolveGithubAccessLevel(
+    repo: {
+      owner?: { login?: string };
+      permissions?: {
+        admin?: boolean;
+        maintain?: boolean;
+        push?: boolean;
+        triage?: boolean;
+        pull?: boolean;
+      };
+    },
+    githubLogin?: string | null,
+  ): RepositoryAccessLevel {
+    if (githubLogin && repo.owner?.login?.toLowerCase() === githubLogin.toLowerCase()) {
+      return RepositoryAccessLevel.OWNER;
+    }
+    if (repo.permissions?.admin) {
+      return RepositoryAccessLevel.ADMIN;
+    }
+    if (repo.permissions?.maintain) {
+      return RepositoryAccessLevel.MAINTAIN;
+    }
+    if (repo.permissions?.push) {
+      return RepositoryAccessLevel.WRITE;
+    }
+    if (repo.permissions?.triage) {
+      return RepositoryAccessLevel.TRIAGE;
+    }
+    if (repo.permissions?.pull) {
+      return RepositoryAccessLevel.READ;
+    }
+
+    return RepositoryAccessLevel.NONE;
+  }
+
+  private resolveAccessMode(accessLevel: RepositoryAccessLevel): RepositoryAccessMode {
+    return (
+      accessLevel === RepositoryAccessLevel.OWNER ||
+      accessLevel === RepositoryAccessLevel.ADMIN ||
+      accessLevel === RepositoryAccessLevel.MAINTAIN ||
+      accessLevel === RepositoryAccessLevel.WRITE
+    )
+      ? RepositoryAccessMode.EDITABLE
+      : RepositoryAccessMode.MONITOR;
+  }
+
   async syncUserRepositories(userId: string): Promise<{ synced: number; starred: number }> {
     this.logger.log(`Starting to sync repositories for user: ${userId}`);
 
-    // 获取用户的 GitHub tokens
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { githubAccessToken: true, githubRefreshToken: true },
+      select: { githubAccessToken: true, githubRefreshToken: true, githubLogin: true },
     });
 
     if (!user?.githubAccessToken) {
@@ -34,33 +84,41 @@ export class SyncService {
     let starred = 0;
 
     try {
-      // 1. 同步用户拥有的/协作的仓库
       const userRepos = await this.githubService.getUserRepositories(
         user.githubAccessToken,
         user.githubRefreshToken || undefined,
       );
-
       this.logger.log(`GitHub API returned ${userRepos.length} user repositories`);
 
       for (const repo of userRepos) {
         try {
-          // 检查仓库是否已存在
+          const accessLevel = this.resolveGithubAccessLevel(repo, user.githubLogin);
+          const accessMode = this.resolveAccessMode(accessLevel);
+          const role: Role = accessMode === RepositoryAccessMode.EDITABLE ? 'MEMBER' : 'VIEWER';
           let existing = await prisma.repository.findFirst({
             where: { externalId: String(repo.id) },
           });
 
           if (!existing) {
-            // 创建新仓库（会自动创建 webhook）
             const [owner, repoName] = repo.full_name.split('/');
-            existing = await this.repositoryService.create(userId, {
-              platform: Platform.GITHUB,
-              owner,
-              repo: repoName,
-            }, user.githubAccessToken);
+            existing = await this.repositoryService.create(
+              userId,
+              {
+                platform: Platform.GITHUB,
+                owner,
+                repo: repoName,
+              },
+              {
+                userOAuthToken: user.githubAccessToken,
+                accessMode,
+                accessLevel,
+                role,
+                githubLogin: user.githubLogin ?? undefined,
+              },
+            );
             synced++;
             this.logger.log(`Created new repository: ${repo.full_name}`);
           } else {
-            // 检查用户是否已关联此仓库
             const userRepo = await prisma.userRepository.findUnique({
               where: {
                 userId_repositoryId: {
@@ -70,16 +128,31 @@ export class SyncService {
               },
             });
 
-            // 如果用户未关联，则添加关联
             if (!userRepo) {
               await prisma.userRepository.create({
                 data: {
                   userId,
                   repositoryId: existing.id,
-                  role: 'MEMBER',
+                  role,
+                  accessMode,
+                  accessLevel,
                 },
               });
               this.logger.log(`Linked existing repository ${repo.full_name} to user`);
+            } else {
+              await prisma.userRepository.update({
+                where: {
+                  userId_repositoryId: {
+                    userId,
+                    repositoryId: existing.id,
+                  },
+                },
+                data: {
+                  role,
+                  accessMode,
+                  accessLevel,
+                },
+              });
             }
           }
         } catch (error) {
@@ -87,33 +160,51 @@ export class SyncService {
         }
       }
 
-      // 2. 同步 starred 仓库
-      const starredRepos = await this.githubService.getStarredRepos(
-        user.githubAccessToken,
-        user.githubRefreshToken || undefined,
-      );
-
+      let starredRepos: Awaited<ReturnType<GithubService['getStarredRepos']>>;
+      let shouldReconcileStarredState = false;
+      try {
+        starredRepos = await this.githubService.getStarredRepos(
+          user.githubAccessToken,
+          user.githubRefreshToken || undefined,
+          { throwOnError: true },
+        );
+        shouldReconcileStarredState = true;
+      } catch (error) {
+        this.logger.error(`Failed to fetch starred repositories for user ${userId}`, error);
+        starredRepos = [];
+      }
       this.logger.log(`GitHub API returned ${starredRepos.length} starred repositories`);
+      const starredExternalIds = starredRepos.map((repo) => String(repo.id));
+      const starredRepositoryIds: string[] = [];
 
       for (const repo of starredRepos) {
         try {
-          // 检查仓库是否已存在
           let existing = await prisma.repository.findFirst({
             where: { externalId: String(repo.id) },
           });
 
           if (!existing) {
-            // 创建新仓库
             const [owner, repoName] = repo.full_name.split('/');
-            existing = await this.repositoryService.create(userId, {
-              platform: Platform.GITHUB,
-              owner,
-              repo: repoName,
-            }, user.githubAccessToken);
+            existing = await this.repositoryService.create(
+              userId,
+              {
+                platform: Platform.GITHUB,
+                owner,
+                repo: repoName,
+              },
+              {
+                userOAuthToken: user.githubAccessToken,
+                accessMode: RepositoryAccessMode.MONITOR,
+                accessLevel: RepositoryAccessLevel.READ,
+                role: 'VIEWER',
+                githubLogin: user.githubLogin ?? undefined,
+                isStarred: true,
+              },
+            );
             starred++;
             this.logger.log(`Created starred repository: ${repo.full_name}`);
+            starredRepositoryIds.push(existing.id);
           } else {
-            // 检查用户是否已关联此仓库
             const userRepo = await prisma.userRepository.findUnique({
               where: {
                 userId_repositoryId: {
@@ -123,16 +214,48 @@ export class SyncService {
               },
             });
 
-            // 如果用户未关联，则添加关联
             if (!userRepo) {
               await prisma.userRepository.create({
                 data: {
                   userId,
                   repositoryId: existing.id,
-                  role: 'MEMBER',
+                  role: 'VIEWER',
+                  accessMode: RepositoryAccessMode.MONITOR,
+                  accessLevel: RepositoryAccessLevel.READ,
+                  isStarred: true,
                 },
               });
               this.logger.log(`Linked existing starred repository ${repo.full_name} to user`);
+              starredRepositoryIds.push(existing.id);
+            } else if (userRepo.accessMode === RepositoryAccessMode.EDITABLE) {
+              await prisma.userRepository.update({
+                where: {
+                  userId_repositoryId: {
+                    userId,
+                    repositoryId: existing.id,
+                  },
+                },
+                data: {
+                  isStarred: true,
+                },
+              });
+              starredRepositoryIds.push(existing.id);
+            } else {
+              await prisma.userRepository.update({
+                where: {
+                  userId_repositoryId: {
+                    userId,
+                    repositoryId: existing.id,
+                  },
+                },
+                data: {
+                  role: 'VIEWER',
+                  accessMode: RepositoryAccessMode.MONITOR,
+                  accessLevel: RepositoryAccessLevel.READ,
+                  isStarred: true,
+                },
+              });
+              starredRepositoryIds.push(existing.id);
             }
           }
         } catch (error) {
@@ -140,12 +263,28 @@ export class SyncService {
         }
       }
 
+      if (shouldReconcileStarredState) {
+        await prisma.userRepository.updateMany({
+          where: {
+            userId,
+            isStarred: true,
+            repository: {
+              platform: Platform.GITHUB,
+              externalId: { notIn: starredExternalIds },
+            },
+          },
+          data: { isStarred: false },
+        });
+      }
+
       this.logger.log(`Sync completed: ${synced} new repos, ${starred} new starred repos`);
 
-      // 同步完仓库后，始终同步历史事件（不管是否有新仓库）
       setTimeout(() => {
-        this.syncAllUserRepositoriesHistory(userId).catch((err) => {
+        this.syncAllUserRepositoriesHistory(userId, starredRepositoryIds).catch((err) => {
           this.logger.error(`Failed to sync repository history for user ${userId}`, err);
+        });
+        this.branchSyncService.syncBranchesForUser(userId).catch((err) => {
+          this.logger.error(`Failed to sync branches for user ${userId}`, err);
         });
       }, 500);
 
@@ -156,9 +295,6 @@ export class SyncService {
     }
   }
 
-  /**
-   * 同步指定仓库的历史事件
-   */
   async syncRepositoryHistory(
     repositoryId: string,
     options?: { daysBack?: number },
@@ -193,7 +329,6 @@ export class SyncService {
     let issues = 0;
 
     try {
-      // 1. 同步 Commits
       const commitData = await this.githubService.getCommits(
         owner,
         repo,
@@ -233,7 +368,6 @@ export class SyncService {
         }
       }
 
-      // 2. 同步 Pull Requests
       const prData = await this.githubService.getPullRequests(
         owner,
         repo,
@@ -288,7 +422,6 @@ export class SyncService {
         }
       }
 
-      // 3. 同步 Issues
       const issueData = await this.githubService.getIssues(
         owner,
         repo,
@@ -297,7 +430,6 @@ export class SyncService {
       );
 
       for (const issue of issueData as any[]) {
-        // 跳过 PR（GitHub API 返回的 issues 包含 PR）
         if (issue.pull_request) continue;
 
         const existingEvent = await prisma.event.findFirst({
@@ -308,7 +440,8 @@ export class SyncService {
         });
 
         if (!existingEvent) {
-          const eventType = issue.state === 'closed' ? EventType.ISSUE_CLOSED : EventType.ISSUE_OPENED;
+          const eventType =
+            issue.state === 'closed' ? EventType.ISSUE_CLOSED : EventType.ISSUE_OPENED;
           const action = issue.state === 'closed' ? 'closed' : 'opened';
 
           await prisma.event.create({
@@ -336,7 +469,6 @@ export class SyncService {
         }
       }
 
-      // 更新最后同步时间
       await prisma.repository.update({
         where: { id: repositoryId },
         data: { lastSyncAt: new Date() },
@@ -350,10 +482,10 @@ export class SyncService {
     }
   }
 
-  /**
-   * 同步用户的所有仓库的历史事件
-   */
-  async syncAllUserRepositoriesHistory(userId: string): Promise<void> {
+  async syncAllUserRepositoriesHistory(
+    userId: string,
+    priorityRepositoryIds: string[] = [],
+  ): Promise<void> {
     const repositories = await prisma.repository.findMany({
       where: {
         users: { some: { userId } },
@@ -361,11 +493,18 @@ export class SyncService {
       select: { id: true },
     });
 
-    for (const repo of repositories) {
+    const repositoryIds = Array.from(
+      new Set([
+        ...priorityRepositoryIds,
+        ...repositories.map((repository) => repository.id),
+      ]),
+    );
+
+    for (const repositoryId of repositoryIds) {
       try {
-        await this.syncRepositoryHistory(repo.id);
+        await this.syncRepositoryHistory(repositoryId);
       } catch (error) {
-        this.logger.error(`Failed to sync history for repository ${repo.id}`, error);
+        this.logger.error(`Failed to sync history for repository ${repositoryId}`, error);
       }
     }
   }

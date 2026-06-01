@@ -64,3 +64,23 @@ export function useDashboardRecentActivity(
     enabled: Boolean(repositoryIds && repositoryIds.length > 0),
   });
 }
+
+export function useProjectRiverDashboard(
+  repositoryId?: string,
+  repositoryBranchScopes?: RepositoryBranchScopeMap,
+) {
+  const selectionKey = createSelectionKey(
+    repositoryId ? [repositoryId] : undefined,
+    repositoryBranchScopes,
+  );
+
+  return useQuery({
+    queryKey: ['dashboard', 'project-river', repositoryId ?? 'none', selectionKey],
+    queryFn: () => dashboardService.getProjectRiverRepositoryDashboard(
+      repositoryId as string,
+      repositoryBranchScopes,
+    ),
+    enabled: Boolean(repositoryId),
+    staleTime: 60 * 1000,
+  });
+}

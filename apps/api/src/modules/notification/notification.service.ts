@@ -4,6 +4,8 @@ import { EmailChannel } from './channels/email.channel';
 import { DingTalkChannel } from './channels/dingtalk.channel';
 import { FeishuChannel } from './channels/feishu.channel';
 import { WebhookChannel } from './channels/webhook.channel';
+import { WecomChannel } from './channels/wecom.channel';
+import { WechatChannel } from './channels/wechat.channel';
 import { ChannelSendResult } from './channels/shared';
 import { SendNotificationDto, UpdateNotificationPreferencesDto } from './dto/notification.dto';
 import {
@@ -21,6 +23,8 @@ export interface NotificationPreferences {
     weeklyReport: boolean;
   };
   webhookUrl: string | null;
+  wecomWebhookUrl: string | null;
+  wechatWebhookUrl: string | null;
   email: string | null;
 }
 
@@ -33,6 +37,8 @@ const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
     weeklyReport: false,
   },
   webhookUrl: null,
+  wecomWebhookUrl: null,
+  wechatWebhookUrl: null,
   email: null,
 };
 
@@ -45,6 +51,8 @@ export class NotificationService {
     private readonly dingtalkChannel: DingTalkChannel,
     private readonly feishuChannel: FeishuChannel,
     private readonly webhookChannel: WebhookChannel,
+    private readonly wecomChannel: WecomChannel,
+    private readonly wechatChannel: WechatChannel,
   ) {}
 
   private async resolveRepositoryIds(
@@ -98,6 +106,14 @@ export class NotificationService {
         typeof prefs.notificationWebhookUrl === 'string'
           ? (prefs.notificationWebhookUrl as string)
           : null,
+      wecomWebhookUrl:
+        typeof prefs.notificationWecomWebhookUrl === 'string'
+          ? (prefs.notificationWecomWebhookUrl as string)
+          : null,
+      wechatWebhookUrl:
+        typeof prefs.notificationWechatWebhookUrl === 'string'
+          ? (prefs.notificationWechatWebhookUrl as string)
+          : null,
       email:
         typeof prefs.notificationEmail === 'string'
           ? (prefs.notificationEmail as string)
@@ -128,6 +144,14 @@ export class NotificationService {
 
     if (prefs.webhookUrl !== undefined) {
       updatedPrefs.notificationWebhookUrl = prefs.webhookUrl;
+    }
+
+    if (prefs.wecomWebhookUrl !== undefined) {
+      updatedPrefs.notificationWecomWebhookUrl = prefs.wecomWebhookUrl;
+    }
+
+    if (prefs.wechatWebhookUrl !== undefined) {
+      updatedPrefs.notificationWechatWebhookUrl = prefs.wechatWebhookUrl;
     }
 
     if (prefs.email !== undefined) {
@@ -235,6 +259,20 @@ export class NotificationService {
       case NotificationChannel.FEISHU:
         return this.feishuChannel.send({
           webhookUrl: prefs.notificationWebhookUrl as string,
+          title: dto.title,
+          content: dto.content,
+        });
+
+      case NotificationChannel.WECOM:
+        return this.wecomChannel.send({
+          webhookUrl: prefs.notificationWecomWebhookUrl as string,
+          title: dto.title,
+          content: dto.content,
+        });
+
+      case NotificationChannel.WECHAT:
+        return this.wechatChannel.send({
+          userId: dto.userId,
           title: dto.title,
           content: dto.content,
         });

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useState, useEffect } from 'react';
 import {
   User,
@@ -13,14 +12,19 @@ import {
   CheckCircle,
   AlertTriangle,
   Brain,
-  Link,
   Wifi,
   Download,
   Loader2,
   Eye,
   EyeOff,
+  GitPullRequest,
+  MessageSquare,
+  FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
+import { apiClient } from '@/services/api-client';
+import { authQueryKeys } from '@/hooks/queries/use-auth-queries';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,6 +51,8 @@ import {
   NotificationTemplateGallery,
   type NotificationTemplateValue,
 } from '@/components/settings/notifications/NotificationTemplateGallery';
+import { FeishuIntegrationDialog } from '@/components/settings/integrations/FeishuIntegrationDialog';
+import { ImChannelIntegrationDialog } from '@/components/settings/integrations/ImChannelIntegrationDialog';
 import {
   createExceptionRuleFromFilterRule,
   createFilterRulePayloadFromDraft,
@@ -75,12 +81,18 @@ import {
 } from '@/services/settings.service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getProviderLogo } from '@/lib/provider-logo';
+import { cn } from '@/lib/utils';
 import { authService } from '@/services/auth.service';
 import { notificationService } from '@/services/notification.service';
 import type {
   NotificationChannel,
   NotificationPreferences,
 } from '@/services/notification.service';
+import { imService, type ImProvider } from '@/services/im.service';
+import feishuLogo from '@/assets/integrations/feishu.svg';
+import dingtalkLogo from '@/assets/integrations/dingtalk.svg';
+import wecomLogo from '@/assets/integrations/wecom.svg';
+import wechatLogo from '@/assets/integrations/wechat.svg';
 
 const apiKeys = [
   { name: 'Production API Key', key: 'rp_live_xxxxxxxxxxxx', created: '2025-01-15', lastUsed: '2 hours ago' },
@@ -89,15 +101,28 @@ const apiKeys = [
 
 export function Settings() {
   const { t } = useLanguage();
+  const queryClient = useQueryClient();
   const [saved, setSaved] = useState(false);
+  const [feishuDialogOpen, setFeishuDialogOpen] = useState(false);
+  const [imDialogOpen, setImDialogOpen] = useState<Exclude<ImProvider, 'feishu'> | null>(null);
+  const [imConnected, setImConnected] = useState<Record<ImProvider, boolean>>({
+    feishu: false,
+    dingtalk: false,
+    wecom: false,
+    wechat: false,
+  });
 
   // 用户信息状态
   const [userLoading, setUserLoading] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
   const [userProfile, setUserProfile] = useState({
     name: '',
     email: '',
     avatar: '',
     githubId: '',
+    username: '',
+    company: '',
+    bio: '',
   });
 
   // AI 配置状态
@@ -125,6 +150,10 @@ export function Settings() {
       analysisComplete: true,
       weeklyReport: false,
     },
+    webhookUrl: '',
+    wecomWebhookUrl: '',
+    wechatWebhookUrl: '',
+    email: '',
   });
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifSaving, setNotifSaving] = useState(false);
@@ -152,6 +181,9 @@ export function Settings() {
           email: user.email || '',
           avatar: user.avatar || '',
           githubId: user.githubId || '',
+          username: user.username || '',
+          company: user.company || '',
+          bio: user.bio || '',
         });
       } catch (error) {
         console.error('Failed to load user profile:', error);
@@ -160,6 +192,29 @@ export function Settings() {
       }
     };
     loadUser();
+  }, []);
+
+  useEffect(() => {
+    const loadImStatus = async () => {
+      try {
+        const status = await imService.getImStatus();
+        setImConnected({
+          feishu: Boolean(status.feishu?.connected || status.feishu?.state === 'connected' || status.feishu?.state === 'ready'),
+          dingtalk: Boolean(status.dingtalk?.connected || status.dingtalk?.state === 'connected' || status.dingtalk?.state === 'ready'),
+          wecom: Boolean(status.wecom?.connected || status.wecom?.state === 'connected' || status.wecom?.state === 'ready'),
+          wechat: Boolean(status.wechat?.connected || status.wechat?.state === 'connected' || status.wechat?.state === 'ready'),
+        });
+      } catch {
+        setImConnected({
+          feishu: false,
+          dingtalk: false,
+          wecom: false,
+          wechat: false,
+        });
+      }
+    };
+
+    loadImStatus();
   }, []);
 
   // 加载 AI 配置
@@ -193,6 +248,26 @@ export function Settings() {
     };
     loadNotifPrefs();
   }, []);
+
+  const handleUpdateProfile = async () => {
+    setProfileSaving(true);
+    try {
+      await apiClient.patch('/users/me', {
+        name: userProfile.name,
+        email: userProfile.email,
+        avatar: userProfile.avatar,
+        username: userProfile.username || '',
+        company: userProfile.company || '',
+        bio: userProfile.bio || '',
+      });
+      queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });
+      toast.success(t('settings.profile.saved') || 'Saved');
+    } catch {
+      toast.error(t('settings.profile.saveFailed') || 'Failed');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
 
   const handleSaveAI = async () => {
     setAiSaving(true);
@@ -281,11 +356,49 @@ export function Settings() {
     setTimeout(() => setSaved(false), 3000);
   };
 
-  const toggleChannel = (channel: NotificationChannel) => {
+  const toggleChannel = async (channel: NotificationChannel) => {
     const channels = notifPrefs.channels.includes(channel)
       ? notifPrefs.channels.filter((c) => c !== channel)
       : [...notifPrefs.channels, channel];
-    setNotifPrefs({ ...notifPrefs, channels });
+    const nextPrefs = { ...notifPrefs, channels };
+    setNotifPrefs(nextPrefs);
+    
+    try {
+      await notificationService.updatePreferences(nextPrefs);
+      toast.success(t('settings.notifications.saved') || '通知设置已保存');
+    } catch (error) {
+      console.error('Failed to auto-save notification channel state:', error);
+      toast.error('保存通知渠道状态失败');
+    }
+  };
+
+  const handleImConnectionChange = async (provider: ImProvider, connected: boolean) => {
+    setImConnected((current) => ({ ...current, [provider]: connected }));
+
+    if (connected) {
+      const channelMap: Record<ImProvider, NotificationChannel> = {
+        feishu: 'FEISHU',
+        dingtalk: 'DINGTALK',
+        wecom: 'WECOM',
+        wechat: 'WECHAT',
+      };
+      const channel = channelMap[provider];
+      
+      if (channel && !notifPrefs.channels.includes(channel)) {
+        const nextPrefs = {
+          ...notifPrefs,
+          channels: [...notifPrefs.channels, channel]
+        };
+        setNotifPrefs(nextPrefs);
+        
+        try {
+          await notificationService.updatePreferences(nextPrefs);
+          toast.success(`${provider === 'feishu' ? '飞书' : provider === 'dingtalk' ? '钉钉' : provider === 'wecom' ? '企业微信' : '微信'}通知渠道已自动开启`);
+        } catch (error) {
+          console.error('Failed to auto-enable notification channel:', error);
+        }
+      }
+    }
   };
 
   const handleSelectTemplate = (template: NotificationTemplateValue) => {
@@ -320,7 +433,7 @@ export function Settings() {
   };
 
   const handleEditExceptionRule = (rule: NotificationExceptionRule) => {
-    setSelectedTemplate(rule.template);
+    setSelectedTemplate(rule.template ?? null);
     setExceptionDraft(rule);
   };
 
@@ -361,35 +474,35 @@ export function Settings() {
         <TabsList className="bg-[var(--github-surface)] border border-[var(--github-border)]">
           <TabsTrigger
             value="profile"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+            className="data-[state=active]:text-white"
           >
             <User className="w-4 h-4 mr-2" />
             {t('settings.tabs.profile')}
           </TabsTrigger>
           <TabsTrigger
             value="notifications"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+            className="data-[state=active]:text-white"
           >
             <Bell className="w-4 h-4 mr-2" />
             {t('settings.tabs.notifications')}
           </TabsTrigger>
           <TabsTrigger
             value="integrations"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+            className="data-[state=active]:text-white"
           >
             <Code className="w-4 h-4 mr-2" />
             {t('settings.tabs.integrations')}
           </TabsTrigger>
           <TabsTrigger
             value="security"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+            className="data-[state=active]:text-white"
           >
             <Shield className="w-4 h-4 mr-2" />
             {t('settings.tabs.security')}
           </TabsTrigger>
           <TabsTrigger
             value="ai"
-            className="data-[state=active]:bg-[var(--github-accent)] data-[state=active]:text-white"
+            className="data-[state=active]:text-white"
           >
             <Brain className="w-4 h-4 mr-2" />
             {t('settings.tabs.ai')}
@@ -415,13 +528,33 @@ export function Settings() {
                     {userProfile.name.charAt(0) || 'U'}
                   </AvatarFallback>
                 </Avatar>
-                <div className="space-y-2">
-                  <Button variant="outline" className="border-[var(--github-border)]">
-                    {t('settings.profile.changeAvatar')}
-                  </Button>
-                  <p className="text-xs text-[var(--github-text-secondary)]">
-                    {t('settings.profile.avatarHint')}
-                  </p>
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <label className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-[var(--github-border)] bg-[var(--github-surface)] text-sm text-white cursor-pointer hover:border-[var(--github-accent)] transition-colors">
+                      {t('settings.profile.uploadAvatar') || 'Upload from computer'}
+                      <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const fd = new FormData();
+                        fd.append('file', file);
+                        try {
+                          const res = await apiClient.post('/users/me/avatar', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+                          setUserProfile({ ...userProfile, avatar: res.data.data.avatar });
+                          toast.success(t('settings.profile.avatarUploaded') || 'Avatar uploaded');
+                        } catch { toast.error('Upload failed'); }
+                      }} />
+                    </label>
+                    <Button variant="outline" size="sm" className="border-[var(--github-border)]" onClick={async () => {
+                      try {
+                        const res = await apiClient.get('/users/me/github-avatar');
+                        setUserProfile({ ...userProfile, avatar: res.data.data.avatar });
+                        toast.success(t('settings.profile.avatarRestored') || 'GitHub avatar restored');
+                      } catch { toast.error('Failed to restore'); }
+                    }}>
+                      <Github className="w-4 h-4 mr-1" />
+                      {t('settings.profile.restoreAvatar') || 'Restore GitHub avatar'}
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -441,7 +574,8 @@ export function Settings() {
                   <Label htmlFor="username" className="text-sm text-white">{t('settings.profile.username')}</Label>
                   <Input
                     id="username"
-                    defaultValue="johndoe"
+                    value={userProfile.username}
+                    onChange={(e) => setUserProfile({ ...userProfile, username: e.target.value })}
                     className="bg-[var(--github-surface)] border-[var(--github-border)]"
                   />
                 </div>
@@ -459,7 +593,8 @@ export function Settings() {
                   <Label htmlFor="company" className="text-sm text-white">{t('settings.profile.company')}</Label>
                   <Input
                     id="company"
-                    defaultValue="Acme Corp"
+                    value={userProfile.company}
+                    onChange={(e) => setUserProfile({ ...userProfile, company: e.target.value })}
                     className="bg-[var(--github-surface)] border-[var(--github-border)]"
                   />
                 </div>
@@ -470,354 +605,521 @@ export function Settings() {
                 <textarea
                   id="bio"
                   rows={3}
-                  defaultValue="Full-stack developer passionate about clean code and AI."
+                  value={userProfile.bio}
+                  onChange={(e) => setUserProfile({ ...userProfile, bio: e.target.value })}
                   className="w-full px-3 py-2 rounded-md bg-[var(--github-surface)] border border-[var(--github-border)] text-white text-sm resize-none focus:outline-none focus:border-[var(--github-accent)]"
                 />
               </div>
+
+              <Button onClick={handleUpdateProfile} disabled={profileSaving} className="gap-2">
+                {profileSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {profileSaving ? (t('settings.profile.saving') || 'Saving...') : (t('settings.profile.save') || 'Save Settings')}
+              </Button>
             </CardContent>
           </Card>
           )}
         </TabsContent>
 
         {/* Notifications Tab */}
-        <TabsContent value="notifications" className="mt-4 space-y-4">
+        <TabsContent value="notifications" className="mt-4 space-y-6">
           {notifLoading ? (
-            <div className="flex items-center justify-center py-8">
+            <div className="flex items-center justify-center py-12">
               <Spinner className="h-6 w-6 text-[var(--github-accent)]" />
             </div>
           ) : (
             <>
-              <Card className="card-github">
+              {/* Delivery Channels Card */}
+              <Card className="card-github border border-border/80 shadow-md">
                 <CardHeader>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge className="bg-[var(--github-accent)]/15 text-[var(--github-accent)]">
-                      {t('settings.notifications.badge.controls')}
-                    </Badge>
-                  </div>
-                  <CardTitle className="text-base font-semibold text-white">
-                    {t('settings.notifications.title')}
+                  <CardTitle className="text-base font-semibold text-white flex items-center gap-2">
+                    <Mail className="h-5 w-5 text-primary" />
+                    {t('settings.notifications.channels.header')}
                   </CardTitle>
-                  <CardDescription className="text-[var(--github-text-secondary)]">
-                    {t('settings.notifications.description')}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-4 md:grid-cols-3">
-                  <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--github-surface)]">
-                        <Bell className="h-5 w-5 text-white" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-white">{t('settings.notifications.channels.cardTitle')}</p>
-                        <p className="text-xs text-[var(--github-text-secondary)]">
-                          {t('settings.notifications.channels.cardDesc')}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--github-surface)]">
-                        <Shield className="h-5 w-5 text-white" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-white">{t('settings.notifications.focus.cardTitle')}</p>
-                        <p className="text-xs text-[var(--github-text-secondary)]">
-                          {t('settings.notifications.focus.cardDesc')}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--github-surface)]">
-                        <Link className="h-5 w-5 text-white" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-white">{t('settings.notifications.exceptions.cardTitle')}</p>
-                        <p className="text-xs text-[var(--github-text-secondary)]">
-                          {t('settings.notifications.exceptions.cardDesc')}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
-                  {t('settings.notifications.section.delivery')}
-                </p>
-                <p className="text-sm text-[var(--github-text-secondary)]">
-                  {t('settings.notifications.section.deliveryDesc')}
-                </p>
-              </div>
-
-              <Card className="card-github">
-                <CardHeader>
-                  <CardTitle className="text-base font-semibold text-white">{t('settings.notifications.channels.header')}</CardTitle>
-                  <CardDescription className="text-[var(--github-text-secondary)]">
+                  <CardDescription className="text-muted-foreground text-xs leading-normal">
                     {t('settings.notifications.channels.headerDesc')}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
-                      <div className="flex items-center gap-3">
-                        <Mail className="w-5 h-5 text-[var(--github-text-secondary)]" />
-                        <div>
-                          <p className="text-sm text-white">{t('settings.notifications.channels.email')}</p>
-                          <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.channels.emailDesc')}</p>
+                  {/* Channels Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {/* In App Channel */}
+                    <div className={cn(
+                      "rounded-xl border p-4 flex flex-col justify-between space-y-4 transition-all duration-200",
+                      notifPrefs.channels.includes('IN_APP')
+                        ? "border-primary bg-primary/5 shadow-md shadow-primary/5 glow-orange"
+                        : "border-border/60 bg-card/40 hover:bg-white/5 hover:border-primary/20"
+                    )}>
+                      <div className="flex items-center justify-between">
+                        <div className={cn(
+                          "flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200",
+                          notifPrefs.channels.includes('IN_APP')
+                            ? "bg-primary/10 border-primary/20 text-primary"
+                            : "bg-white/5 border-border/40 text-muted-foreground"
+                        )}>
+                          <Bell className="h-4.5 w-4.5" />
                         </div>
-                      </div>
-                      <Switch
-                        checked={notifPrefs.channels.includes('EMAIL')}
-                        onCheckedChange={() => toggleChannel('EMAIL')}
-                      />
-                    </div>
-                    {notifPrefs.channels.includes('EMAIL') && (
-                      <div className="ml-12 space-y-2">
-                        <Input
-                          placeholder="your@email.com"
-                          value={notifPrefs.email || ''}
-                          onChange={(e) => setNotifPrefs({ ...notifPrefs, email: e.target.value })}
-                          className="bg-[var(--github-surface)] border-[var(--github-border)]"
+                        <Switch
+                          checked={notifPrefs.channels.includes('IN_APP')}
+                          onCheckedChange={() => toggleChannel('IN_APP')}
+                          className="data-[state=checked]:bg-primary"
                         />
                       </div>
-                    )}
-
-                    <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
-                      <div className="flex items-center gap-3">
-                        <Link className="w-5 h-5 text-[var(--github-text-secondary)]" />
-                        <div>
-                          <p className="text-sm text-white">{t('settings.notifications.channels.dingtalk')}</p>
-                          <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.channels.dingtalkDesc')}</p>
-                        </div>
+                      <div>
+                        <p className="text-sm font-semibold text-white">{t('settings.notifications.channels.inApp')}</p>
+                        <p className="text-xs text-muted-foreground mt-1 leading-normal">
+                          {t('settings.notifications.channels.inAppDesc')}
+                        </p>
                       </div>
-                      <Switch
-                        checked={notifPrefs.channels.includes('DINGTALK')}
-                        onCheckedChange={() => toggleChannel('DINGTALK')}
-                      />
                     </div>
 
-                    <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
-                      <div className="flex items-center gap-3">
-                        <Link className="w-5 h-5 text-[var(--github-text-secondary)]" />
-                        <div>
-                          <p className="text-sm text-white">{t('settings.notifications.channels.feishu')}</p>
-                          <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.channels.feishuDesc')}</p>
+                    {/* Email Channel */}
+                    <div className={cn(
+                      "rounded-xl border p-4 flex flex-col justify-between space-y-4 transition-all duration-200",
+                      notifPrefs.channels.includes('EMAIL')
+                        ? "border-primary bg-primary/5 shadow-md shadow-primary/5 glow-orange"
+                        : "border-border/60 bg-card/40 hover:bg-white/5 hover:border-primary/20"
+                    )}>
+                      <div className="flex items-center justify-between">
+                        <div className={cn(
+                          "flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200",
+                          notifPrefs.channels.includes('EMAIL')
+                            ? "bg-primary/10 border-primary/20 text-primary"
+                            : "bg-white/5 border-border/40 text-muted-foreground"
+                        )}>
+                          <Mail className="h-4.5 w-4.5" />
                         </div>
+                        <Switch
+                          checked={notifPrefs.channels.includes('EMAIL')}
+                          onCheckedChange={() => toggleChannel('EMAIL')}
+                          className="data-[state=checked]:bg-primary"
+                        />
                       </div>
-                      <Switch
-                        checked={notifPrefs.channels.includes('FEISHU')}
-                        onCheckedChange={() => toggleChannel('FEISHU')}
-                      />
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{t('settings.notifications.channels.email')}</p>
+                          <p className="text-xs text-muted-foreground mt-1 leading-normal">
+                            {t('settings.notifications.channels.emailDesc')}
+                          </p>
+                        </div>
+                        {notifPrefs.channels.includes('EMAIL') && (
+                          <div className="pt-3 border-t border-border/30 space-y-1.5 transition-all">
+                            <Label className="text-[10px] font-semibold text-muted-foreground">{t('settings.notifications.channels.email')}</Label>
+                            <Input
+                              placeholder="your@email.com"
+                              value={notifPrefs.email || ''}
+                              onChange={(e) => setNotifPrefs({ ...notifPrefs, email: e.target.value })}
+                              className="h-8 bg-background border-border/60 text-xs text-white rounded-lg focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary"
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
-                      <div className="flex items-center gap-3">
-                        <Bell className="w-5 h-5 text-[var(--github-text-secondary)]" />
-                        <div>
-                          <p className="text-sm text-white">{t('settings.notifications.channels.inApp')}</p>
-                          <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.channels.inAppDesc')}</p>
+                    {/* Feishu Channel */}
+                    <div className={cn(
+                      "rounded-xl border p-4 flex flex-col justify-between space-y-4 transition-all duration-200",
+                      notifPrefs.channels.includes('FEISHU')
+                        ? "border-primary bg-primary/5 shadow-md shadow-primary/5 glow-orange"
+                        : "border-border/60 bg-card/40 hover:bg-white/5 hover:border-primary/20"
+                    )}>
+                      <div className="flex items-center justify-between">
+                        <div className={cn(
+                          "flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200 overflow-hidden",
+                          notifPrefs.channels.includes('FEISHU')
+                            ? "bg-primary/10 border-primary/20"
+                            : "bg-white/5 border-border/40"
+                        )}>
+                          <img src={feishuLogo} alt="Feishu" className="h-4.5 w-4.5 brightness-110 filter" />
                         </div>
+                        <Switch
+                          checked={notifPrefs.channels.includes('FEISHU')}
+                          onCheckedChange={() => toggleChannel('FEISHU')}
+                          className="data-[state=checked]:bg-primary"
+                        />
                       </div>
-                      <Switch
-                        checked={notifPrefs.channels.includes('IN_APP')}
-                        onCheckedChange={() => toggleChannel('IN_APP')}
-                      />
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{t('settings.notifications.channels.feishu')}</p>
+                          <p className="text-xs text-muted-foreground mt-1 leading-normal">
+                            {t('settings.notifications.channels.feishuDesc')}
+                          </p>
+                        </div>
+                        {notifPrefs.channels.includes('FEISHU') && (
+                          <div className="pt-3 border-t border-border/30 space-y-1.5 transition-all">
+                            <Label className="text-[10px] font-semibold text-muted-foreground">{t('settings.notifications.channels.webhookUrl')}</Label>
+                            <Input
+                              placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+                              value={notifPrefs.webhookUrl || ''}
+                              onChange={(e) => setNotifPrefs({ ...notifPrefs, webhookUrl: e.target.value })}
+                              className="h-8 bg-background border-border/60 text-xs text-white rounded-lg focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* DingTalk Channel */}
+                    <div className={cn(
+                      "rounded-xl border p-4 flex flex-col justify-between space-y-4 transition-all duration-200",
+                      notifPrefs.channels.includes('DINGTALK')
+                        ? "border-primary bg-primary/5 shadow-md shadow-primary/5 glow-orange"
+                        : "border-border/60 bg-card/40 hover:bg-white/5 hover:border-primary/20"
+                    )}>
+                      <div className="flex items-center justify-between">
+                        <div className={cn(
+                          "flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200 overflow-hidden",
+                          notifPrefs.channels.includes('DINGTALK')
+                            ? "bg-primary/10 border-primary/20"
+                            : "bg-white/5 border-border/40"
+                        )}>
+                          <img src={dingtalkLogo} alt="DingTalk" className="h-4.5 w-4.5 brightness-110 filter" />
+                        </div>
+                        <Switch
+                          checked={notifPrefs.channels.includes('DINGTALK')}
+                          onCheckedChange={() => toggleChannel('DINGTALK')}
+                          className="data-[state=checked]:bg-primary"
+                        />
+                      </div>
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{t('settings.notifications.channels.dingtalk')}</p>
+                          <p className="text-xs text-muted-foreground mt-1 leading-normal">
+                            {t('settings.notifications.channels.dingtalkDesc')}
+                          </p>
+                        </div>
+                        {notifPrefs.channels.includes('DINGTALK') && (
+                          <div className="pt-3 border-t border-border/30 space-y-1.5 transition-all">
+                            <Label className="text-[10px] font-semibold text-muted-foreground">{t('settings.notifications.channels.webhookUrl')}</Label>
+                            <Input
+                              placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx"
+                              value={notifPrefs.webhookUrl || ''}
+                              onChange={(e) => setNotifPrefs({ ...notifPrefs, webhookUrl: e.target.value })}
+                              className="h-8 bg-background border-border/60 text-xs text-white rounded-lg focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* WeCom Channel */}
+                    <div className={cn(
+                      "rounded-xl border p-4 flex flex-col justify-between space-y-4 transition-all duration-200",
+                      notifPrefs.channels.includes('WECOM')
+                        ? "border-primary bg-primary/5 shadow-md shadow-primary/5 glow-orange"
+                        : "border-border/60 bg-card/40 hover:bg-white/5 hover:border-primary/20"
+                    )}>
+                      <div className="flex items-center justify-between">
+                        <div className={cn(
+                          "flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200 overflow-hidden",
+                          notifPrefs.channels.includes('WECOM')
+                            ? "bg-primary/10 border-primary/20"
+                            : "bg-white/5 border-border/40"
+                        )}>
+                          <img src={wecomLogo} alt="WeCom" className="h-4.5 w-4.5 brightness-110 filter" />
+                        </div>
+                        <Switch
+                          checked={notifPrefs.channels.includes('WECOM')}
+                          onCheckedChange={() => toggleChannel('WECOM')}
+                          className="data-[state=checked]:bg-primary"
+                        />
+                      </div>
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{t('settings.notifications.channels.wecom')}</p>
+                          <p className="text-xs text-muted-foreground mt-1 leading-normal">
+                            {t('settings.notifications.channels.wecomDesc')}
+                          </p>
+                        </div>
+                        {notifPrefs.channels.includes('WECOM') && (
+                          <div className="pt-3 border-t border-border/30 space-y-1.5 transition-all">
+                            <Label className="text-[10px] font-semibold text-muted-foreground">{t('settings.notifications.channels.webhookUrl')}</Label>
+                            <Input
+                              placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
+                              value={notifPrefs.wecomWebhookUrl || ''}
+                              onChange={(e) => setNotifPrefs({ ...notifPrefs, wecomWebhookUrl: e.target.value })}
+                              className="h-8 bg-background border-border/60 text-xs text-white rounded-lg focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* WeChat Channel */}
+                    <div className={cn(
+                      "rounded-xl border p-4 flex flex-col justify-between space-y-4 transition-all duration-200",
+                      notifPrefs.channels.includes('WECHAT')
+                        ? "border-primary bg-primary/5 shadow-md shadow-primary/5 glow-orange"
+                        : "border-border/60 bg-card/40 hover:bg-white/5 hover:border-primary/20"
+                    )}>
+                      <div className="flex items-center justify-between">
+                        <div className={cn(
+                          "flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200 overflow-hidden",
+                          notifPrefs.channels.includes('WECHAT')
+                            ? "bg-primary/10 border-primary/20"
+                            : "bg-white/5 border-border/40"
+                        )}>
+                          <img src={wechatLogo} alt="WeChat" className="h-4.5 w-4.5 brightness-110 filter" />
+                        </div>
+                        <Switch
+                          checked={notifPrefs.channels.includes('WECHAT')}
+                          onCheckedChange={() => toggleChannel('WECHAT')}
+                          className="data-[state=checked]:bg-primary"
+                        />
+                      </div>
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{t('settings.notifications.channels.wechat')}</p>
+                          <p className="text-xs text-muted-foreground mt-1 leading-normal">
+                            {t('settings.notifications.channels.wechatDesc')}
+                          </p>
+                        </div>
+                        {notifPrefs.channels.includes('WECHAT') && (
+                          <div className="pt-3 border-t border-border/30 space-y-1.5 transition-all">
+                            <Label className="text-[10px] font-semibold text-muted-foreground">{t('settings.notifications.channels.webhookUrl')}</Label>
+                            <Input
+                              placeholder="https://api.weixin.qq.com/... (optional)"
+                              value={notifPrefs.wechatWebhookUrl || ''}
+                              onChange={(e) => setNotifPrefs({ ...notifPrefs, wechatWebhookUrl: e.target.value })}
+                              className="h-8 bg-background border-border/60 text-xs text-white rounded-lg focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary"
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-
-                  {(notifPrefs.channels.includes('DINGTALK') ||
-                    notifPrefs.channels.includes('FEISHU') ||
-                    notifPrefs.channels.includes('WEBHOOK')) && (
-                    <>
-                      <Separator className="bg-[var(--github-border)]" />
-                      <div className="space-y-2">
-                        <Label className="text-sm text-white">{t('settings.notifications.channels.webhookUrl')}</Label>
-                        <Input
-                          placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx"
-                          value={notifPrefs.webhookUrl || ''}
-                          onChange={(e) => setNotifPrefs({ ...notifPrefs, webhookUrl: e.target.value })}
-                          className="bg-[var(--github-surface)] border-[var(--github-border)]"
-                        />
-                      </div>
-                    </>
-                  )}
                 </CardContent>
               </Card>
 
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
-                  {t('settings.notifications.section.focus')}
-                </p>
-                <p className="text-sm text-[var(--github-text-secondary)]">
-                  {t('settings.notifications.section.focusDesc')}
-                </p>
-              </div>
-
-              <Card className="card-github">
+              {/* Focus Level & Categories */}
+              <Card className="card-github border border-border/80 shadow-md">
                 <CardHeader>
-                  <CardTitle className="text-base font-semibold text-white">{t('settings.notifications.focus.header')}</CardTitle>
-                  <CardDescription className="text-[var(--github-text-secondary)]">
+                  <CardTitle className="text-base font-semibold text-white flex items-center gap-2">
+                    <Shield className="h-5 w-5 text-primary" />
+                    {t('settings.notifications.focus.header')}
+                  </CardTitle>
+                  <CardDescription className="text-muted-foreground text-xs leading-normal">
                     {t('settings.notifications.focus.headerDesc')}
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-6">
+                  {/* Focus Level Selector */}
                   <NotificationLevelSelector
                     onValueChange={setNotificationLevel}
                     value={notificationLevel}
                   />
 
-                  <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
-                    <div>
-                      <p className="text-sm text-white">{t('settings.notifications.events.highRisk')}</p>
-                      <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.events.highRiskDesc')}</p>
+                  <Separator className="bg-border/60" />
+
+                  {/* Focus Event Categories */}
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                      {t('settings.notifications.section.focus')}
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* High Risk */}
+                      <div className={cn(
+                        "flex items-center justify-between p-4 rounded-xl border transition-all duration-200",
+                        notifPrefs.events.highRisk
+                          ? "border-primary/25 bg-primary/5 shadow-sm shadow-primary/5"
+                          : "border-border/60 bg-card/30 hover:bg-white/5"
+                      )}>
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200",
+                            notifPrefs.events.highRisk ? "bg-primary/10 border-primary/20 text-primary" : "bg-white/5 border-border/40 text-muted-foreground"
+                          )}>
+                            <AlertTriangle className="h-4.5 w-4.5" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-white">{t('settings.notifications.events.highRisk')}</p>
+                            <p className="text-xs text-muted-foreground leading-normal mt-0.5">{t('settings.notifications.events.highRiskDesc')}</p>
+                          </div>
+                        </div>
+                        <Switch
+                          checked={notifPrefs.events.highRisk}
+                          onCheckedChange={(checked) =>
+                            setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, highRisk: checked } })
+                          }
+                          className="data-[state=checked]:bg-primary"
+                        />
+                      </div>
+
+                      {/* PR Updates */}
+                      <div className={cn(
+                        "flex items-center justify-between p-4 rounded-xl border transition-all duration-200",
+                        notifPrefs.events.prUpdates
+                          ? "border-primary/25 bg-primary/5 shadow-sm shadow-primary/5"
+                          : "border-border/60 bg-card/30 hover:bg-white/5"
+                      )}>
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200",
+                            notifPrefs.events.prUpdates ? "bg-primary/10 border-primary/20 text-primary" : "bg-white/5 border-border/40 text-muted-foreground"
+                          )}>
+                            <GitPullRequest className="h-4.5 w-4.5" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-white">{t('settings.notifications.events.prUpdates')}</p>
+                            <p className="text-xs text-muted-foreground leading-normal mt-0.5">{t('settings.notifications.events.prUpdatesDesc')}</p>
+                          </div>
+                        </div>
+                        <Switch
+                          checked={notifPrefs.events.prUpdates}
+                          onCheckedChange={(checked) =>
+                            setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, prUpdates: checked } })
+                          }
+                          className="data-[state=checked]:bg-primary"
+                        />
+                      </div>
+
+                      {/* Analysis Complete */}
+                      <div className={cn(
+                        "flex items-center justify-between p-4 rounded-xl border transition-all duration-200",
+                        notifPrefs.events.analysisComplete
+                          ? "border-primary/25 bg-primary/5 shadow-sm shadow-primary/5"
+                          : "border-border/60 bg-card/30 hover:bg-white/5"
+                      )}>
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200",
+                            notifPrefs.events.analysisComplete ? "bg-primary/10 border-primary/20 text-primary" : "bg-white/5 border-border/40 text-muted-foreground"
+                          )}>
+                            <Brain className="h-4.5 w-4.5" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-white">{t('settings.notifications.events.analysisComplete')}</p>
+                            <p className="text-xs text-muted-foreground leading-normal mt-0.5">{t('settings.notifications.events.analysisCompleteDesc')}</p>
+                          </div>
+                        </div>
+                        <Switch
+                          checked={notifPrefs.events.analysisComplete}
+                          onCheckedChange={(checked) =>
+                            setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, analysisComplete: checked } })
+                          }
+                          className="data-[state=checked]:bg-primary"
+                        />
+                      </div>
+
+                      {/* Weekly Report */}
+                      <div className={cn(
+                        "flex items-center justify-between p-4 rounded-xl border transition-all duration-200",
+                        notifPrefs.events.weeklyReport
+                          ? "border-primary/25 bg-primary/5 shadow-sm shadow-primary/5"
+                          : "border-border/60 bg-card/30 hover:bg-white/5"
+                      )}>
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200",
+                            notifPrefs.events.weeklyReport ? "bg-primary/10 border-primary/20 text-primary" : "bg-white/5 border-border/40 text-muted-foreground"
+                          )}>
+                            <FileText className="h-4.5 w-4.5" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-white">{t('settings.notifications.events.weeklyReport')}</p>
+                            <p className="text-xs text-muted-foreground leading-normal mt-0.5">{t('settings.notifications.events.weeklyReportDesc')}</p>
+                          </div>
+                        </div>
+                        <Switch
+                          checked={notifPrefs.events.weeklyReport}
+                          onCheckedChange={(checked) =>
+                            setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, weeklyReport: checked } })
+                          }
+                          className="data-[state=checked]:bg-primary"
+                        />
+                      </div>
                     </div>
-                    <Switch
-                      checked={notifPrefs.events.highRisk}
-                      onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, highRisk: checked } })
-                      }
-                    />
-                  </div>
-                  <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
-                    <div>
-                      <p className="text-sm text-white">{t('settings.notifications.events.prUpdates')}</p>
-                      <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.events.prUpdatesDesc')}</p>
-                    </div>
-                    <Switch
-                      checked={notifPrefs.events.prUpdates}
-                      onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, prUpdates: checked } })
-                      }
-                    />
-                  </div>
-                  <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
-                    <div>
-                      <p className="text-sm text-white">{t('settings.notifications.events.analysisComplete')}</p>
-                      <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.events.analysisCompleteDesc')}</p>
-                    </div>
-                    <Switch
-                      checked={notifPrefs.events.analysisComplete}
-                      onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, analysisComplete: checked } })
-                      }
-                    />
-                  </div>
-                  <div className="flex items-center justify-between p-4 rounded-lg bg-white/5">
-                    <div>
-                      <p className="text-sm text-white">{t('settings.notifications.events.weeklyReport')}</p>
-                      <p className="text-xs text-[var(--github-text-secondary)]">{t('settings.notifications.events.weeklyReportDesc')}</p>
-                    </div>
-                    <Switch
-                      checked={notifPrefs.events.weeklyReport}
-                      onCheckedChange={(checked) =>
-                        setNotifPrefs({ ...notifPrefs, events: { ...notifPrefs.events, weeklyReport: checked } })
-                      }
-                    />
                   </div>
                 </CardContent>
               </Card>
 
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-[var(--github-text-secondary)]">
-                  {t('settings.notifications.section.exceptions')}
-                </p>
-                <p className="text-sm text-[var(--github-text-secondary)]">
-                  {t('settings.notifications.section.exceptionsDesc')}
-                </p>
-              </div>
-
-              <Card className="card-github border-dashed">
+              {/* Exception Rules Card */}
+              <Card className="card-github border border-border/80 shadow-md">
                 <CardHeader>
-                  <CardTitle className="text-base font-semibold text-white">
+                  <CardTitle className="text-base font-semibold text-white flex items-center gap-2">
+                    <Code className="h-5 w-5 text-primary" />
                     {t('settings.notifications.exceptions.incoming')}
                   </CardTitle>
-                  <CardDescription className="text-[var(--github-text-secondary)]">
+                  <CardDescription className="text-muted-foreground text-xs leading-normal">
                     {t('settings.notifications.exceptions.incomingDesc')}
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-6">
+                  {/* Template Shortcuts */}
                   <NotificationTemplateGallery
                     onSelectTemplate={handleSelectTemplate}
                     selectedTemplate={selectedTemplate}
                   />
 
-                  <div className="rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
-                    <p className="text-sm font-medium text-white">{t('settings.notifications.exceptions.planned')}</p>
-                    <p className="mt-1 text-xs text-[var(--github-text-secondary)]">
-                      {t('settings.notifications.exceptions.plannedDesc')}
-                    </p>
-                  </div>
+                  {/* Exception Draft Form */}
+                  {exceptionDraft && (
+                    <div className="pt-2">
+                      <NotificationExceptionDraftCard
+                        draft={exceptionDraft}
+                        isSaving={
+                          createFilterRuleMutation.isPending || updateFilterRuleMutation.isPending
+                        }
+                        onActionChange={(value: NotificationExceptionAction) =>
+                          setExceptionDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  action: value,
+                                }
+                              : current,
+                          )
+                        }
+                        onClear={() => {
+                          setSelectedTemplate(null);
+                          setExceptionDraft(null);
+                        }}
+                        onDescriptionChange={(value: string) =>
+                          setExceptionDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  description: value,
+                                }
+                              : current,
+                          )
+                        }
+                        onEnabledChange={(value: boolean) =>
+                          setExceptionDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  enabled: value,
+                                }
+                              : current,
+                          )
+                        }
+                        onNameChange={(value: string) =>
+                          setExceptionDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  name: value,
+                                }
+                              : current,
+                          )
+                        }
+                        onSave={handleSaveExceptionDraft}
+                      />
+                    </div>
+                  )}
 
-                  {exceptionDraft ? (
-                    <NotificationExceptionDraftCard
-                      draft={exceptionDraft}
-                      isSaving={
-                        createFilterRuleMutation.isPending || updateFilterRuleMutation.isPending
-                      }
-                      onActionChange={(value: NotificationExceptionAction) =>
-                        setExceptionDraft((current) =>
-                          current
-                            ? {
-                                ...current,
-                                action: value,
-                              }
-                            : current,
-                        )
-                      }
-                      onClear={() => {
-                        setSelectedTemplate(null);
-                        setExceptionDraft(null);
-                      }}
-                      onDescriptionChange={(value: string) =>
-                        setExceptionDraft((current) =>
-                          current
-                            ? {
-                                ...current,
-                                description: value,
-                              }
-                            : current,
-                        )
-                      }
-                      onEnabledChange={(value: boolean) =>
-                        setExceptionDraft((current) =>
-                          current
-                            ? {
-                                ...current,
-                                enabled: value,
-                              }
-                            : current,
-                        )
-                      }
-                      onNameChange={(value: string) =>
-                        setExceptionDraft((current) =>
-                          current
-                            ? {
-                                ...current,
-                                name: value,
-                              }
-                            : current,
-                        )
-                      }
-                      onSave={handleSaveExceptionDraft}
-                    />
-                  ) : null}
-
-                  {filterRulesQuery.error ? (
-                    <Alert className="border-destructive/40 bg-destructive/10 text-white">
-                      <AlertTriangle className="h-4 w-4" />
+                  {filterRulesQuery.error && (
+                    <Alert className="border-destructive/40 bg-destructive/10 text-white rounded-xl">
+                      <AlertTriangle className="h-4 w-4 text-[var(--github-danger)]" />
                       <AlertTitle>{t('notifications.settings.rules.errorTitle')}</AlertTitle>
                       <AlertDescription>
                         {filterRulesQuery.error.message || t('notifications.settings.rules.errorDescription')}
                       </AlertDescription>
                     </Alert>
-                  ) : null}
+                  )}
 
+                  <Separator className="bg-border/60" />
+
+                  {/* Rule List */}
                   <NotificationExceptionRuleList
                     isDeleting={deleteFilterRuleMutation.isPending}
                     isLoading={filterRulesQuery.isLoading}
@@ -828,15 +1130,17 @@ export function Settings() {
                 </CardContent>
               </Card>
 
-              <Button
-                onClick={handleSaveNotifications}
-                disabled={notifSaving}
-                className="btn-x-primary gap-2"
-              >
-                {notifSaving && <Spinner className="h-4 w-4" />}
-                {notifSaved ? <CheckCircle className="w-4 h-4" /> : null}
-                {notifSaving ? t('settings.notifications.saving') : notifSaved ? t('settings.notifications.saved') : t('settings.notifications.save')}
-              </Button>
+              {/* Bottom Sticky-like Action Buttons */}
+              <div className="flex justify-end pt-2">
+                <Button
+                  onClick={handleSaveNotifications}
+                  disabled={notifSaving}
+                  className="btn-x-primary h-10 px-6 gap-2 text-sm font-semibold rounded-full shadow-lg shadow-primary/5 border-none"
+                >
+                  {notifSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : notifSaved ? <CheckCircle className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+                  {notifSaving ? t('settings.notifications.saving') : notifSaved ? t('settings.notifications.saved') : t('settings.notifications.save')}
+                </Button>
+              </div>
             </>
           )}
         </TabsContent>
@@ -850,15 +1154,27 @@ export function Settings() {
             <CardContent className="space-y-4">
               {[
                 { provider: 'GitHub', username: userProfile.githubId ? userProfile.name || 'Connected' : 'Not connected', connected: !!userProfile.githubId, icon: Github },
+                { provider: 'Feishu', username: imConnected.feishu ? t('settings.integrations.feishu.ready') : t('settings.integrations.feishu.notConfigured'), connected: imConnected.feishu, logo: feishuLogo, action: 'feishu' as const },
+                { provider: '钉钉', username: imConnected.dingtalk ? t('settings.integrations.feishu.ready') : t('settings.integrations.feishu.notConfigured'), connected: imConnected.dingtalk, logo: dingtalkLogo, action: 'dingtalk' as const },
+                { provider: '企业微信', username: imConnected.wecom ? t('settings.integrations.feishu.ready') : t('settings.integrations.feishu.notConfigured'), connected: imConnected.wecom, logo: wecomLogo, action: 'wecom' as const },
+                { provider: '微信', username: imConnected.wechat ? t('settings.integrations.feishu.ready') : t('settings.integrations.feishu.notConfigured'), connected: imConnected.wechat, logo: wechatLogo, action: 'wechat' as const },
                 { provider: 'Slack', username: 'Not configured', connected: false, icon: Slack },
                 { provider: 'Email', username: userProfile.email || 'Not configured', connected: !!userProfile.email, icon: Mail },
               ].map((account) => {
                 const Icon = account.icon;
+                const isFeishu = account.action === 'feishu';
+                const imProvider = account.action === 'dingtalk' || account.action === 'wecom' || account.action === 'wechat'
+                  ? account.action
+                  : null;
                 return (
                   <div key={account.provider} className="flex items-center justify-between p-4 rounded-lg bg-white/5">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 rounded-lg bg-[var(--github-surface)] flex items-center justify-center">
-                        <Icon className="w-5 h-5 text-white" />
+                        {account.logo ? (
+                          <img src={account.logo} alt="" className="h-5 w-5 rounded" />
+                        ) : Icon ? (
+                          <Icon className="w-5 h-5 text-white" />
+                        ) : null}
                       </div>
                       <div>
                         <p className="text-sm font-medium text-white">{account.provider}</p>
@@ -866,7 +1182,39 @@ export function Settings() {
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      {account.connected ? (
+                      {isFeishu ? (
+                        <>
+                          {account.connected ? (
+                            <Badge className="bg-green-400/20 text-green-400">{t('settings.integrations.connected')}</Badge>
+                          ) : null}
+                          <Button
+                            size="sm"
+                            className={account.connected ? "border-[var(--github-border)]" : "btn-x-primary"}
+                            variant={account.connected ? "outline" : undefined}
+                            onClick={() => setFeishuDialogOpen(true)}
+                          >
+                            {account.connected
+                              ? t('settings.integrations.feishu.manage')
+                              : t('settings.integrations.feishu.configure')}
+                          </Button>
+                        </>
+                      ) : imProvider ? (
+                        <>
+                          {account.connected ? (
+                            <Badge className="bg-green-400/20 text-green-400">{t('settings.integrations.connected')}</Badge>
+                          ) : null}
+                          <Button
+                            size="sm"
+                            className={account.connected ? "border-[var(--github-border)]" : "btn-x-primary"}
+                            variant={account.connected ? "outline" : undefined}
+                            onClick={() => setImDialogOpen(imProvider)}
+                          >
+                            {account.connected
+                              ? t('settings.integrations.feishu.manage')
+                              : t('settings.integrations.feishu.configure')}
+                          </Button>
+                        </>
+                      ) : account.connected ? (
                         <>
                           <Badge className="bg-green-400/20 text-green-400">{t('settings.integrations.connected')}</Badge>
                           <Button variant="outline" size="sm" className="border-[var(--github-border)] text-red-400 hover:text-red-400">
@@ -884,6 +1232,21 @@ export function Settings() {
               })}
             </CardContent>
           </Card>
+
+          <FeishuIntegrationDialog
+            open={feishuDialogOpen}
+            onOpenChange={setFeishuDialogOpen}
+            onConnectionChange={(connected) => handleImConnectionChange('feishu', connected)}
+          />
+          {imDialogOpen ? (
+            <ImChannelIntegrationDialog
+              key={imDialogOpen}
+              provider={imDialogOpen}
+              open
+              onOpenChange={(open) => setImDialogOpen(open ? imDialogOpen : null)}
+              onConnectionChange={handleImConnectionChange}
+            />
+          ) : null}
 
           <Card className="card-github">
             <CardHeader>
@@ -997,7 +1360,7 @@ export function Settings() {
                     <Label htmlFor="aiProvider" className="text-sm text-white">{t('settings.ai.provider')}</Label>
                     <Select
                       value={aiConfig.aiProvider || ''}
-                      onValueChange={(value: AIProvider) => setAiConfig({ ...aiConfig, aiProvider: value, aiModel: PROVIDER_DEFAULT_MODELS[value] || '', aiBaseUrl: value === 'custom' ? '' : null })}
+                      onValueChange={(value: AIProvider) => setAiConfig({ ...aiConfig, aiProvider: value, aiModel: PROVIDER_DEFAULT_MODELS[value] || '', aiBaseUrl: value === 'custom' ? '' : undefined })}
                     >
                       <SelectTrigger className="bg-[var(--github-surface)] border-[var(--github-border)]">
                         <SelectValue placeholder={t('settings.ai.providerPlaceholder')} />
@@ -1057,6 +1420,12 @@ export function Settings() {
                             <span>{PROVIDER_LABELS.qwen}</span>
                           </div>
                         </SelectItem>
+                        <SelectItem value="ollama">
+                          <div className="flex items-center gap-2">
+                            <img src={getProviderLogo('ollama')} alt="" className="w-5 h-5" />
+                            <span>{PROVIDER_LABELS.ollama}</span>
+                          </div>
+                        </SelectItem>
                         <SelectItem value="custom">
                           <div className="flex items-center gap-2">
                             <img src={getProviderLogo('custom')} alt="" className="w-5 h-5" />
@@ -1067,15 +1436,15 @@ export function Settings() {
                     </Select>
                   </div>
 
-                  {/* API Key - show for all providers except custom */}
-                  {(aiConfig.aiProvider && aiConfig.aiProvider !== 'custom') && (
+                  {/* API Key - show for all providers except custom & ollama */}
+                  {(aiConfig.aiProvider && aiConfig.aiProvider !== 'custom' && aiConfig.aiProvider !== 'ollama') && (
                     <div className="space-y-2">
                       <Label htmlFor="aiApiKey" className="text-sm text-white">{t('settings.ai.apiKey')}</Label>
                       <div className="relative">
                         <Input
                           id="aiApiKey"
                           type={showApiKey ? 'text' : 'password'}
-                          placeholder={aiConfig.aiApiKey ? '***' : t('settings.ai.apiKeyPlaceholder')}
+                          placeholder={aiConfig.aiApiKey ? '*'.repeat(aiConfig.aiApiKey.length) : t('settings.ai.apiKeyPlaceholder')}
                           value={aiConfig.aiApiKey || ''}
                           onChange={(e) => setAiConfig({ ...aiConfig, aiApiKey: e.target.value })}
                           className="bg-[var(--github-surface)] border-[var(--github-border)] pr-10"
@@ -1085,7 +1454,7 @@ export function Settings() {
                           onClick={() => setShowApiKey(!showApiKey)}
                           className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--github-text-secondary)] hover:text-white transition-colors"
                         >
-                          {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          {showApiKey ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
                         </button>
                       </div>
                       <p className="text-xs text-[var(--github-text-secondary)]">
@@ -1266,6 +1635,8 @@ function getModelHint(provider?: string): string {
       return 'e.g., doubao-pro-32k';
     case 'qwen':
       return 'e.g., qwen-turbo, qwen-plus';
+    case 'ollama':
+      return 'e.g., llama3, qwen2.5, mistral, codellama';
     case 'custom':
       return 'Enter the model name supported by your custom endpoint';
     default:

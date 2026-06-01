@@ -3,6 +3,7 @@ import { Search, FileText, ArrowRight } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -60,10 +61,6 @@ export function SearchDialog({ isOpen, onClose, onSectionChange }: SearchDialogP
     : searchData;
 
   useEffect(() => {
-    setSelectedIndex(0);
-  }, [query]);
-
-  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return;
 
@@ -103,17 +100,25 @@ export function SearchDialog({ isOpen, onClose, onSectionChange }: SearchDialogP
     setQuery('');
   };
 
+  const handleQueryChange = (value: string) => {
+    setQuery(value);
+    setSelectedIndex(0);
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl p-0 gap-0">
         <DialogHeader className="p-4 pb-0">
           <DialogTitle className="sr-only">Search Documentation</DialogTitle>
+          <DialogDescription className="sr-only">
+            Search documentation sections by title or description.
+          </DialogDescription>
           <div className="flex items-center gap-2">
             <Search className="h-5 w-5 text-muted-foreground" />
             <Input
               placeholder="Search documentation..."
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => handleQueryChange(e.target.value)}
               className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
               autoFocus
             />

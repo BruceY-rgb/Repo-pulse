@@ -20,6 +20,7 @@ import {
   RepositorySyncSummaryDto,
 } from './dto/repository.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 
 @ApiTags('Repository Management')
@@ -36,10 +37,14 @@ export class RepositoryController {
   @ApiOperation({ summary: 'Create repository' })
   async create(@Req() req: Request, @Body() dto: CreateRepositoryDto) {
     const userId = (req.user as { sub: string }).sub;
-    return this.repositoryService.create(userId, dto);
+    const user = await this.userService.findById(userId);
+    return this.repositoryService.create(userId, dto, {
+      userOAuthToken: user?.githubAccessToken || undefined,
+    });
   }
 
   @Get()
+  @Throttle({ default: { limit: 300, ttl: 60000 } })
   @ApiOperation({ summary: 'List repositories' })
   async findAll(@Req() req: Request, @Query() query: RepositoryQueryDto) {
     const userId = (req.user as { sub: string }).sub;
@@ -66,8 +71,10 @@ export class RepositoryController {
       return { error: 'GitHub account not connected, please log in again' };
     }
     return this.repositoryService.searchUserRepositories(
+      userId,
       user.githubAccessToken,
       user.githubRefreshToken,
+      user.githubLogin,
     );
   }
 
@@ -80,6 +87,7 @@ export class RepositoryController {
       return { error: 'GitHub account not connected, please log in again' };
     }
     return this.repositoryService.searchStarredRepositories(
+      userId,
       user.githubAccessToken,
       user.githubRefreshToken,
     );
@@ -87,21 +95,32 @@ export class RepositoryController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get repository details' })
-  async findById(@Param('id') id: string): Promise<any> {
-    return this.repositoryService.findById(id);
+  async findById(@Req() req: Request, @Param('id') id: string): Promise<any> {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.findById(userId, id);
   }
 
   @Get(':id/branches')
+  @Throttle({ default: { limit: 300, ttl: 60000 } })
   @ApiOperation({ summary: 'Get repository branches' })
   async getBranches(@Req() req: Request, @Param('id') id: string) {
     const userId = (req.user as { sub: string }).sub;
     return this.repositoryService.getBranches(userId, id);
   }
 
+  @Get(':id/contributors')
+  @ApiOperation({ summary: 'Get repository contributors' })
+  async getContributors(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req.user as { sub: string }).sub;
+    const user = await this.userService.findById(userId);
+    return this.repositoryService.getContributors(id, user?.githubAccessToken || undefined);
+  }
+
   @Patch(':id')
   @ApiOperation({ summary: 'Update repository' })
-  async update(@Param('id') id: string, @Body() dto: UpdateRepositoryDto) {
-    return this.repositoryService.update(id, dto);
+  async update(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateRepositoryDto) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.updateForUser(userId, id, dto);
   }
 
   @Delete(':id')
@@ -114,7 +133,16 @@ export class RepositoryController {
 
   @Post(':id/sync')
   @ApiOperation({ summary: 'Sync repository history' })
-  async sync(@Param('id') id: string): Promise<RepositorySyncSummaryDto> {
-    return this.repositoryService.sync(id);
+  async sync(@Req() req: Request, @Param('id') id: string): Promise<RepositorySyncSummaryDto> {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.syncForUser(userId, id);
+  }
+
+  @Post(':id/webhook')
+  @ApiOperation({ summary: '重新注册 Webhook' })
+  async registerWebhook(@Req() req: Request, @Param('id') id: string): Promise<any> {
+    const userId = (req.user as { sub: string }).sub;
+    const repository = await this.repositoryService.registerWebhook(userId, id);
+    return repository;
   }
 }

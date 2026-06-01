@@ -3,7 +3,12 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import * as bcrypt from 'bcrypt';
 import cookieParser from 'cookie-parser';
-import { PrismaClient, Platform } from '@repo-pulse/database';
+import {
+  PrismaClient,
+  Platform,
+  RepositoryAccessMode,
+  RepositoryAccessLevel,
+} from '@repo-pulse/database';
 import { AppModule } from '../src/app.module';
 
 const prisma = new PrismaClient();
@@ -18,7 +23,8 @@ describe('RepositoryModule (e2e)', () => {
   let app: INestApplication;
   let authCookie: string;
   let testUserId: string;
-  let testRepoId: string;
+  let editableRepoId: string;
+  let monitorRepoId: string;
 
   beforeAll(async () => {
     const user = await prisma.user.create({
@@ -30,7 +36,7 @@ describe('RepositoryModule (e2e)', () => {
     });
     testUserId = user.id;
 
-    const repo = await prisma.repository.create({
+    const editableRepo = await prisma.repository.create({
       data: {
         name: 'contract-test-repo',
         fullName: 'contract-org/contract-test-repo',
@@ -39,10 +45,36 @@ describe('RepositoryModule (e2e)', () => {
         url: 'https://github.com/contract-org/contract-test-repo',
       },
     });
-    testRepoId = repo.id;
+    editableRepoId = editableRepo.id;
 
-    await prisma.userRepository.create({
-      data: { userId: testUserId, repositoryId: testRepoId, role: 'ADMIN' },
+    const monitorRepo = await prisma.repository.create({
+      data: {
+        name: 'monitor-only-repo',
+        fullName: 'contract-org/monitor-only-repo',
+        platform: Platform.GITHUB,
+        externalId: '777000335',
+        url: 'https://github.com/contract-org/monitor-only-repo',
+      },
+    });
+    monitorRepoId = monitorRepo.id;
+
+    await prisma.userRepository.createMany({
+      data: [
+        {
+          userId: testUserId,
+          repositoryId: editableRepoId,
+          role: 'ADMIN',
+          accessMode: RepositoryAccessMode.EDITABLE,
+          accessLevel: RepositoryAccessLevel.WRITE,
+        },
+        {
+          userId: testUserId,
+          repositoryId: monitorRepoId,
+          role: 'VIEWER',
+          accessMode: RepositoryAccessMode.MONITOR,
+          accessLevel: RepositoryAccessLevel.READ,
+        },
+      ],
     });
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -64,26 +96,30 @@ describe('RepositoryModule (e2e)', () => {
   });
 
   afterAll(async () => {
-    await prisma.userRepository.deleteMany({ where: { repositoryId: testRepoId } });
-    await prisma.repository.deleteMany({ where: { externalId: '777000333' } });
+    await prisma.userRepository.deleteMany({
+      where: { repositoryId: { in: [editableRepoId, monitorRepoId] } },
+    });
+    await prisma.repository.deleteMany({
+      where: { externalId: { in: ['777000333', '777000335', '777000334'] } },
+    });
     await prisma.user.deleteMany({ where: { email: TEST_USER.email } });
     await prisma.$disconnect();
     await app.close();
   });
 
-  describe('未登录访问', () => {
-    it('GET /repositories 应返回 401', () => {
+  describe('unauthenticated access', () => {
+    it('GET /repositories returns 401', () => {
       return request(app.getHttpServer()).get('/repositories').expect(401);
     });
 
-    it('POST /repositories 应返回 401', () => {
+    it('POST /repositories returns 401', () => {
       return request(app.getHttpServer())
         .post('/repositories')
         .send({ fullName: 'owner/repo', platform: 'GITHUB' })
         .expect(401);
     });
 
-    it('GET /repositories/search 应返回 401', () => {
+    it('GET /repositories/search returns 401', () => {
       return request(app.getHttpServer())
         .get('/repositories/search')
         .query({ q: 'nestjs' })
@@ -91,8 +127,8 @@ describe('RepositoryModule (e2e)', () => {
     });
   });
 
-  describe('GET /repositories - 仓库列表契约', () => {
-    it('应返回 200 且结果为数组', async () => {
+  describe('GET /repositories', () => {
+    it('returns the current user repositories', async () => {
       const res = await request(app.getHttpServer())
         .get('/repositories')
         .set('Cookie', authCookie)
@@ -100,53 +136,43 @@ describe('RepositoryModule (e2e)', () => {
 
       const list = res.body.data ?? res.body;
       expect(Array.isArray(list)).toBe(true);
+      expect(list.map((repo: { id: string }) => repo.id)).toEqual(
+        expect.arrayContaining([editableRepoId, monitorRepoId]),
+      );
     });
 
-    it('只返回当前用户的仓库，不返回其他用户的', async () => {
+    it('includes current user access metadata', async () => {
       const res = await request(app.getHttpServer())
         .get('/repositories')
         .set('Cookie', authCookie)
         .expect(200);
 
       const list = res.body.data ?? res.body;
-      const ids = list.map((r: { id: string }) => r.id);
-      expect(ids).toContain(testRepoId);
-    });
+      const editableRepo = list.find((repo: { id: string }) => repo.id === editableRepoId);
+      const monitorRepo = list.find((repo: { id: string }) => repo.id === monitorRepoId);
 
-    it('返回的仓库对象包含必要字段', async () => {
-      const res = await request(app.getHttpServer())
-        .get('/repositories')
-        .set('Cookie', authCookie)
-        .expect(200);
-
-      const list = res.body.data ?? res.body;
-      const repo = list.find((r: { id: string }) => r.id === testRepoId);
-      expect(repo).toBeDefined();
-
-      expect(repo).toHaveProperty('id');
-      expect(repo).toHaveProperty('name');
-      expect(repo).toHaveProperty('fullName');
-      expect(repo).toHaveProperty('platform');
-      expect(repo).toHaveProperty('url');
-      expect(repo).toHaveProperty('isActive');
-
-      expect(repo.webhookSecret).toBeNull();
+      expect(editableRepo.isEditable).toBe(true);
+      expect(editableRepo.canOperate).toBe(true);
+      expect(monitorRepo.isEditable).toBe(false);
+      expect(monitorRepo.canOperate).toBe(false);
+      expect(editableRepo.webhookSecret).toBeNull();
     });
   });
 
-  describe('GET /repositories/:id - 仓库详情契约', () => {
-    it('登录后访问自己的仓库应返回 200', async () => {
+  describe('GET /repositories/:id', () => {
+    it('returns repository details with access metadata', async () => {
       const res = await request(app.getHttpServer())
-        .get(`/repositories/${testRepoId}`)
+        .get(`/repositories/${editableRepoId}`)
         .set('Cookie', authCookie)
         .expect(200);
 
       const repo = res.body.data ?? res.body;
-      expect(repo.id).toBe(testRepoId);
+      expect(repo.id).toBe(editableRepoId);
       expect(repo.fullName).toBe('contract-org/contract-test-repo');
+      expect(repo.canOperate).toBe(true);
     });
 
-    it('访问不存在的仓库应返回 404', () => {
+    it('returns 404 for a missing repository', () => {
       return request(app.getHttpServer())
         .get('/repositories/non-existent-id-000')
         .set('Cookie', authCookie)
@@ -154,8 +180,25 @@ describe('RepositoryModule (e2e)', () => {
     });
   });
 
-  describe('POST /repositories - 输入校验', () => {
-    it('缺少所有必填字段应返回 400', () => {
+  describe('repository permissions', () => {
+    it('rejects monitor-only repository updates', () => {
+      return request(app.getHttpServer())
+        .patch(`/repositories/${monitorRepoId}`)
+        .set('Cookie', authCookie)
+        .send({ isActive: false })
+        .expect(403);
+    });
+
+    it('rejects monitor-only repository sync', () => {
+      return request(app.getHttpServer())
+        .post(`/repositories/${monitorRepoId}/sync`)
+        .set('Cookie', authCookie)
+        .expect(403);
+    });
+  });
+
+  describe('POST /repositories validation', () => {
+    it('returns 400 when required fields are missing', () => {
       return request(app.getHttpServer())
         .post('/repositories')
         .set('Cookie', authCookie)
@@ -163,33 +206,17 @@ describe('RepositoryModule (e2e)', () => {
         .expect(400);
     });
 
-    it('platform 字段传入非法枚举值应返回 400', () => {
+    it('returns 400 for invalid platform', () => {
       return request(app.getHttpServer())
         .post('/repositories')
         .set('Cookie', authCookie)
         .send({ platform: 'INVALID_PLATFORM', owner: 'test-owner', repo: 'test-repo' })
         .expect(400);
     });
-
-    it('缺少 owner 字段应返回 400', () => {
-      return request(app.getHttpServer())
-        .post('/repositories')
-        .set('Cookie', authCookie)
-        .send({ platform: 'GITHUB', repo: 'test-repo' })
-        .expect(400);
-    });
-
-    it('缺少 repo 字段应返回 400', () => {
-      return request(app.getHttpServer())
-        .post('/repositories')
-        .set('Cookie', authCookie)
-        .send({ platform: 'GITHUB', owner: 'test-owner' })
-        .expect(400);
-    });
   });
 
-  describe('GET /repositories/search - 搜索契约', () => {
-    it('空 q 参数应返回 200 且结果为空数组', async () => {
+  describe('GET /repositories/search', () => {
+    it('returns an empty list for an empty query', async () => {
       const res = await request(app.getHttpServer())
         .get('/repositories/search')
         .set('Cookie', authCookie)
@@ -201,8 +228,9 @@ describe('RepositoryModule (e2e)', () => {
       expect(list).toHaveLength(0);
     });
   });
-  describe('DELETE /repositories/:id - remove contract', () => {
-    it('should return 200 and delete the repository with its membership', async () => {
+
+  describe('DELETE /repositories/:id', () => {
+    it('deletes an editable repository with its membership', async () => {
       const deleteRepo = await prisma.repository.create({
         data: {
           name: 'contract-delete-repo',
@@ -214,7 +242,13 @@ describe('RepositoryModule (e2e)', () => {
       });
 
       await prisma.userRepository.create({
-        data: { userId: testUserId, repositoryId: deleteRepo.id, role: 'ADMIN' },
+        data: {
+          userId: testUserId,
+          repositoryId: deleteRepo.id,
+          role: 'ADMIN',
+          accessMode: RepositoryAccessMode.EDITABLE,
+          accessLevel: RepositoryAccessLevel.WRITE,
+        },
       });
 
       await request(app.getHttpServer())

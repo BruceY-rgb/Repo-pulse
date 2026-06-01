@@ -33,6 +33,8 @@ enum EventType {
   RELEASE
   BRANCH_CREATED
   BRANCH_DELETED
+  BRANCH_SYNC_ALERT
+  UPSTREAM_SYNC_ALERT
 }
 
 enum RiskLevel {
@@ -69,6 +71,8 @@ enum NotificationChannel {
   FEISHU
   WEBHOOK
   IN_APP
+  WECOM
+  WECHAT
 }
 
 enum NotificationStatus {
@@ -96,19 +100,38 @@ enum ReportStatus {
   FAILED
 }
 
+enum RepositoryAccessMode {
+  EDITABLE
+  MONITOR
+}
+
+enum RepositoryAccessLevel {
+  OWNER
+  ADMIN
+  MAINTAIN
+  WRITE
+  TRIAGE
+  READ
+  NONE
+}
+
 // ===== Models =====
 
 model User {
   id                 String   @id @default(cuid())
   email              String   @unique
   name               String
-  avatar             String?
+  avatar             String?   @db.Text
   passwordHash       String?
   githubId           String?  @unique
+  githubLogin        String?
   githubAccessToken  String?
   githubRefreshToken String?
   gitlabId           String?  @unique
   role               Role     @default(MEMBER)
+  username           String?  @unique
+  company            String?
+  bio                String?   @db.Text
   preferences        Json     @default("{}")
 
   // AI 配置
@@ -121,6 +144,7 @@ model User {
   updatedAt          DateTime @updatedAt
 
   repositories  UserRepository[]
+  conversationStates UserRepositoryConversationState[]
   approvals     Approval[]
   notifications Notification[]
   workspaces    Workspace[]
@@ -143,6 +167,7 @@ model Repository {
   updatedAt     DateTime @updatedAt
 
   users         UserRepository[]
+  conversationStates UserRepositoryConversationState[]
   events        Event[]
 
   @@unique([platform, externalId])
@@ -152,12 +177,31 @@ model UserRepository {
   userId       String
   repositoryId String
   role         Role     @default(MEMBER)
+  accessMode   RepositoryAccessMode @default(EDITABLE)
+  accessLevel  RepositoryAccessLevel @default(READ)
+  isStarred    Boolean  @default(false)
   createdAt    DateTime @default(now())
 
   user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
 
   @@id([userId, repositoryId])
+}
+
+model UserRepositoryConversationState {
+  userId       String
+  repositoryId String
+  lastReadAt   DateTime?
+  lastViewedAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@id([userId, repositoryId])
+  @@index([userId, lastReadAt])
+  @@index([repositoryId, updatedAt])
 }
 
 model Event {

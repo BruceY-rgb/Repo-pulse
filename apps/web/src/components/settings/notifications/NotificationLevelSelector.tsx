@@ -49,21 +49,21 @@ export function NotificationLevelSelector({
   const { t } = useLanguage();
 
   return (
-    <div className="space-y-4 rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
+    <div className="space-y-4">
       <div className="space-y-1">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge className="bg-[var(--github-accent)]/15 text-[var(--github-accent)]">
+          <Badge className="bg-[var(--github-accent)]/15 text-[var(--github-accent)] rounded-full px-2.5 py-0.5 border-none text-xs font-semibold">
             {t('notifications.settings.focus.badge')}
           </Badge>
         </div>
-        <p className="text-sm font-medium text-white">{t('notifications.settings.focus.title')}</p>
-        <p className="text-xs text-[var(--github-text-secondary)]">
+        <p className="text-sm font-semibold text-white">{t('notifications.settings.focus.title')}</p>
+        <p className="text-xs text-muted-foreground">
           {t('notifications.settings.focus.description')}
         </p>
       </div>
 
       <RadioGroup
-        className="gap-3"
+        className="grid grid-cols-1 md:grid-cols-3 gap-4"
         onValueChange={(nextValue) => onValueChange(nextValue as NotificationLevelValue)}
         value={value}
       >
@@ -75,39 +75,56 @@ export function NotificationLevelSelector({
             <label
               key={option.value}
               className={cn(
-                'flex cursor-pointer items-start gap-4 rounded-lg border border-[var(--github-border)] bg-[var(--github-surface)]/80 p-4 transition-colors',
-                isSelected && 'border-primary bg-primary/10',
+                'relative flex flex-col items-center text-center justify-between cursor-pointer rounded-xl border p-5 transition-all duration-200 select-none min-h-[175px]',
+                isSelected 
+                  ? 'border-primary bg-primary/5 shadow-md shadow-primary/5 glow-orange' 
+                  : 'border-border/60 bg-card/40 hover:bg-white/5 hover:border-primary/20'
               )}
               htmlFor={`notification-focus-${option.value}`}
             >
-              <RadioGroupItem
-                className="mt-1"
-                id={`notification-focus-${option.value}`}
-                value={option.value}
-              />
-              <div className="flex min-w-0 flex-1 items-start gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/5">
-                  <Icon className="h-4 w-4 text-white" />
-                </div>
-                <div className="min-w-0 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium text-white">{t(option.titleKey)}</p>
-                    <Badge
-                      className={cn(
-                        'text-xs',
-                        isSelected
-                          ? 'bg-[var(--github-accent)] text-white'
-                          : 'bg-white/10 text-[var(--github-text-secondary)]',
-                      )}
-                    >
-                      {t(option.badgeKey)}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-[var(--github-text-secondary)]">
-                    {t(option.descriptionKey)}
-                  </p>
+              {/* Radio Indicator (Top Right) */}
+              <div className="absolute top-3 right-3">
+                <RadioGroupItem
+                  id={`notification-focus-${option.value}`}
+                  value={option.value}
+                  className={cn(
+                    'h-4 w-4 border-border',
+                    isSelected && 'border-primary text-primary'
+                  )}
+                />
+              </div>
+
+              {/* Icon Container */}
+              <div className={cn(
+                'flex h-12 w-12 items-center justify-center rounded-full border transition-all duration-200 mb-2',
+                isSelected 
+                  ? 'bg-primary/10 border-primary/30 text-primary' 
+                  : 'bg-white/5 border-border/40 text-muted-foreground'
+              )}>
+                <Icon className={cn('h-5 w-5', isSelected ? 'text-primary' : 'text-foreground')} />
+              </div>
+
+              {/* Title & Badge */}
+              <div className="space-y-1.5 flex flex-col items-center">
+                <div className="flex flex-col items-center gap-1">
+                  <p className="text-sm font-semibold text-white">{t(option.titleKey)}</p>
+                  <Badge
+                    className={cn(
+                      'text-[10px] px-2 py-0 border-none font-medium rounded-full shadow-none',
+                      isSelected
+                        ? 'bg-primary/20 text-primary'
+                        : 'bg-white/10 text-muted-foreground'
+                    )}
+                  >
+                    {t(option.badgeKey)}
+                  </Badge>
                 </div>
               </div>
+
+              {/* Description */}
+              <p className="text-xs text-muted-foreground mt-3 leading-relaxed max-w-[200px]">
+                {t(option.descriptionKey)}
+              </p>
             </label>
           );
         })}

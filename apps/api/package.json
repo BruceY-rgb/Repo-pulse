@@ -15,9 +15,12 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:e2e": "jest --config test/jest-e2e.json --runInBand"
+    "test:e2e": "jest --config test/jest-e2e.json --runInBand",
+    "test:perf": "jest --config test/jest-perf.json --runInBand --testTimeout=120000",
+    "test:stability": "jest --testPathPattern=\"test/stability\" --runInBand"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.64.0",
     "@nestjs/bullmq": "^11.0.0",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",
@@ -25,25 +28,28 @@
     "@nestjs/jwt": "^11.0.0",
     "@nestjs/passport": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
-    "@nestjs/platform-socket.io": "^11.0.0",
+    "@nestjs/platform-socket.io": "^11.1.17",
     "@nestjs/swagger": "^11.0.0",
     "@nestjs/throttler": "^6.0.0",
-    "@nestjs/websockets": "^11.0.0",
+    "@nestjs/websockets": "^11.1.17",
     "@repo-pulse/ai-sdk": "workspace:*",
     "@repo-pulse/database": "workspace:*",
     "@repo-pulse/shared": "workspace:*",
     "@types/jsonwebtoken": "^9.0.10",
+    "@wecom/aibot-node-sdk": "^1.0.7",
     "axios": "^1.13.6",
     "bcrypt": "^5.1.1",
     "bullmq": "^5.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "cookie-parser": "^1.4.7",
+    "dingtalk-stream-sdk-nodejs": "^2.0.4",
     "helmet": "^8.0.0",
     "ioredis": "^5.4.0",
     "joi": "^17.13.0",
     "jsonwebtoken": "^9.0.3",
     "jspdf": "^4.2.1",
+    "multer": "^2.1.1",
     "passport": "^0.7.0",
     "passport-github2": "^0.1.12",
     "passport-jwt": "^4.0.1",
@@ -60,12 +66,14 @@
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.0",
     "@types/jest": "^29.5.0",
+    "@types/multer": "^2.1.0",
     "@types/node": "^24.0.0",
     "@types/passport-github2": "^1.2.9",
     "@types/passport-jwt": "^4.0.1",
     "@types/supertest": "^7.2.0",
     "cross-env": "^10.1.0",
     "jest": "^29.7.0",
+    "socket.io-client": "^4.8.3",
     "supertest": "^7.2.2",
     "ts-jest": "^29.2.0",
     "ts-node": "^10.9.2",
@@ -82,7 +90,8 @@
     "testRegex": ".*\\.spec\\.ts$",
     "roots": [
       "<rootDir>/src",
-      "<rootDir>/test/units"
+      "<rootDir>/test/units",
+      "<rootDir>/test/stability"
     ],
     "transform": {
       "^.+\\.(t|j)s$": [
@@ -96,6 +105,26 @@
       "^@/(.*)$": "<rootDir>/src/$1",
       "^@modules/(.*)$": "<rootDir>/src/modules/$1"
     },
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "!src/main.ts",
+      "!src/**/*.module.ts",
+      "!src/**/*.dto.ts",
+      "!src/**/*.d.ts"
+    ],
+    "coverageDirectory": "coverage",
+    "coverageReporters": [
+      "lcov",
+      "text-summary"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "lines": 65,
+        "functions": 60,
+        "branches": 50,
+        "statements": 65
+      }
+    }
   }
 }

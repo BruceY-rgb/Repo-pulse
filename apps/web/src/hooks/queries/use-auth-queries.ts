@@ -12,7 +12,7 @@ export const authQueryKeys = {
 export function useCurrentUserQuery(enabled = true) {
   return useApiQuery({
     queryKey: authQueryKeys.currentUser(),
-    queryFn: authService.getMe,
+    queryFn: authService.getSession,
     enabled,
     retry: false,
     staleTime: 60 * 1000,
@@ -40,7 +40,22 @@ export function useLoginMutation() {
     mutationKey: [...authQueryKeys.all, 'login'],
     mutationFn: async ({ email, password }: LoginPayload) => {
       await authService.login(email, password);
-      return authService.getMe();
+      return authService.getSession();
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });
+    },
+  });
+}
+
+export function useDesktopGithubLoginMutation() {
+  const queryClient = useQueryClient();
+
+  return useApiMutation({
+    mutationKey: [...authQueryKeys.all, 'desktop-github-login'],
+    mutationFn: async () => {
+      await authService.loginWithDesktopGithub();
+      return authService.getSession();
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });

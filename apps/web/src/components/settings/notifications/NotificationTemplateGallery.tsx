@@ -70,22 +70,22 @@ export function NotificationTemplateGallery({
   const { t } = useLanguage();
 
   return (
-    <div className="space-y-4 rounded-lg border border-[var(--github-border)] bg-white/5 p-4">
+    <div className="space-y-4">
       <div className="space-y-1">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge className="bg-[var(--github-accent)]/15 text-[var(--github-accent)]">
+          <Badge className="bg-[var(--github-accent)]/15 text-[var(--github-accent)] rounded-full px-2.5 py-0.5 border-none text-xs font-semibold">
             {t('notifications.settings.templates.badge')}
           </Badge>
         </div>
-        <p className="text-sm font-medium text-white">
+        <p className="text-sm font-semibold text-white">
           {t('notifications.settings.templates.title')}
         </p>
-        <p className="text-xs text-[var(--github-text-secondary)]">
+        <p className="text-xs text-muted-foreground">
           {t('notifications.settings.templates.description')}
         </p>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2">
         {templateOptions.map((template) => {
           const Icon = template.icon;
           const isSelected = template.value === selectedTemplate;
@@ -94,46 +94,58 @@ export function NotificationTemplateGallery({
             <div
               key={template.value}
               className={cn(
-                'rounded-lg border border-[var(--github-border)] bg-[var(--github-surface)]/80 p-4 transition-colors',
-                isSelected && 'border-primary bg-primary/10',
+                'rounded-xl border p-4 flex flex-col justify-between min-h-[190px] transition-all duration-200',
+                isSelected
+                  ? 'border-primary bg-primary/5 shadow-md shadow-primary/5 glow-orange'
+                  : 'border-border/60 bg-card/40 hover:bg-white/5 hover:border-primary/20'
               )}
             >
-              <div className="flex items-start gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/5">
-                  <Icon className="h-4 w-4 text-white" />
-                </div>
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium text-white">{t(template.titleKey)}</p>
-                    <Badge
-                      className={cn(
-                        'text-xs',
-                        isSelected
-                          ? 'bg-[var(--github-accent)] text-white'
-                          : 'bg-white/10 text-[var(--github-text-secondary)]',
-                      )}
-                    >
-                      {t(template.badgeKey)}
-                    </Badge>
+              <div className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className={cn(
+                    'flex h-9 w-9 items-center justify-center rounded-lg border transition-all duration-200 shrink-0',
+                    isSelected 
+                      ? 'bg-primary/10 border-primary/20 text-primary' 
+                      : 'bg-white/5 border-border/40 text-muted-foreground'
+                  )}>
+                    <Icon className="h-4 w-4" />
                   </div>
-                  <p className="text-xs text-[var(--github-text-secondary)]">
-                    {t(template.descriptionKey)}
-                  </p>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-white">{t(template.titleKey)}</p>
+                      <Badge
+                        className={cn(
+                          'text-[10px] px-2 py-0 border-none font-medium rounded-full shadow-none',
+                          isSelected
+                            ? 'bg-primary/20 text-primary'
+                            : 'bg-white/10 text-muted-foreground'
+                        )}
+                      >
+                        {t(template.badgeKey)}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {t(template.descriptionKey)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border/40 bg-background/50 px-3 py-2 text-xs text-muted-foreground leading-relaxed">
+                  {t(template.summaryKey)}
                 </div>
               </div>
 
-              <div className="mt-3 rounded-lg border border-[var(--github-border)] bg-white/5 px-3 py-2">
-                <p className="text-xs text-[var(--github-text-secondary)]">
-                  {t(template.summaryKey)}
-                </p>
-              </div>
-
-              <div className="mt-3">
+              <div className="mt-4 flex justify-end">
                 <Button
-                  className="gap-2"
+                  className={cn(
+                    'h-8 text-xs font-medium px-3 rounded-lg border',
+                    isSelected
+                      ? 'bg-primary text-white border-primary hover:bg-primary/95 hover:border-primary'
+                      : 'bg-transparent border-border hover:bg-white/5 hover:border-primary/30 text-white'
+                  )}
                   onClick={() => onSelectTemplate(template.value)}
                   size="sm"
-                  variant={isSelected ? 'default' : 'outline'}
+                  variant="outline"
                 >
                   {isSelected
                     ? t('notifications.settings.templates.actions.selected')

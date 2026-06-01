@@ -1,16 +1,26 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { PrismaClient, EventType, Prisma, Event, NotificationChannel, FilterAction } from '@repo-pulse/database';
+import {
+  PrismaClient,
+  EventType,
+  Prisma,
+  Event,
+  NotificationChannel,
+  FilterAction,
+  RepositoryAccessMode,
+} from '@repo-pulse/database';
 import { PaginationQueryDto } from './dto/event.dto';
 import { EventGateway } from './event.gateway';
 import { AIService } from '../ai/ai.service';
 import { FilterService } from '../filter/filter.service';
 import { NotificationService, NotificationPreferences } from '../notification/notification.service';
 import { SendNotificationDto } from '../notification/dto/notification.dto';
+import { ImService } from '../im/im.service';
 import {
   buildEventScopeWhere,
   normalizeRepositoryBranchScopes,
   parseRepositoryBranchScopesParam,
 } from '../../common/utils/repository-branch-scope';
+import { readBooleanEnv, readCsvEnv } from '../../common/utils/env-flags';
 
 @Injectable()
 export class EventService {
@@ -22,6 +32,7 @@ export class EventService {
     private readonly aiService: AIService,
     private readonly filterService: FilterService,
     private readonly notificationService: NotificationService,
+    private readonly imService: ImService,
   ) {
     this.prisma = new PrismaClient();
   }
@@ -172,7 +183,28 @@ export class EventService {
       select: { riskLevel: true },
     });
 
+    // 获取所有用户偏好，检查监控范围
+    const allUserIds = userRepositories.map((e) => e.userId);
+    const usersWithPrefs = allUserIds.length > 0
+      ? await this.prisma.user.findMany({
+          where: { id: { in: allUserIds } },
+          select: { id: true, preferences: true },
+        })
+      : [];
+    const userScopeMap = new Map<string, string[]>();
+    for (const u of usersWithPrefs) {
+      const prefs = (u.preferences as Record<string, unknown>) || {};
+      const scope = (prefs.monitoringScope as Record<string, unknown>) || {};
+      const ids = Array.isArray(scope.repositoryIds) ? scope.repositoryIds as string[] : [];
+      userScopeMap.set(u.id, ids);
+    }
+
     for (const entry of userRepositories) {
+      // 只在仓库属于用户监控范围时才通知（未设范围则不通知）
+      const scopeIds = userScopeMap.get(entry.userId) || [];
+      if (scopeIds.length === 0 || !scopeIds.includes(event.repositoryId)) {
+        continue;
+      }
       const userId = entry.userId;
       try {
         const hasRiskRule = await this.filterService.hasRuleReferencingField(userId, 'riskLevel');
@@ -205,9 +237,8 @@ export class EventService {
 
         const preferences = await this.notificationService.getPreferences(userId);
         const channels = this.resolveChannelsForEvent(event, preferences);
-        if (channels.length === 0) {
-          continue;
-        }
+
+        await this.sendImRepositoryEventNotification(userId, event, repository?.fullName);
 
         for (const channel of channels) {
           const dto: SendNotificationDto = {
@@ -230,6 +261,43 @@ export class EventService {
           `notification_failed eventId=${event.id} userId=${userId} stage=notify_repository_users reason=${message}`,
         );
       }
+    }
+  }
+
+  private async sendImRepositoryEventNotification(
+    userId: string,
+    event: Event,
+    repositoryName?: string,
+  ): Promise<void> {
+    try {
+      const result = await this.imService.sendRepositoryEventNotification(userId, {
+        eventId: event.id,
+        repositoryId: event.repositoryId,
+        repositoryName: repositoryName || event.repositoryId,
+        eventType: event.type,
+        title: event.title,
+        content: event.body || event.title,
+        author: event.author,
+        externalUrl: event.externalUrl || undefined,
+        branch: event.branch || undefined,
+        sourceBranch: event.sourceBranch || undefined,
+        targetBranch: event.targetBranch || undefined,
+      });
+
+      if (result.sent > 0) {
+        this.logger.log(
+          `feishu_event_notification_sent eventId=${event.id} userId=${userId} count=${result.sent}`,
+        );
+      } else if (result.skippedReason) {
+        this.logger.log(
+          `feishu_event_notification_skipped eventId=${event.id} userId=${userId} reason=${result.skippedReason}`,
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown_error';
+      this.logger.warn(
+        `feishu_event_notification_failed eventId=${event.id} userId=${userId} reason=${message}`,
+      );
     }
   }
 
@@ -259,9 +327,16 @@ export class EventService {
 
   private async enqueueAnalysis(eventId: string): Promise<void> {
     // 系统级 AI 分析开关
-    const enabled = process.env.AI_ANALYSIS_ENABLED !== 'false';
+    const enabled = readBooleanEnv('AI_ANALYSIS_ENABLED', true);
     if (!enabled) {
       this.logger.log(`ai_skipped eventId=${eventId} reason=system_disabled`);
+      return;
+    }
+
+    // 自动分析必须显式开启，避免 webhook / 同步事件持续消耗模型额度。
+    const autoEnabled = readBooleanEnv('AI_AUTO_ANALYSIS_ENABLED', false);
+    if (!autoEnabled) {
+      this.logger.log(`ai_skipped eventId=${eventId} reason=auto_disabled`);
       return;
     }
 
@@ -269,7 +344,7 @@ export class EventService {
     const MVP_TYPES: EventType[] = [EventType.PUSH, EventType.PR_OPENED, EventType.ISSUE_OPENED];
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
-      select: { type: true },
+      select: { type: true, repositoryId: true },
     });
 
     if (!event || !MVP_TYPES.includes(event.type)) {
@@ -279,13 +354,56 @@ export class EventService {
       return;
     }
 
+    const autoAccessModes = this.resolveAutoAnalysisAccessModes();
+    if (autoAccessModes.length === 0) {
+      this.logger.log(`ai_skipped eventId=${eventId} reason=auto_no_allowed_access_modes`);
+      return;
+    }
+
+    // 检查仓库是否有允许自动分析的用户关联，并且在这些用户的监控范围内。
+    const repoUsers = await this.prisma.userRepository.findMany({
+      where: {
+        repositoryId: event.repositoryId,
+        accessMode: { in: autoAccessModes },
+      },
+      select: { userId: true },
+    });
+    const userIds = repoUsers.map((r) => r.userId);
+    if (userIds.length === 0) {
+      this.logger.log(`ai_skipped eventId=${eventId} reason=auto_no_eligible_repository_user`);
+      return;
+    }
+
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { preferences: true },
+    });
+    const anyInScope = users.some((u) => {
+      const prefs = (u.preferences as Record<string, unknown>) || {};
+      const scope = (prefs.monitoringScope as Record<string, unknown>) || {};
+      const ids = Array.isArray(scope.repositoryIds) ? scope.repositoryIds : [];
+      return ids.includes(event.repositoryId);
+    });
+    if (!anyInScope) {
+      this.logger.log(`ai_skipped eventId=${eventId} reason=not_in_monitoring_scope`);
+      return;
+    }
+
     try {
-      await this.aiService.triggerAnalysis(eventId);
+      await this.aiService.triggerAnalysis(eventId, false, { source: 'auto' });
       this.logger.log(`ai_enqueued eventId=${eventId}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown_error';
       this.logger.error(`ai_enqueue_failed eventId=${eventId} reason=${message}`);
     }
+  }
+
+  private resolveAutoAnalysisAccessModes(): RepositoryAccessMode[] {
+    const allowed = new Set<string>(Object.values(RepositoryAccessMode));
+
+    return readCsvEnv('AI_AUTO_ANALYSIS_ACCESS_MODES', [RepositoryAccessMode.EDITABLE])
+      .map((mode) => mode.toUpperCase())
+      .filter((mode): mode is RepositoryAccessMode => allowed.has(mode));
   }
 
   private isPullRequestEvent(type: EventType): boolean {

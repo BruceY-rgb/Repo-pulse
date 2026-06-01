@@ -9,6 +9,7 @@ import { PROVIDER_DEFAULT_URLS } from '../interfaces/ai-provider';
 import { OpenAICompatibleProvider } from '../providers/openai-compatible';
 import { AnthropicProvider } from '../providers/anthropic';
 import { GeminiProvider } from '../providers/gemini';
+import { OllamaProvider } from '../providers/ollama';
 
 export interface ConnectionTestResult {
   success: boolean;
@@ -71,6 +72,19 @@ export async function testConnection(
           model: 'gpt-4o',
         });
         const available = await openaiProvider.isAvailable();
+        return {
+          success: available,
+          message: available ? '连接成功' : '连接失败',
+        };
+      }
+
+      case 'ollama': {
+        const ollamaProvider = new OllamaProvider({
+          apiKey: '',
+          baseUrl: url,
+          model: 'llama3',
+        });
+        const available = await ollamaProvider.isAvailable();
         return {
           success: available,
           message: available ? '连接成功' : '连接失败',
