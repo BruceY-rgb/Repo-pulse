@@ -93,6 +93,8 @@ describe('RepositoryService', () => {
   let mockGithubService: { [key: string]: jest.Mock };
   let mockGitlabService: { [key: string]: jest.Mock };
   let mockEventService: { findByExternalId: jest.Mock; create: jest.Mock };
+  let mockEventGateway: { [key: string]: jest.Mock };
+  let mockAppConfigService: { get: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -127,11 +129,21 @@ describe('RepositoryService', () => {
       findByExternalId: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({}),
     };
+    mockEventGateway = {
+      broadcastRepositorySyncProgress: jest.fn(),
+      broadcastRepositorySynced: jest.fn(),
+      broadcastRepositorySyncFailed: jest.fn(),
+    };
+    mockAppConfigService = {
+      get: jest.fn().mockResolvedValue('http://localhost:3001'),
+    };
     service = new RepositoryService(
       mockConfigService as any,
       mockGithubService as any,
       mockGitlabService as any,
       mockEventService as any,
+      mockEventGateway as any,
+      mockAppConfigService as any,
     );
   });
 

@@ -55,10 +55,11 @@ describe('GithubService', () => {
       expect(result).toBe(42);
     });
 
-    it('returns null on failure without throwing', async () => {
+    it('throws provider errors so callers can classify webhook status', async () => {
       mockClient.post.mockRejectedValue(new Error('403 Forbidden'));
-      const result = await service.createWebhook('org', 'repo', 'url', 'secret');
-      expect(result).toBeNull();
+      await expect(service.createWebhook('org', 'repo', 'url', 'secret')).rejects.toThrow(
+        '403 Forbidden',
+      );
     });
 
     it('sends correct webhook payload', async () => {

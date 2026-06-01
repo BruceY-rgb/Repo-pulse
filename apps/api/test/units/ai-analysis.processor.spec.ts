@@ -43,6 +43,7 @@ describe('AIProcessor', () => {
     jest.clearAllMocks();
     delete process.env.AI_ANALYSIS_ENABLED;
     process.env.AI_AUTO_ANALYSIS_ENABLED = 'true';
+    mockEventFindUnique.mockResolvedValue({ repositoryId: 'repo-1' });
     mockAIService = { analyzeEvent: jest.fn().mockResolvedValue({ summary: 'All good' }) };
     mockApprovalService = { createFromAIAnalysis: jest.fn().mockResolvedValue(null) };
     mockNotificationService = {
@@ -108,18 +109,28 @@ describe('AIProcessor', () => {
 
     it('broadcasts analysis completed', async () => {
       await processor.process(makeJob({ eventId: 'e1' }));
-      expect(mockEventGateway.broadcastAnalysisCompleted).toHaveBeenCalledWith('e1');
+      expect(mockEventGateway.broadcastAnalysisCompleted).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventId: 'e1',
+          repositoryId: 'repo-1',
+        }),
+      );
     });
 
     it('does not notify when no approval created', async () => {
       mockApprovalService.createFromAIAnalysis.mockResolvedValue(null);
       await processor.process(makeJob({ eventId: 'e1' }));
-      expect(mockEventFindUnique).not.toHaveBeenCalled();
+      expect(mockEventFindUnique).toHaveBeenCalledWith({
+        where: { id: 'e1' },
+        select: { repositoryId: true },
+      });
+      expect(mockNotificationService.send).not.toHaveBeenCalled();
     });
 
     it('notifies users when approval created and user has IN_APP preference', async () => {
       mockApprovalService.createFromAIAnalysis.mockResolvedValue({ id: 'appr-1' });
       mockEventFindUnique.mockResolvedValue({
+        repositoryId: 'repo-1',
         title: 'Push event',
         repository: {
           users: [{ userId: 'u1' }],
@@ -139,6 +150,7 @@ describe('AIProcessor', () => {
     it('skips notification when user does not have highRisk events enabled', async () => {
       mockApprovalService.createFromAIAnalysis.mockResolvedValue({ id: 'appr-1' });
       mockEventFindUnique.mockResolvedValue({
+        repositoryId: 'repo-1',
         title: 'Push',
         repository: { users: [{ userId: 'u1' }] },
       });
@@ -154,6 +166,7 @@ describe('AIProcessor', () => {
     it('skips notification when user does not have IN_APP channel', async () => {
       mockApprovalService.createFromAIAnalysis.mockResolvedValue({ id: 'appr-1' });
       mockEventFindUnique.mockResolvedValue({
+        repositoryId: 'repo-1',
         title: 'Push',
         repository: { users: [{ userId: 'u1' }] },
       });

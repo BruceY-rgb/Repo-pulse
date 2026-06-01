@@ -85,6 +85,8 @@ describe('RepositoryService — isMonitored（externalId vs UUID）', () => {
       mockGithubService as any,
       {} as any,
       {} as any,
+      {} as any,
+      { get: jest.fn().mockResolvedValue('http://localhost:3001') } as any,
     );
 
     // 用户监控了一个仓库，monitoringScope 存的是 Prisma UUID

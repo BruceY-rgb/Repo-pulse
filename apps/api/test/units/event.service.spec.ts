@@ -27,7 +27,7 @@ describe('EventService - 后置编排韧性 (unit)', () => {
     userRepository: { findMany: jest.Mock };
     user: { findMany: jest.Mock };
   };
-  let gateway: { broadcastNewEvent: jest.Mock };
+  let gateway: { broadcastEventCreated: jest.Mock };
   let aiService: { triggerAnalysis: jest.Mock };
   let filterService: { applyRules: jest.Mock; hasRuleReferencingField: jest.Mock };
   let notificationService: {
@@ -49,6 +49,7 @@ describe('EventService - 后置编排韧性 (unit)', () => {
     authorAvatar: null,
     externalId: 'orch-evt-1',
     externalUrl: null,
+    seq: BigInt(1),
     createdAt: new Date(),
   };
 
@@ -88,7 +89,7 @@ describe('EventService - 后置编排韧性 (unit)', () => {
       },
     };
 
-    gateway = { broadcastNewEvent: jest.fn() };
+    gateway = { broadcastEventCreated: jest.fn() };
     aiService = { triggerAnalysis: jest.fn().mockResolvedValue(undefined) };
     filterService = {
       hasRuleReferencingField: jest.fn().mockResolvedValue(false),
@@ -161,7 +162,14 @@ describe('EventService - 后置编排韧性 (unit)', () => {
 
     await flushAsync();
 
-    expect(gateway.broadcastNewEvent).toHaveBeenCalledTimes(1);
+    expect(gateway.broadcastEventCreated).toHaveBeenCalledTimes(1);
+    expect(gateway.broadcastEventCreated).toHaveBeenCalledWith({
+      eventId: 'evt-1',
+      repositoryId: REPO_ID,
+      eventType: EventType.PUSH,
+      seq: 1,
+      createdAt: CREATED_EVENT.createdAt.toISOString(),
+    });
     expect(notificationService.send).toHaveBeenCalledTimes(1);
     expect(imService.sendRepositoryEventNotification).toHaveBeenCalledWith(
       USER_ID,
@@ -244,7 +252,7 @@ describe('EventService - 后置编排韧性 (unit)', () => {
 
   it('broadcast 抛错时，事件主记录仍正常返回，且 notify / AI 流程继续', async () => {
     process.env.AI_AUTO_ANALYSIS_ENABLED = 'true';
-    gateway.broadcastNewEvent.mockImplementation(() => {
+    gateway.broadcastEventCreated.mockImplementation(() => {
       throw new Error('socket gateway down');
     });
 

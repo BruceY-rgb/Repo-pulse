@@ -5,6 +5,7 @@ import {
   Patch,
   Delete,
   Body,
+  HttpCode,
   Param,
   Query,
   UseGuards,
@@ -91,6 +92,35 @@ export class RepositoryController {
       user.githubAccessToken,
       user.githubRefreshToken,
     );
+  }
+
+  @Post('batch-retry-webhooks')
+  @ApiOperation({ summary: 'Re-register webhooks for editable active repositories' })
+  async batchRetryWebhooks(@Req() req: Request) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.batchRetryWebhooks(userId);
+  }
+
+  @Get(':id/webhook')
+  @ApiOperation({ summary: 'Get repository webhook status' })
+  async getWebhookStatus(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.getWebhookStatus(userId, id);
+  }
+
+  @Post(':id/webhook/retry')
+  @ApiOperation({ summary: 'Recreate repository webhook' })
+  async retryWebhook(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.retryWebhook(userId, id);
+  }
+
+  @Post(':id/webhook/test')
+  @HttpCode(202)
+  @ApiOperation({ summary: 'Ask provider to send a webhook ping event' })
+  async testWebhook(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.testWebhook(userId, id);
   }
 
   @Get(':id')

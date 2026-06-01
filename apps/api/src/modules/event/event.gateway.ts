@@ -8,10 +8,24 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
+import { prisma } from '@repo-pulse/database';
+import {
+  AnalysisCompletedPayload,
+  ApprovalUpdatedPayload,
+  EventCreatedPayload,
+  EventReplayDonePayload,
+  REALTIME_EVENTS,
+  RepositorySyncFailedPayload,
+  RepositorySyncProgressPayload,
+  RepositorySyncedPayload,
+} from '@repo-pulse/shared';
 import { Server, Socket } from 'socket.io';
+import { MetricsService } from '../observability/metrics.service';
+
+const REPLAY_BATCH_LIMIT = 200;
 
 interface JwtPayload {
   sub: string;
@@ -22,6 +36,7 @@ interface JwtPayload {
 interface UserSocket extends Socket {
   userId?: string;
   email?: string;
+  subCount?: number;
 }
 
 export interface RealtimeSocketStats {
@@ -61,7 +76,10 @@ export class EventGateway
   private readonly jwtSecret: string;
   private readonly trackedSockets = new Map<string, TrackedSocket>();
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional() private readonly metricsService?: MetricsService,
+  ) {
     this.jwtSecret =
       this.configService.get<string>('JWT_SECRET') || 'default-secret';
   }
@@ -90,6 +108,7 @@ export class EventGateway
         connectedAt: new Date(),
         rooms: new Set(),
       });
+      this.metricsService?.incrementConnections();
 
       this.logger.log(
         `Client ${client.id} connected as user ${decoded.sub} active=${this.trackedSockets.size}`,
@@ -102,6 +121,13 @@ export class EventGateway
   }
 
   handleDisconnect(client: UserSocket) {
+    if (this.trackedSockets.has(client.id)) {
+      this.metricsService?.decrementConnections();
+      const count = client.subCount ?? this.trackedSockets.get(client.id)?.rooms.size ?? 0;
+      if (count > 0) {
+        this.metricsService?.decrementSubscriptions(count);
+      }
+    }
     this.trackedSockets.delete(client.id);
     this.logger.log(
       `Client ${client.id} disconnected active=${this.trackedSockets.size}`,
@@ -109,17 +135,87 @@ export class EventGateway
   }
 
   @SubscribeMessage('join:repository')
-  handleJoinRepository(
+  async handleJoinRepository(
     @ConnectedSocket() client: UserSocket,
-    @MessageBody() data: { repositoryId: string },
+    @MessageBody() data: { repositoryId: string; sinceSeq?: number },
   ) {
     const roomName = `repo:${data.repositoryId}`;
+
+    if (typeof data.sinceSeq === 'number') {
+      await this.replayMissedEvents(client, data.repositoryId, data.sinceSeq);
+    }
+
+    const tracked = this.trackedSockets.get(client.id);
+    const alreadyIn = tracked?.rooms.has(roomName) ?? client.rooms?.has(roomName) ?? false;
     client.join(roomName);
-    this.trackedSockets.get(client.id)?.rooms.add(roomName);
+    tracked?.rooms.add(roomName);
+    if (!alreadyIn) {
+      client.subCount = (client.subCount ?? 0) + 1;
+      this.metricsService?.incrementSubscriptions();
+    }
     this.logger.log(
-      `Client ${client.id} joined room ${roomName} (user: ${client.userId})`,
+      `Client ${client.id} joined room ${roomName} (user: ${client.userId}${
+        typeof data.sinceSeq === 'number' ? `, sinceSeq=${data.sinceSeq}` : ''
+      })`,
     );
     return { event: 'joined', room: roomName };
+  }
+
+  private async replayMissedEvents(
+    client: UserSocket,
+    repositoryId: string,
+    sinceSeq: number,
+  ): Promise<void> {
+    try {
+      const missed = await prisma.event.findMany({
+        where: {
+          repositoryId,
+          seq: { gt: BigInt(sinceSeq) },
+        },
+        orderBy: { seq: 'asc' },
+        take: REPLAY_BATCH_LIMIT + 1,
+        select: {
+          id: true,
+          repositoryId: true,
+          type: true,
+          seq: true,
+          createdAt: true,
+        },
+      });
+
+      const hasMore = missed.length > REPLAY_BATCH_LIMIT;
+      const batch = hasMore ? missed.slice(0, REPLAY_BATCH_LIMIT) : missed;
+
+      for (const event of batch) {
+        const payload: EventCreatedPayload = {
+          eventId: event.id,
+          repositoryId: event.repositoryId,
+          eventType: event.type,
+          seq: Number(event.seq),
+          createdAt: event.createdAt.toISOString(),
+        };
+        client.emit(REALTIME_EVENTS.EVENT_CREATED, payload);
+      }
+
+      const donePayload: EventReplayDonePayload = {
+        repositoryId,
+        replayed: batch.length,
+        hasMore,
+        lastSeq: batch.length > 0
+          ? Number(batch[batch.length - 1].seq)
+          : sinceSeq,
+      };
+      client.emit(REALTIME_EVENTS.EVENT_REPLAY_DONE, donePayload);
+
+      this.logger.log(
+        `replay_complete repositoryId=${repositoryId} sinceSeq=${sinceSeq} replayed=${batch.length} hasMore=${hasMore}`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown_error';
+      this.logger.warn(
+        `replay_failed repositoryId=${repositoryId} sinceSeq=${sinceSeq} reason=${message}`,
+      );
+    }
   }
 
   @SubscribeMessage('leave:repository')
@@ -128,8 +224,14 @@ export class EventGateway
     @MessageBody() data: { repositoryId: string },
   ) {
     const roomName = `repo:${data.repositoryId}`;
+    const tracked = this.trackedSockets.get(client.id);
+    const wasIn = tracked?.rooms.has(roomName) ?? client.rooms?.has(roomName) ?? false;
     client.leave(roomName);
-    this.trackedSockets.get(client.id)?.rooms.delete(roomName);
+    tracked?.rooms.delete(roomName);
+    if (wasIn) {
+      client.subCount = Math.max(0, (client.subCount ?? 0) - 1);
+      this.metricsService?.decrementSubscriptions();
+    }
     this.logger.log(
       `Client ${client.id} left room ${roomName} (user: ${client.userId})`,
     );
@@ -160,13 +262,89 @@ export class EventGateway
     );
   }
 
-  broadcastAnalysisCompleted(eventId: string) {
+  broadcastEventCreated(payload: EventCreatedPayload) {
+    const roomName = `repo:${payload.repositoryId}`;
+    this.server.to(roomName).emit(REALTIME_EVENTS.EVENT_CREATED, payload);
+    this.server.to(roomName).emit('event:new', {
+      type: 'event:new',
+      repositoryId: payload.repositoryId,
+      data: {
+        id: payload.eventId,
+        type: payload.eventType,
+        seq: payload.seq,
+        createdAt: payload.createdAt,
+      },
+      timestamp: payload.createdAt,
+    });
+    const latency = Date.now() - new Date(payload.createdAt).getTime();
+    this.metricsService?.observeEmitLatency(REALTIME_EVENTS.EVENT_CREATED, latency);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.EVENT_CREATED} to room ${roomName} eventId=${payload.eventId}`,
+    );
+  }
+
+  broadcastAnalysisCompleted(payloadOrEventId: AnalysisCompletedPayload | string) {
+    if (typeof payloadOrEventId === 'string') {
+      this.server.emit('analysis:completed', {
+        type: 'analysis:completed',
+        eventId: payloadOrEventId,
+        timestamp: new Date().toISOString(),
+      });
+      this.logger.log(`Broadcast analysis:completed eventId=${payloadOrEventId}`);
+      return;
+    }
+
+    const payload = payloadOrEventId;
+    const roomName = `repo:${payload.repositoryId}`;
+    this.server.to(roomName).emit(REALTIME_EVENTS.ANALYSIS_COMPLETED, payload);
     this.server.emit('analysis:completed', {
       type: 'analysis:completed',
-      eventId,
-      timestamp: new Date().toISOString(),
+      eventId: payload.eventId,
+      repositoryId: payload.repositoryId,
+      timestamp: payload.completedAt,
     });
-    this.logger.log(`Broadcast analysis:completed eventId=${eventId}`);
+    const latency = Date.now() - new Date(payload.completedAt).getTime();
+    this.metricsService?.observeEmitLatency(REALTIME_EVENTS.ANALYSIS_COMPLETED, latency);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.ANALYSIS_COMPLETED} to room ${roomName} eventId=${payload.eventId}`,
+    );
+  }
+
+  broadcastApprovalUpdated(payload: ApprovalUpdatedPayload) {
+    const roomName = `repo:${payload.repositoryId}`;
+    this.server.to(roomName).emit(REALTIME_EVENTS.APPROVAL_UPDATED, payload);
+    this.metricsService?.observeEmitLatency(REALTIME_EVENTS.APPROVAL_UPDATED, 0);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.APPROVAL_UPDATED} to room ${roomName} approvalId=${payload.approvalId}`,
+    );
+  }
+
+  broadcastRepositorySyncProgress(payload: RepositorySyncProgressPayload) {
+    const roomName = `repo:${payload.repositoryId}`;
+    this.server.to(roomName).emit(REALTIME_EVENTS.REPOSITORY_SYNC_PROGRESS, payload);
+    this.metricsService?.observeEmitLatency(REALTIME_EVENTS.REPOSITORY_SYNC_PROGRESS, 0);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.REPOSITORY_SYNC_PROGRESS} to room ${roomName} jobId=${payload.jobId} stage=${payload.stage} progress=${payload.progress}`,
+    );
+  }
+
+  broadcastRepositorySynced(payload: RepositorySyncedPayload) {
+    const roomName = `repo:${payload.repositoryId}`;
+    this.server.to(roomName).emit(REALTIME_EVENTS.REPOSITORY_SYNCED, payload);
+    const latency = Date.now() - new Date(payload.syncedAt).getTime();
+    this.metricsService?.observeEmitLatency(REALTIME_EVENTS.REPOSITORY_SYNCED, latency);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.REPOSITORY_SYNCED} to room ${roomName} jobId=${payload.jobId} durationMs=${payload.durationMs}`,
+    );
+  }
+
+  broadcastRepositorySyncFailed(payload: RepositorySyncFailedPayload) {
+    const roomName = `repo:${payload.repositoryId}`;
+    this.server.to(roomName).emit(REALTIME_EVENTS.REPOSITORY_SYNC_FAILED, payload);
+    this.metricsService?.observeEmitLatency(REALTIME_EVENTS.REPOSITORY_SYNC_FAILED, 0);
+    this.logger.warn(
+      `Broadcast ${REALTIME_EVENTS.REPOSITORY_SYNC_FAILED} to room ${roomName} jobId=${payload.jobId} reason=${payload.reason}`,
+    );
   }
 
   getRealtimeStats(): RealtimeSocketStats {

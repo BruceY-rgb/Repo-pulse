@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { prisma } from '@repo-pulse/database';
 import type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
+import { AppConfigService, AppConfigValue } from '../app-config/app-config.service';
 
 // Re-export for backward compatibility
 export type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
@@ -14,6 +15,8 @@ export interface FetchModelsResult {
 @Injectable()
 export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
+
+  constructor(private readonly appConfigService: AppConfigService) {}
 
   async getAIConfig(userId: string): Promise<AIConfig> {
     const user = await prisma.user.findUnique({
@@ -37,6 +40,19 @@ export class SettingsService {
       aiBaseUrl: user.aiBaseUrl || undefined,
       aiModel: user.aiModel || undefined,
     };
+  }
+
+  async getApiUrlConfig(): Promise<AppConfigValue> {
+    return this.appConfigService.getWithSource('API_URL', 'http://localhost:3001');
+  }
+
+  async updateApiUrlConfig(apiUrl: string, userId: string): Promise<AppConfigValue> {
+    const normalized = apiUrl.trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//i.test(normalized)) {
+      throw new BadRequestException('API_URL must start with http:// or https://');
+    }
+
+    return this.appConfigService.set('API_URL', normalized, userId);
   }
 
   async updateAIConfig(

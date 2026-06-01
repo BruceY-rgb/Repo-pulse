@@ -132,9 +132,9 @@ describe('EventGateway', () => {
 
   // ── handleJoinRepository ──────────────────────────────────────────────────
   describe('handleJoinRepository', () => {
-    it('joins the correct room and returns event', () => {
+    it('joins the correct room and returns event', async () => {
       const client = makeClient();
-      const result = gateway.handleJoinRepository(client as any, { repositoryId: 'r1' });
+      const result = await gateway.handleJoinRepository(client as any, { repositoryId: 'r1' });
       expect(client.join).toHaveBeenCalledWith('repo:r1');
       expect(result).toEqual({ event: 'joined', room: 'repo:r1' });
     });
@@ -156,7 +156,7 @@ describe('EventGateway', () => {
       const client = makeClient({ auth: { token } });
 
       await gateway.handleConnection(client as any);
-      gateway.handleJoinRepository(client as any, { repositoryId: 'r1' });
+      await gateway.handleJoinRepository(client as any, { repositoryId: 'r1' });
 
       expect(gateway.getRealtimeStats()).toMatchObject({
         connectedClients: 1,

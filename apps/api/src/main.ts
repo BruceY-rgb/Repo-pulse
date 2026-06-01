@@ -7,7 +7,14 @@ import cookieParser from 'cookie-parser';
 import { json } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
+import { RedisIoAdapter } from './adapters/redis-io.adapter';
 import { join } from 'path';
+
+// Prisma Event.seq is BigInt. Native JSON.stringify throws on BigInt, so make
+// HTTP responses and socket replay payloads safe before app bootstrap.
+(BigInt.prototype as unknown as { toJSON(): number }).toJSON = function () {
+  return Number(this);
+};
 
 async function bootstrap() {
   // 保留 Raw Body 供 Webhook 验签使用
@@ -69,6 +76,23 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  // Socket.io Redis adapter — 多 API 实例时共享 WebSocket room 广播。
+  // 本地单实例可设置 REDIS_PUBSUB_DISABLE=true 跳过；Redis 不可用时自动降级。
+  if (configService.get<string>('REDIS_PUBSUB_DISABLE') !== 'true') {
+    const redisUrl = configService.get<string>('REDIS_URL', 'redis://localhost:6379');
+    const pubsubDb = Number(configService.get<string>('REDIS_PUBSUB_DB', '1'));
+    const redisAdapter = new RedisIoAdapter(app);
+    try {
+      await redisAdapter.connectToRedis(redisUrl, pubsubDb);
+      app.useWebSocketAdapter(redisAdapter);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown_error';
+      logger.warn(
+        `Redis adapter unavailable, falling back to single-instance broadcast: ${message}`,
+      );
+    }
+  }
 
   // Swagger API docs
   const swaggerConfig = new DocumentBuilder()

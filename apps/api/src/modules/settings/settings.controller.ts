@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Body, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, ForbiddenException, Get, Post, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { SettingsService, AIProvider } from './settings.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @ApiTags('设置')
 @Controller('settings')
@@ -55,6 +56,32 @@ export class SettingsController {
     },
   ) {
     return this.settingsService.updateAIConfig(user.sub, body);
+  }
+
+  @Get('app-config/api-url')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '获取 Webhook API URL 配置' })
+  async getApiUrlConfig() {
+    return this.settingsService.getApiUrlConfig();
+  }
+
+  @Post('app-config/api-url')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Roles('ADMIN')
+  @ApiOperation({ summary: '更新 Webhook API URL 配置' })
+  async updateApiUrlConfig(
+    @CurrentUser() user: { sub: string; role?: string },
+    @Body() body: { apiUrl?: string },
+  ) {
+    if (user.role !== 'ADMIN') {
+      throw new ForbiddenException('Only ADMIN can update API URL');
+    }
+    if (!body.apiUrl) {
+      throw new BadRequestException('apiUrl is required');
+    }
+    return this.settingsService.updateApiUrlConfig(body.apiUrl, user.sub);
   }
 
   /**

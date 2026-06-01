@@ -6,6 +6,11 @@ import { performance } from 'perf_hooks';
 import type { AddressInfo } from 'net';
 import { io, Socket } from 'socket.io-client';
 import { EventGateway } from '../src/modules/event/event.gateway';
+import {
+  AnalysisCompletedPayload,
+  EventCreatedPayload,
+  REALTIME_EVENTS,
+} from '@repo-pulse/shared';
 
 const JWT_SECRET = 'websocket-realtime-secret';
 const TRANSPORT_BUDGET_MS = 250;
@@ -210,6 +215,27 @@ describe('WebSocket realtime transport (e2e)', () => {
     });
     expect(batchResult.payload.data).toHaveLength(2);
 
+    const createdResult = await measureSocketEvent<EventCreatedPayload>(
+      socket,
+      REALTIME_EVENTS.EVENT_CREATED,
+      () => {
+        gateway.broadcastEventCreated({
+          eventId: 'event-created-1',
+          repositoryId: 'repo-realtime',
+          eventType: 'PUSH',
+          seq: 1,
+          createdAt: new Date().toISOString(),
+        });
+      },
+    );
+
+    expect(createdResult.payload).toMatchObject({
+      eventId: 'event-created-1',
+      repositoryId: 'repo-realtime',
+      eventType: 'PUSH',
+      seq: 1,
+    });
+
     const analysisResult = await measureSocketEvent<{
       type: string;
       eventId: string;
@@ -222,6 +248,23 @@ describe('WebSocket realtime transport (e2e)', () => {
       eventId: 'analysis-event-1',
     });
 
+    const analysisCompletedResult = await measureSocketEvent<AnalysisCompletedPayload>(
+      socket,
+      REALTIME_EVENTS.ANALYSIS_COMPLETED,
+      () => {
+        gateway.broadcastAnalysisCompleted({
+          eventId: 'analysis-event-2',
+          repositoryId: 'repo-realtime',
+          completedAt: new Date().toISOString(),
+        });
+      },
+    );
+
+    expect(analysisCompletedResult.payload).toMatchObject({
+      eventId: 'analysis-event-2',
+      repositoryId: 'repo-realtime',
+    });
+
     const p95EventLatency = percentile(eventLatencies, 0.95);
     const maxEventLatency = Math.max(...eventLatencies);
     console.info(
@@ -229,14 +272,20 @@ describe('WebSocket realtime transport (e2e)', () => {
         2,
       )}ms max=${maxEventLatency.toFixed(2)}ms events:new=${batchResult.latencyMs.toFixed(
         2,
+      )}ms event.created=${createdResult.latencyMs.toFixed(
+        2,
       )}ms analysis:completed=${analysisResult.latencyMs.toFixed(
+        2,
+      )}ms analysis.completed=${analysisCompletedResult.latencyMs.toFixed(
         2,
       )}ms budget=${TRANSPORT_BUDGET_MS}ms`,
     );
 
     expect(p95EventLatency).toBeLessThanOrEqual(TRANSPORT_BUDGET_MS);
     expect(batchResult.latencyMs).toBeLessThanOrEqual(TRANSPORT_BUDGET_MS);
+    expect(createdResult.latencyMs).toBeLessThanOrEqual(TRANSPORT_BUDGET_MS);
     expect(analysisResult.latencyMs).toBeLessThanOrEqual(TRANSPORT_BUDGET_MS);
+    expect(analysisCompletedResult.latencyMs).toBeLessThanOrEqual(TRANSPORT_BUDGET_MS);
 
     socket.emit('leave:repository', { repositoryId: 'repo-realtime' });
     await waitUntil(

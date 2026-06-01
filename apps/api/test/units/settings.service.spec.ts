@@ -24,10 +24,14 @@ function makeDbUser(overrides: object = {}) {
 
 describe('SettingsService', () => {
   let service: SettingsService;
+  const mockAppConfigService = {
+    getWithSource: jest.fn(),
+    set: jest.fn(),
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new SettingsService();
+    service = new SettingsService(mockAppConfigService as any);
   });
 
   // ── getAIConfig ────────────────────────────────────────────────────────────

@@ -106,6 +106,16 @@ const mockConfigService = {
   get: jest.fn().mockReturnValue('http://localhost:3001'),
 };
 
+const mockEventGateway = {
+  broadcastRepositorySyncProgress: jest.fn(),
+  broadcastRepositorySynced: jest.fn(),
+  broadcastRepositorySyncFailed: jest.fn(),
+};
+
+const mockAppConfigService = {
+  get: jest.fn().mockResolvedValue('http://localhost:3001'),
+};
+
 function makeRepo(overrides: object = {}) {
   return {
     id: 'r1',
@@ -139,6 +149,8 @@ function getSvc(): RepositoryService {
     mockGithubService as any,
     mockGitlabService as any,
     mockEventService as any,
+    mockEventGateway as any,
+    mockAppConfigService as any,
   );
   return svc;
 }

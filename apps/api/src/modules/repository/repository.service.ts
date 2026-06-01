@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
 import {
   EventType,
   Platform,
@@ -14,6 +15,7 @@ import {
   RepositoryAccessMode,
   Role,
 } from '@repo-pulse/database';
+import { WebhookStatus } from '@repo-pulse/shared';
 import { randomBytes } from 'crypto';
 import {
   assertUserCanAccessRepository,
@@ -22,9 +24,14 @@ import {
   isEditableRepositoryAccessLevel,
 } from '../../common/utils/repository-access';
 import { EventService } from '../event/event.service';
+import { EventGateway } from '../event/event.gateway';
 import { CreateRepositoryDto, UpdateRepositoryDto } from './dto/repository.dto';
 import { GithubBranchInfo, GithubRepoResponse, GithubService } from './services/github.service';
 import { GitlabBranchInfo, GitlabService } from './services/gitlab.service';
+import type { RepositorySyncStage } from '@repo-pulse/shared';
+import { AppConfigService } from '../app-config/app-config.service';
+
+const API_URL_FALLBACK = 'http://localhost:3001';
 
 interface SyncSummary {
   repositoryId: string;
@@ -34,6 +41,18 @@ interface SyncSummary {
   failedSources: string[];
   lastSyncAt: string;
 }
+
+export interface WebhookProvisionResult {
+  webhookStatus: WebhookStatus;
+  webhookError?: string;
+  webhookId?: string | null;
+}
+
+const STAGE_PROGRESS: Record<Exclude<RepositorySyncStage, 'done'>, number> = {
+  commits: 5,
+  prs: 40,
+  issues: 70,
+};
 
 export interface RepositoryBranchOption {
   name: string;
@@ -86,6 +105,8 @@ export class RepositoryService {
     private readonly githubService: GithubService,
     private readonly gitlabService: GitlabService,
     private readonly eventService: EventService,
+    private readonly eventGateway: EventGateway,
+    private readonly appConfigService: AppConfigService,
   ) {
     this.prisma = new PrismaClient();
   }
@@ -202,42 +223,51 @@ export class RepositoryService {
       }
     }
 
-    const apiUrl = this.configService.get<string>('API_URL', 'http://localhost:3001');
+    let webhookResult: WebhookProvisionResult = {
+      webhookStatus: shouldRegisterWebhook
+        ? WebhookStatus.NOT_CONFIGURED
+        : WebhookStatus.NOT_CONFIGURED,
+      webhookError: shouldRegisterWebhook ? 'Webhook has not been provisioned yet' : undefined,
+      webhookId: repository.webhookId,
+    };
+
     if (shouldRegisterWebhook) {
       const editableWebhookSecret = webhookSecret ?? this.generateWebhookSecret();
-      try {
-        if (platform === Platform.GITHUB) {
-          const webhookUrl = `${apiUrl}/webhooks/github`;
-          const webhookId = await this.githubService.createWebhook(
-            owner,
-            repo,
-            webhookUrl,
-            editableWebhookSecret,
-            options?.userOAuthToken,
-          );
-          if (webhookId) {
-            await this.prisma.repository.update({
-              where: { id: repository.id },
-              data: { webhookId: String(webhookId) },
-            });
-          }
-        } else {
-          const webhookUrl = `${apiUrl}/webhooks/gitlab`;
-          await this.gitlabService.createWebhook(owner, repo, webhookUrl, editableWebhookSecret);
-        }
-      } catch (error) {
-        this.logger.error(`Failed to register webhook for ${repoInfo.fullName}`, error);
-      }
+      webhookResult = await this.provisionWebhook({
+        repositoryId: repository.id,
+        platform,
+        owner,
+        repo,
+        fullName: repoInfo.fullName,
+        webhookSecret: editableWebhookSecret,
+        userOAuthToken: options?.userOAuthToken,
+      });
+    } else {
+      await this.prisma.repository.update({
+        where: { id: repository.id },
+        data: {
+          webhookStatus: WebhookStatus.NOT_CONFIGURED,
+          webhookError: null,
+        },
+      });
     }
 
     this.logger.log(
       `Repository ${repoInfo.fullName} added successfully for user ${userId} with accessLevel=${accessLevel}`,
     );
-    return this.attachRepositoryAccessView(repository, {
-      role,
-      accessMode,
-      accessLevel,
-    });
+    return this.attachRepositoryAccessView(
+      {
+        ...repository,
+        webhookId: webhookResult.webhookId ?? repository.webhookId,
+        webhookStatus: webhookResult.webhookStatus,
+        webhookError: webhookResult.webhookError ?? null,
+      },
+      {
+        role,
+        accessMode,
+        accessLevel,
+      },
+    );
   }
 
   async findAll(userId: string, options?: { isActive?: boolean }) {
@@ -493,7 +523,13 @@ export class RepositoryService {
     return { success: true };
   }
 
-  async sync(id: string, options?: { daysBack?: number }): Promise<SyncSummary> {
+  async sync(
+    id: string,
+    options?: {
+      daysBack?: number;
+      onStageStart?: (stage: Exclude<RepositorySyncStage, 'done'>) => void;
+    },
+  ): Promise<SyncSummary> {
     const repository = await this.prisma.repository.findUnique({
       where: { id },
       include: {
@@ -540,6 +576,7 @@ export class RepositoryService {
             : [repository.defaultBranch];
         const commitSources = branchNames.map((branchName) => ({
           name: `github_commits:${branchName}`,
+          stage: 'commits' as const,
           fetch: () =>
             this.githubService.getCommits(
               owner,
@@ -553,6 +590,7 @@ export class RepositoryService {
           ...commitSources,
           {
             name: 'github_pull_requests',
+            stage: 'prs' as const,
             fetch: () =>
               this.githubService.getPullRequests(
                 owner,
@@ -564,6 +602,7 @@ export class RepositoryService {
           },
           {
             name: 'github_issues',
+            stage: 'issues' as const,
             fetch: () =>
               this.githubService.getIssues(
                 owner,
@@ -575,7 +614,7 @@ export class RepositoryService {
           },
         ];
 
-        const summary = await this.syncSources(repository.id, sources, failedSources);
+        const summary = await this.syncSources(repository.id, sources, failedSources, options?.onStageStart);
         createdCount += summary.createdCount;
         skippedCount += summary.skippedCount;
         updatedCount += summary.updatedCount;
@@ -589,6 +628,7 @@ export class RepositoryService {
           : [repository.defaultBranch];
       const commitSources = branchNames.map((branchName) => ({
         name: `gitlab_commits:${branchName}`,
+        stage: 'commits' as const,
         fetch: () =>
           this.gitlabService.getCommits(owner, repo, {
             branch: branchName,
@@ -600,17 +640,19 @@ export class RepositoryService {
         ...commitSources,
         {
           name: 'gitlab_merge_requests',
+          stage: 'prs' as const,
           fetch: () => this.gitlabService.getMergeRequests(owner, repo, 'all'),
           normalize: (item: unknown) => this.normalizeGitlabMergeRequest(item, sinceDate),
         },
         {
           name: 'gitlab_issues',
+          stage: 'issues' as const,
           fetch: () => this.gitlabService.getIssues(owner, repo, 'all'),
           normalize: (item: unknown) => this.normalizeGitlabIssue(item, sinceDate),
         },
       ];
 
-      const summary = await this.syncSources(repository.id, sources, failedSources);
+      const summary = await this.syncSources(repository.id, sources, failedSources, options?.onStageStart);
       createdCount += summary.createdCount;
       skippedCount += summary.skippedCount;
       updatedCount += summary.updatedCount;
@@ -644,6 +686,77 @@ export class RepositoryService {
    * 重新注册 Webhook
    */
   async registerWebhook(userId: string, id: string) {
+    return this.retryWebhook(userId, id);
+  }
+
+  async getWebhookStatus(userId: string, id: string) {
+    await assertUserCanEditRepository(userId, id);
+
+    const repository = await this.prisma.repository.findUnique({
+      where: { id },
+      include: {
+        users: {
+          where: { userId },
+          include: {
+            user: {
+              select: {
+                githubAccessToken: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!repository) {
+      throw new NotFoundException('Repository not found');
+    }
+
+    if (repository.platform !== Platform.GITHUB) {
+      throw new BadRequestException(
+        'Webhook management currently supports GitHub repositories only',
+      );
+    }
+
+    const userOAuthToken = repository.users[0]?.user.githubAccessToken;
+    if (!userOAuthToken) {
+      throw new BadRequestException('GitHub account is not connected');
+    }
+
+    if (!repository.webhookId) {
+      return this.persistWebhookStatus(id, {
+        webhookStatus: WebhookStatus.NOT_CONFIGURED,
+        webhookError: 'Webhook ID is not configured',
+        webhookId: null,
+      });
+    }
+
+    const [owner, repo] = this.parseRepositoryPath(repository.fullName);
+
+    try {
+      const webhook = await this.githubService.getWebhook(
+        owner,
+        repo,
+        repository.webhookId,
+        userOAuthToken,
+      );
+      return this.persistWebhookStatus(id, {
+        webhookStatus: webhook.active ? WebhookStatus.ACTIVE : WebhookStatus.FAILED,
+        webhookError: webhook.active
+          ? undefined
+          : webhook.last_response?.message || 'Webhook is inactive on GitHub',
+        webhookId: String(webhook.id),
+      });
+    } catch (error) {
+      const result = this.classifyWebhookError(error, { notFoundMeansScope: false });
+      return this.persistWebhookStatus(id, {
+        ...result,
+        webhookId: repository.webhookId,
+      });
+    }
+  }
+
+  async retryWebhook(userId: string, id: string) {
     await assertUserCanEditRepository(userId, id);
 
     const repository = await this.prisma.repository.findUnique({
@@ -678,35 +791,326 @@ export class RepositoryService {
     }
 
     const [owner, repo] = this.parseRepositoryPath(repository.fullName);
+    const webhookSecret = repository.webhookSecret || this.generateWebhookSecret();
 
-    // 生成新的 webhook secret
-    const webhookSecret = this.generateWebhookSecret();
-
-    const apiUrl = this.configService.get<string>('API_URL', 'http://localhost:3001');
-    const webhookUrl = `${apiUrl}/webhooks/github`;
-
-    // 创建 Webhook
-    const webhookId = await this.githubService.createWebhook(
+    const result = await this.provisionWebhook({
+      repositoryId: id,
+      platform: repository.platform,
       owner,
       repo,
-      webhookUrl,
+      fullName: repository.fullName,
       webhookSecret,
       userOAuthToken,
-    );
-
-    // 更新仓库记录
-    await this.prisma.repository.update({
-      where: { id },
-      data: {
-        webhookId: webhookId ? String(webhookId) : null,
-        webhookSecret,
-      },
     });
 
     this.logger.log(
-      `Webhook re-registered for ${repository.fullName} by user ${userId}`,
+      `Webhook re-registered for ${repository.fullName} by user ${userId} status=${result.webhookStatus}`,
     );
-    return { success: true, webhookId };
+    return result;
+  }
+
+  async testWebhook(userId: string, id: string) {
+    await assertUserCanEditRepository(userId, id);
+
+    const repository = await this.prisma.repository.findUnique({
+      where: { id },
+      include: {
+        users: {
+          where: { userId },
+          include: {
+            user: {
+              select: {
+                githubAccessToken: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!repository) {
+      throw new NotFoundException('Repository not found');
+    }
+    if (repository.platform !== Platform.GITHUB) {
+      throw new BadRequestException('Webhook test currently supports GitHub repositories only');
+    }
+    if (!repository.webhookId) {
+      throw new BadRequestException('Webhook is not configured');
+    }
+
+    const userOAuthToken = repository.users[0]?.user.githubAccessToken;
+    if (!userOAuthToken) {
+      throw new BadRequestException('GitHub account is not connected');
+    }
+
+    const [owner, repo] = this.parseRepositoryPath(repository.fullName);
+    await this.githubService.pingWebhook(owner, repo, repository.webhookId, userOAuthToken);
+    return this.persistWebhookStatus(id, {
+      webhookStatus: WebhookStatus.ACTIVE,
+      webhookId: repository.webhookId,
+    });
+  }
+
+  async batchRetryWebhooks(userId: string) {
+    const memberships = await this.prisma.userRepository.findMany({
+      where: {
+        userId,
+        accessMode: RepositoryAccessMode.EDITABLE,
+        accessLevel: {
+          in: [
+            RepositoryAccessLevel.OWNER,
+            RepositoryAccessLevel.ADMIN,
+            RepositoryAccessLevel.MAINTAIN,
+            RepositoryAccessLevel.WRITE,
+          ],
+        },
+        repository: {
+          isActive: true,
+          platform: Platform.GITHUB,
+        },
+      },
+      include: {
+        repository: true,
+      },
+    });
+
+    const failures: Array<{ repositoryId: string; fullName: string; reason: string }> = [];
+    let succeeded = 0;
+
+    for (const membership of memberships) {
+      try {
+        const result = await this.retryWebhook(userId, membership.repositoryId);
+        if (result.webhookStatus === WebhookStatus.ACTIVE) {
+          succeeded += 1;
+        } else {
+          failures.push({
+            repositoryId: membership.repositoryId,
+            fullName: membership.repository.fullName,
+            reason: result.webhookError || result.webhookStatus,
+          });
+        }
+      } catch (error) {
+        failures.push({
+          repositoryId: membership.repositoryId,
+          fullName: membership.repository.fullName,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return {
+      total: memberships.length,
+      succeeded,
+      failed: failures.length,
+      failures,
+    };
+  }
+
+  private async provisionWebhook(input: {
+    repositoryId: string;
+    platform: Platform;
+    owner: string;
+    repo: string;
+    fullName: string;
+    webhookSecret: string;
+    userOAuthToken?: string;
+  }): Promise<WebhookProvisionResult> {
+    const apiUrl = (await this.appConfigService.get(
+      'API_URL',
+      this.configService.get<string>('API_URL') || API_URL_FALLBACK,
+    )).replace(/\/+$/, '');
+
+    if (input.platform === Platform.GITLAB) {
+      try {
+        const webhookUrl = `${apiUrl}/webhooks/gitlab`;
+        await this.gitlabService.createWebhook(
+          input.owner,
+          input.repo,
+          webhookUrl,
+          input.webhookSecret,
+        );
+        return this.persistWebhookStatus(input.repositoryId, {
+          webhookStatus: WebhookStatus.ACTIVE,
+          webhookError: undefined,
+          webhookId: null,
+        }, input.webhookSecret);
+      } catch (error) {
+        const result = this.classifyWebhookError(error, { notFoundMeansScope: false });
+        this.logger.warn(
+          `Failed to register GitLab webhook for ${input.fullName}: ${result.webhookError}`,
+        );
+        return this.persistWebhookStatus(input.repositoryId, result, input.webhookSecret);
+      }
+    }
+
+    const webhookUrl = `${apiUrl}/webhooks/github`;
+
+    try {
+      const webhookId = await this.githubService.createWebhook(
+        input.owner,
+        input.repo,
+        webhookUrl,
+        input.webhookSecret,
+        input.userOAuthToken,
+      );
+
+      return this.persistWebhookStatus(input.repositoryId, {
+        webhookStatus: WebhookStatus.ACTIVE,
+        webhookError: undefined,
+        webhookId: String(webhookId),
+      }, input.webhookSecret);
+    } catch (error) {
+      if (this.isHookAlreadyExistsError(error)) {
+        const healed = await this.recreateExistingGithubWebhook(input, webhookUrl);
+        if (healed) {
+          return healed;
+        }
+      }
+
+      const result = this.classifyWebhookError(error, { notFoundMeansScope: true });
+      this.logger.warn(
+        `Failed to register GitHub webhook for ${input.fullName}: ${result.webhookError}`,
+      );
+      return this.persistWebhookStatus(input.repositoryId, result, input.webhookSecret);
+    }
+  }
+
+  private async recreateExistingGithubWebhook(
+    input: {
+      repositoryId: string;
+      owner: string;
+      repo: string;
+      fullName: string;
+      webhookSecret: string;
+      userOAuthToken?: string;
+    },
+    webhookUrl: string,
+  ): Promise<WebhookProvisionResult | null> {
+    try {
+      const hooks = await this.githubService.listWebhooks(
+        input.owner,
+        input.repo,
+        input.userOAuthToken,
+      );
+      const staleHook = hooks.find((hook) => {
+        const url = hook.config?.url || '';
+        return url === webhookUrl || url.endsWith('/webhooks/github');
+      });
+
+      if (!staleHook) {
+        return null;
+      }
+
+      await this.githubService.deleteWebhook(
+        input.owner,
+        input.repo,
+        String(staleHook.id),
+        input.userOAuthToken,
+      );
+      const webhookId = await this.githubService.createWebhook(
+        input.owner,
+        input.repo,
+        webhookUrl,
+        input.webhookSecret,
+        input.userOAuthToken,
+      );
+
+      this.logger.log(
+        `Recreated existing GitHub webhook for ${input.fullName}, old=${staleHook.id}, new=${webhookId}`,
+      );
+
+      return this.persistWebhookStatus(input.repositoryId, {
+        webhookStatus: WebhookStatus.ACTIVE,
+        webhookError: undefined,
+        webhookId: String(webhookId),
+      }, input.webhookSecret);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Failed to self-heal existing GitHub webhook for ${input.fullName}: ${message}`,
+      );
+      return null;
+    }
+  }
+
+  private async persistWebhookStatus(
+    repositoryId: string,
+    result: WebhookProvisionResult,
+    webhookSecret?: string,
+  ): Promise<WebhookProvisionResult> {
+    await this.prisma.repository.update({
+      where: { id: repositoryId },
+      data: {
+        webhookId: result.webhookId === undefined ? undefined : result.webhookId,
+        webhookSecret,
+        webhookStatus: result.webhookStatus,
+        webhookError: result.webhookError ?? null,
+      },
+    });
+
+    return {
+      webhookStatus: result.webhookStatus,
+      webhookError: result.webhookError,
+      webhookId: result.webhookId,
+    };
+  }
+
+  private classifyWebhookError(
+    error: unknown,
+    options: { notFoundMeansScope: boolean },
+  ): WebhookProvisionResult {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const providerMessage = this.getProviderErrorMessage(error);
+      if (status === 401 || status === 403) {
+        return {
+          webhookStatus: WebhookStatus.INSUFFICIENT_SCOPE,
+          webhookError: providerMessage || 'GitHub token lacks webhook administration permission',
+        };
+      }
+      if (status === 404) {
+        return {
+          webhookStatus: options.notFoundMeansScope
+            ? WebhookStatus.INSUFFICIENT_SCOPE
+            : WebhookStatus.NOT_FOUND,
+          webhookError: providerMessage || 'Webhook or repository was not found',
+        };
+      }
+
+      return {
+        webhookStatus: WebhookStatus.FAILED,
+        webhookError: providerMessage || error.message,
+      };
+    }
+
+    return {
+      webhookStatus: WebhookStatus.FAILED,
+      webhookError: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  private isHookAlreadyExistsError(error: unknown): boolean {
+    if (!axios.isAxiosError(error) || error.response?.status !== 422) {
+      return false;
+    }
+    return this.getProviderErrorMessage(error).toLowerCase().includes('hook already exists');
+  }
+
+  private getProviderErrorMessage(error: unknown): string {
+    if (!axios.isAxiosError(error)) {
+      return error instanceof Error ? error.message : String(error);
+    }
+
+    const data = error.response?.data as {
+      message?: unknown;
+      errors?: Array<{ message?: unknown }>;
+    } | undefined;
+    const message = typeof data?.message === 'string' ? data.message : '';
+    const detail = data?.errors
+      ?.map((item) => (typeof item.message === 'string' ? item.message : ''))
+      .filter(Boolean)
+      .join('; ');
+    return [message, detail].filter(Boolean).join(': ') || error.message;
   }
 
   async getUserRepositories(userId: string) {
@@ -832,17 +1236,59 @@ export class RepositoryService {
     options?: { daysBack?: number },
   ): Promise<SyncSummary> {
     await assertUserCanAccessRepository(userId, id);
-    return this.sync(id, options);
+    const jobId = `manual-${Date.now()}`;
+    const startedAt = Date.now();
+
+    try {
+      const summary = await this.sync(id, {
+        ...options,
+        onStageStart: (stage) => {
+          this.eventGateway.broadcastRepositorySyncProgress({
+            repositoryId: id,
+            jobId,
+            progress: STAGE_PROGRESS[stage],
+            stage,
+          });
+        },
+      });
+
+      const durationMs = Date.now() - startedAt;
+      this.eventGateway.broadcastRepositorySyncProgress({
+        repositoryId: id,
+        jobId,
+        progress: 100,
+        stage: 'done',
+      });
+      this.eventGateway.broadcastRepositorySynced({
+        repositoryId: id,
+        jobId,
+        durationMs,
+        syncedAt: new Date().toISOString(),
+      });
+
+      return summary;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.eventGateway.broadcastRepositorySyncFailed({
+        repositoryId: id,
+        jobId,
+        reason,
+        failedAt: new Date().toISOString(),
+      });
+      throw error;
+    }
   }
 
   private async syncSources(
     repositoryId: string,
     sources: Array<{
       name: string;
+      stage?: Exclude<RepositorySyncStage, 'done'>;
       fetch: () => Promise<unknown[]>;
       normalize: (item: unknown) => NormalizedSyncEvent | null;
     }>,
     failedSources: string[],
+    onStageStart?: (stage: Exclude<RepositorySyncStage, 'done'>) => void,
   ): Promise<{
     createdCount: number;
     skippedCount: number;
@@ -856,6 +1302,9 @@ export class RepositoryService {
 
     for (const source of sources) {
       try {
+        if (source.stage) {
+          onStageStart?.(source.stage);
+        }
         const items = await source.fetch();
         successfulSources += 1;
         for (const item of items) {
