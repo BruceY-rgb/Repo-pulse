@@ -41,6 +41,7 @@ export interface ImStatus {
 export interface SaveFeishuConnectionInput {
   appId: string;
   appSecret: string;
+  botName?: string;
 }
 
 export interface SaveDingTalkConnectionInput {

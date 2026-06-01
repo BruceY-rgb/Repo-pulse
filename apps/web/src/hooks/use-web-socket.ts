@@ -15,6 +15,7 @@ import { useWorkbenchUnreadStore } from '@/stores/workbench-unread.store';
 
 export const REALTIME_INVALIDATION_BUDGET_MS = 50;
 const REALTIME_LAST_SEQ_STORAGE_KEY = 'repo-pulse:realtime:last-seq';
+const REALTIME_DEBUG_STORAGE_KEY = 'repo-pulse:realtime-debug';
 
 const REALTIME_EVENTS = {
   EVENT_CREATED: 'event.created',
@@ -206,6 +207,22 @@ function ensureRealtimeTelemetryApi(): void {
   };
 }
 
+function isRealtimeDebugEnabled(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return window.localStorage.getItem(REALTIME_DEBUG_STORAGE_KEY) === 'true';
+}
+
+function debugRealtime(eventName: string, detail?: Record<string, unknown>): void {
+  if (!isRealtimeDebugEnabled()) {
+    return;
+  }
+
+  console.debug(`[realtime] ${eventName}`, detail ?? {});
+}
+
 function getNumberField(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
@@ -265,14 +282,16 @@ function trackRealtimeDelivery(
   }
 
   if (typeof window !== 'undefined') {
+    const detail = {
+      ...mark,
+      snapshot: getRealtimeTelemetrySnapshot(),
+    };
     window.dispatchEvent(
       new CustomEvent('repo-pulse:realtime-delivery', {
-        detail: {
-          ...mark,
-          snapshot: getRealtimeTelemetrySnapshot(),
-        },
+        detail,
       }),
     );
+    debugRealtime('delivery', detail);
   }
 
   return mark;
@@ -331,16 +350,18 @@ function recordRealtimeRender(
       rememberRecentRealtimeEvent(event);
 
       if (typeof window !== 'undefined') {
+        const detail = {
+          ...event,
+          budgetMs: REALTIME_INVALIDATION_BUDGET_MS,
+          measuredAt: Date.now(),
+          snapshot: getRealtimeTelemetrySnapshot(),
+        };
         window.dispatchEvent(
           new CustomEvent('repo-pulse:realtime-render', {
-            detail: {
-              ...event,
-              budgetMs: REALTIME_INVALIDATION_BUDGET_MS,
-              measuredAt: Date.now(),
-              snapshot: getRealtimeTelemetrySnapshot(),
-            },
+            detail,
           }),
         );
+        debugRealtime('render', detail);
       }
     });
   });
@@ -544,6 +565,7 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
     for (const id of nextRooms) {
       if (!subscribedRoomsRef.current.has(id)) {
         const sinceSeq = getStoredLastSeq(id);
+        debugRealtime('join:repository', { repositoryId: id, sinceSeq });
         socketRef.current.emit(
           'join:repository',
           sinceSeq === undefined ? { repositoryId: id } : { repositoryId: id, sinceSeq },
@@ -553,6 +575,7 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
 
     for (const id of subscribedRoomsRef.current) {
       if (!nextRooms.has(id)) {
+        debugRealtime('leave:repository', { repositoryId: id });
         socketRef.current.emit('leave:repository', { repositoryId: id });
       }
     }
@@ -600,14 +623,20 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
       });
 
       socket.on('connect', () => {
+        debugRealtime('socket:connect', {
+          socketId: socket.id,
+          namespace: socketNamespace,
+        });
         syncRoomSubscriptions();
       });
 
       socket.on('connect_error', (error) => {
+        debugRealtime('socket:connect_error', { message: error.message });
         console.warn('[socket] connect_error', error.message);
       });
 
       socket.on('disconnect', (reason) => {
+        debugRealtime('socket:disconnect', { reason });
         if (reason !== 'io client disconnect') {
           console.warn('[socket] disconnect', reason);
         }
@@ -657,6 +686,7 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
       });
 
       socket.on(REALTIME_EVENTS.EVENT_REPLAY_DONE, (payload: EventReplayDonePayload) => {
+        debugRealtime('event.replay-done', payload);
         storeLastSeq(payload.repositoryId, payload.lastSeq);
       });
 

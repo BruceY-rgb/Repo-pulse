@@ -505,7 +505,7 @@ export function FeishuIntegrationDialog({
         appId: appId.trim(),
         appSecret: appSecret.trim(),
         botName: botName.trim() || undefined,
-      } as any);
+      });
 
       setTestResult(null);
       toast.success(t('settings.integrations.feishu.saved'));
@@ -538,7 +538,7 @@ export function FeishuIntegrationDialog({
         appId: appId.trim(),
         appSecret: appSecret.trim(),
         botName: botName.trim() || undefined,
-      } as any);
+      });
       setTestResult(result);
       const nextBotStatus = {
         provider: 'feishu' as const,

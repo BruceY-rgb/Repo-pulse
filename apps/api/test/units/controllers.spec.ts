@@ -502,7 +502,13 @@ describe('WebhookController', () => {
     const rawBody = Buffer.from('{}');
     const req = { rawBody } as any;
     const payload = { repository: { id: 1 } };
-    const result = await controller.handleGithubWebhook('sha256=abc', 'push', req, payload);
+    const result = await controller.handleGithubWebhook(
+      'sha256=abc',
+      'push',
+      'delivery-1',
+      req,
+      payload,
+    );
     expect(service.handleGithubWebhook).toHaveBeenCalledWith('sha256=abc', 'push', rawBody, payload);
     expect(result).toEqual({ success: true });
   });
