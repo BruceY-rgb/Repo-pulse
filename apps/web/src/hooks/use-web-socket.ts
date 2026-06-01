@@ -3,18 +3,26 @@ import type { QueryClient } from '@tanstack/react-query';
 import type { Socket } from 'socket.io-client';
 import { io } from 'socket.io-client';
 import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import {
+  REALTIME_EVENTS,
+  type RealtimeEventName,
+  type RealtimeEventPayloadMap,
+} from '@repo-pulse/shared';
 import { dashboardQueryKeys } from '@/hooks/queries/use-dashboard-queries';
 import { notificationQueryKeys } from '@/hooks/queries/use-notification-queries';
 import { repositoryQueryKeys } from '@/hooks/queries/use-repository-queries';
 import { workbenchQueryKeys } from '@/hooks/queries/use-workbench-queries';
 import { analysisQueryKeys } from '@/hooks/use-analysis';
 import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
+import { useSyncProgressStore } from '@/stores/sync-progress.store';
 import { getSocketUrl } from '@/lib/desktop';
 import { useWorkbenchUnreadStore } from '@/stores/workbench-unread.store';
+import { getLastSeq, setLastSeq } from '@/lib/event-seq';
 
 export const REALTIME_INVALIDATION_BUDGET_MS = 50;
 
-type RealtimeEventName = 'event:new' | 'events:new' | 'analysis:completed';
+type LegacyRealtimeEventName = 'event:new' | 'events:new' | 'analysis:completed';
 type RealtimeQueryClient = Pick<QueryClient, 'invalidateQueries'>;
 
 interface RepositoryRealtimePayload {
@@ -64,7 +72,7 @@ function getRealtimeMessageAt(payload?: RepositoryRealtimePayload) {
   return getCandidateMessageAt(payload.data) ?? payload.timestamp ?? null;
 }
 
-function emitRealtimeMetric(eventName: RealtimeEventName, startedAt: number): number {
+function emitRealtimeMetric(eventName: LegacyRealtimeEventName, startedAt: number): number {
   const scheduleMs = performance.now() - startedAt;
 
   if (typeof window !== 'undefined') {
@@ -129,6 +137,10 @@ export function invalidateAnalysisRealtimeQueries(
   return emitRealtimeMetric('analysis:completed', startedAt);
 }
 
+type RealtimeEventHandlers = {
+  [K in RealtimeEventName]: (payload: RealtimeEventPayloadMap[K]) => void;
+};
+
 export function useRepositoryRealtimeSubscription(repositoryIds?: string | string[]) {
   const queryClient = useQueryClient();
   const { data: currentUser, isLoading: isAuthLoading } = useCurrentUserQuery();
@@ -152,10 +164,15 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
     }
 
     const nextRooms = new Set(getTargetRepositoryIds());
+    const userId = currentUser?.id;
 
     for (const id of nextRooms) {
       if (!subscribedRoomsRef.current.has(id)) {
-        socketRef.current.emit('join:repository', { repositoryId: id });
+        const sinceSeq = userId ? getLastSeq(userId, id) : undefined;
+        socketRef.current.emit('join:repository', {
+          repositoryId: id,
+          ...(typeof sinceSeq === 'number' ? { sinceSeq } : {}),
+        });
       }
     }
 
@@ -166,7 +183,7 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
     }
 
     subscribedRoomsRef.current = nextRooms;
-  }, [getTargetRepositoryIds]);
+  }, [currentUser?.id, getTargetRepositoryIds]);
 
   const connect = useCallback(() => {
     if (!currentUser || isAuthLoading || socketRef.current || connectTimeoutRef.current !== null) {
@@ -193,21 +210,69 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
       });
 
       socket.on('disconnect', (reason) => {
+        // 清掉本地订阅缓存，确保重连时会重新 emit join:repository
+        // （否则 syncRoomSubscriptions 看到"已订阅"会跳过，后端永远收不到 join）
+        subscribedRoomsRef.current = new Set();
         if (reason !== 'io client disconnect') {
           console.warn('[socket] disconnect', reason);
         }
       });
 
-      socket.on('event:new', (payload: RepositoryRealtimePayload) => {
-        invalidateRepositoryRealtimeQueries(queryClient, 'event:new', payload);
-      });
+      const handlers: RealtimeEventHandlers = {
+        [REALTIME_EVENTS.EVENT_CREATED]: ({ repositoryId, eventType, seq, createdAt }) => {
+          if (currentUser?.id && typeof seq === 'number' && seq > 0) {
+            setLastSeq(currentUser.id, repositoryId, seq);
+          }
+          invalidateRepositoryRealtimeQueries(queryClient, 'event:new', {
+            repositoryId,
+            timestamp: createdAt,
+          });
+          queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.detail(repositoryId) });
+          if (eventType.startsWith('BRANCH_')) {
+            queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.branches(repositoryId) });
+          }
+        },
+        [REALTIME_EVENTS.EVENT_REPLAY_DONE]: ({ repositoryId, replayed, hasMore, lastSeq }) => {
+          if (currentUser?.id && lastSeq > 0) {
+            setLastSeq(currentUser.id, repositoryId, lastSeq);
+          }
+          if (replayed > 0) {
+            console.log(
+              `[ws] replay done repo=${repositoryId} replayed=${replayed} hasMore=${hasMore} lastSeq=${lastSeq}`,
+            );
+          }
+        },
+        [REALTIME_EVENTS.ANALYSIS_COMPLETED]: ({ eventId }) => {
+          invalidateAnalysisRealtimeQueries(queryClient);
+          queryClient.invalidateQueries({ queryKey: analysisQueryKeys.detail(eventId) });
+          queryClient.invalidateQueries({ queryKey: analysisQueryKeys.list() });
+        },
+        [REALTIME_EVENTS.APPROVAL_UPDATED]: ({ repositoryId }) => {
+          queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
+          queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
+          queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.detail(repositoryId) });
+          queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
+          queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
+          window.dispatchEvent(new Event('approval-updated'));
+        },
+        [REALTIME_EVENTS.REPOSITORY_SYNC_PROGRESS]: ({ repositoryId, jobId, progress, stage }) => {
+          useSyncProgressStore.getState().update(repositoryId, { jobId, progress, stage });
+        },
+        [REALTIME_EVENTS.REPOSITORY_SYNCED]: ({ repositoryId, durationMs }) => {
+          useSyncProgressStore.getState().clear(repositoryId);
+          queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
+          queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.detail(repositoryId) });
+          queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
+          toast.success(`同步完成（${(durationMs / 1000).toFixed(1)}s）`);
+        },
+        [REALTIME_EVENTS.REPOSITORY_SYNC_FAILED]: ({ repositoryId, reason }) => {
+          useSyncProgressStore.getState().clear(repositoryId);
+          toast.error(`同步失败：${reason}`);
+        },
+      };
 
-      socket.on('events:new', (payload: RepositoryRealtimePayload) => {
-        invalidateRepositoryRealtimeQueries(queryClient, 'events:new', payload);
-      });
-
-      socket.on('analysis:completed', () => {
-        invalidateAnalysisRealtimeQueries(queryClient);
+      (Object.keys(handlers) as RealtimeEventName[]).forEach((eventName) => {
+        socket.on(eventName, handlers[eventName] as (payload: unknown) => void);
       });
 
       socketRef.current = socket;

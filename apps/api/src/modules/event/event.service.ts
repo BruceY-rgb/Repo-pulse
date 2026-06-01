@@ -417,17 +417,12 @@ export class EventService {
 
   private broadcastEvent(repositoryId: string, event: Event) {
     try {
-      this.eventGateway.broadcastNewEvent(repositoryId, {
-        id: event.id,
-        type: event.type,
-        action: event.action,
-        title: event.title,
-        body: event.body,
-        author: event.author,
-        authorAvatar: event.authorAvatar,
-        externalUrl: event.externalUrl,
-        occurredAt: event.occurredAt,
-        createdAt: event.createdAt,
+      this.eventGateway.broadcastEventCreated({
+        eventId: event.id,
+        repositoryId,
+        eventType: event.type,
+        seq: Number(event.seq),
+        createdAt: event.createdAt.toISOString(),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown_error';

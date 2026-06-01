@@ -61,7 +61,21 @@ export class AIProcessor extends WorkerHost {
       }
 
       // 所有流程完成后通知前端刷新
-      this.eventGateway.broadcastAnalysisCompleted(eventId);
+      const event = await prisma.event.findUnique({
+        where: { id: eventId },
+        select: { repositoryId: true },
+      });
+      if (event) {
+        this.eventGateway.broadcastAnalysisCompleted({
+          eventId,
+          repositoryId: event.repositoryId,
+          completedAt: new Date().toISOString(),
+        });
+      } else {
+        this.logger.warn(
+          `broadcast_skipped_event_missing eventId=${eventId}`,
+        );
+      }
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       this.logger.error(`ai_analysis_failed eventId=${eventId} reason=${err.message}`, err.stack);

@@ -109,6 +109,14 @@ export enum ReportStatus {
   FAILED = 'FAILED',
 }
 
+export enum WebhookStatus {
+  ACTIVE = 'ACTIVE',
+  INSUFFICIENT_SCOPE = 'INSUFFICIENT_SCOPE',
+  NOT_FOUND = 'NOT_FOUND',
+  FAILED = 'FAILED',
+  NOT_CONFIGURED = 'NOT_CONFIGURED',
+}
+
 // ===== API Response Types =====
 
 export interface ApiResponse<T> {

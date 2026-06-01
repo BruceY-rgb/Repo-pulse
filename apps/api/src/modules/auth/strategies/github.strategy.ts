@@ -22,7 +22,7 @@ export class GithubStrategy extends PassportStrategy(Strategy, 'github') {
       clientID,
       clientSecret,
       callbackURL: configService.get<string>('GITHUB_CALLBACK_URL') || '',
-      scope: ['user:email', 'repo'],
+      scope: ['user:email', 'repo', 'admin:repo_hook'],
     });
 
     this.clientID = clientID;

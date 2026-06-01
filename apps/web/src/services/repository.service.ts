@@ -1,4 +1,5 @@
 import { apiClient } from './api-client';
+import type { WebhookStatus } from '@repo-pulse/shared';
 import type {
   ApiResponse,
   Repository,
@@ -15,6 +16,33 @@ const repositoryListReadCache = new Map<string, { expiresAt: number; promise: Pr
 
 function clearRepositoryReadCache() {
   repositoryListReadCache.clear();
+}
+
+export interface WebhookLastResponse {
+  code: number | null;
+  status: string | null;
+  message: string | null;
+}
+
+export interface WebhookStatusResponse {
+  repositoryId: string;
+  url: string;
+  secret: string | null;
+  webhookId: string | null;
+  status: WebhookStatus;
+  lastError: string | null;
+  active: boolean;
+  lastResponse: WebhookLastResponse | null;
+}
+
+export interface WebhookProvisionResponse {
+  webhookStatus: WebhookStatus;
+  webhookError?: string;
+  webhookId?: string | null;
+}
+
+export interface WebhookTestResponse {
+  success: boolean;
 }
 
 export function normalizeBranchOption(rawBranch: unknown): RepositoryBranchScopeOption | null {
@@ -102,13 +130,10 @@ export const repositoryService = {
     clearRepositoryReadCache();
   },
 
-  async sync(id: string): Promise<Repository> {
-    const { data } = await apiClient.post<ApiResponse<Repository>>(
-      `/repositories/${id}/sync`,
-      undefined,
-      { timeout: 0 },
-    );
-    clearRepositoryReadCache();
+  async sync(id: string): Promise<{ status: 'queued'; jobId: string }> {
+    const { data } = await apiClient.post<
+      ApiResponse<{ status: 'queued'; jobId: string }>
+    >(`/repositories/${id}/sync`);
     return data.data;
   },
 
@@ -167,6 +192,37 @@ export const repositoryService = {
    */
   async getContributors(id: string): Promise<Array<{ username: string; avatarUrl: string | null }>> {
     const { data } = await apiClient.get<ApiResponse<Array<{ username: string; avatarUrl: string | null }>>>(`/repositories/${id}/contributors`);
+    return data.data;
+  },
+
+  /**
+   * 查询仓库 webhook 状态（实时调 GitHub 验证）
+   */
+  async getWebhookStatus(id: string): Promise<WebhookStatusResponse> {
+    const { data } = await apiClient.get<ApiResponse<WebhookStatusResponse>>(
+      `/repositories/${id}/webhook`,
+    );
+    return data.data;
+  },
+
+  /**
+   * 重新创建仓库的 webhook
+   */
+  async retryWebhook(id: string): Promise<WebhookProvisionResponse> {
+    const { data } = await apiClient.post<ApiResponse<WebhookProvisionResponse>>(
+      `/repositories/${id}/webhook/retry`,
+    );
+    clearRepositoryReadCache();
+    return data.data;
+  },
+
+  /**
+   * 让 GitHub 重发 ping 事件验证 webhook 链路
+   */
+  async testWebhook(id: string): Promise<WebhookTestResponse> {
+    const { data } = await apiClient.post<ApiResponse<WebhookTestResponse>>(
+      `/repositories/${id}/webhook/test`,
+    );
     return data.data;
   },
 };

@@ -8,6 +8,7 @@ import { json } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
 import { jsonBigIntReplacer } from './common/utils/json-serialization';
+import { RedisIoAdapter } from './adapters/redis-io.adapter';
 
 async function bootstrap() {
   // 保留 Raw Body 供 Webhook 验签使用
@@ -70,6 +71,23 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  // Socket.io Redis adapter — 让多个 API 进程共享 WebSocket 广播
+  // 单实例开发时可设 REDIS_PUBSUB_DISABLE=true 跳过
+  if (configService.get<string>('REDIS_PUBSUB_DISABLE') !== 'true') {
+    const redisUrl = configService.get<string>('REDIS_URL', 'redis://localhost:6379');
+    const pubsubDb = Number(configService.get<string>('REDIS_PUBSUB_DB', '1'));
+    const redisAdapter = new RedisIoAdapter(app);
+    try {
+      await redisAdapter.connectToRedis(redisUrl, pubsubDb);
+      app.useWebSocketAdapter(redisAdapter);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown_error';
+      logger.warn(
+        `Redis adapter unavailable, falling back to single-instance broadcast: ${message}`,
+      );
+    }
+  }
 
   // Swagger API docs
   const swaggerConfig = new DocumentBuilder()

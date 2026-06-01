@@ -5,7 +5,7 @@ import axios from 'axios';
 import * as bcrypt from 'bcrypt';
 import { UserService } from '../user/user.service';
 import { SyncService } from '../sync/sync.service';
-import { User } from '@repo-pulse/database';
+import { prisma, User } from '@repo-pulse/database';
 
 export interface JwtPayload {
   sub: string;
@@ -217,6 +217,15 @@ export class AuthService {
         name: displayName,
         avatar: profile.avatar_url,
       });
+    }
+
+    // Desktop env login = 本机开发者 = 这个本地实例的 owner，强制升 ADMIN
+    if (user.role !== 'ADMIN') {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { role: 'ADMIN' },
+      });
+      this.logger.log(`desktop_github_env_login_role_promoted userId=${user.id} role=ADMIN`);
     }
 
     this.logger.log(`desktop_github_env_login_success userId=${user.id} login=${profile.login}`);

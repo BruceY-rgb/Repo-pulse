@@ -5,6 +5,7 @@ import type { CreateRepositoryDto } from '@/types/api';
 export const repositoryQueryKeys = {
   all: ['repositories'] as const,
   list: () => [...repositoryQueryKeys.all, 'list'] as const,
+  detail: (id: string) => [...repositoryQueryKeys.all, 'detail', id] as const,
   branches: (id: string) => [...repositoryQueryKeys.all, 'branches', id] as const,
   myRepos: () => [...repositoryQueryKeys.all, 'my-repos'] as const,
   starred: () => [...repositoryQueryKeys.all, 'starred'] as const,

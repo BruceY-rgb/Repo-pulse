@@ -18,6 +18,7 @@ import {
   Bell,
   Bot,
   CheckCheck,
+  CheckCircle2,
   CheckSquare,
   ChevronDown,
   ChevronLeft,
@@ -26,6 +27,7 @@ import {
   CircleDot,
   Command,
   CornerDownLeft,
+  Copy,
   ExternalLink,
   Eye,
   EyeOff,
@@ -56,13 +58,16 @@ import {
   Sparkles,
   Star,
   Terminal,
+  TestTube2,
   Trash2,
   Users,
   VolumeX,
   X,
+  Webhook,
   XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useSyncProgressStore } from '@/stores/sync-progress.store';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -116,6 +121,12 @@ import {
   useUnreadNotificationCountQuery,
 } from '@/hooks/queries/use-notification-queries';
 import {
+  useRetryWebhookMutation,
+  useTestWebhookMutation,
+  useWebhookStatusQuery,
+} from '@/hooks/queries/use-webhook-queries';
+import { WebhookStatus } from '@repo-pulse/shared';
+import {
   useCurrentUserQuery,
   useLogoutMutation,
 } from '@/hooks/queries/use-auth-queries';
@@ -125,13 +136,14 @@ import { approvalService, type Approval } from '@/services/approval.service';
 import { repositoryService } from '@/services/repository.service';
 import { workbenchService } from '@/services/workbench.service';
 import { settingsService, PROVIDER_LABELS, type AIProvider } from '@/services/settings.service';
-import { getApiBaseUrl } from '@/lib/desktop';
+import { getApiBaseUrl, isDesktopRuntime } from '@/lib/desktop';
 import { getProviderLogo } from '@/lib/provider-logo';
 import { GitTreePanel } from '@/components/shared/GitTreePanel';
 import {
   useWorkbenchUnreadStore,
   type WorkbenchUnreadBoundary,
 } from '@/stores/workbench-unread.store';
+import { authService } from '@/services/auth.service';
 import type { Notification } from '@/services/notification.service';
 import { Dashboard } from '@/pages/Dashboard';
 import { Repositories } from '@/pages/Repositories';
@@ -905,6 +917,7 @@ function getRepositoryContextMenuItems({
   isMonitored,
   isSyncing,
   isPinned,
+  syncProgress,
   onRemoveFromMonitoring,
   onToggleRepositoryActive,
   onSyncRepository,
@@ -919,6 +932,7 @@ function getRepositoryContextMenuItems({
   isMonitored: boolean;
   isSyncing: boolean;
   isPinned?: boolean;
+  syncProgress?: number;
   onRemoveFromMonitoring: (repository: Repository) => void;
   onToggleRepositoryActive: (repository: Repository) => void;
   onSyncRepository: (repository: Repository) => void;
@@ -945,7 +959,9 @@ function getRepositoryContextMenuItems({
     },
     {
       key: 'sync',
-      label: isSyncing ? '同步中…' : '同步',
+      label: isSyncing
+        ? `同步中 ${Math.round(syncProgress ?? 0)}%`
+        : '同步',
       icon: isSyncing ? Loader2 : RotateCcw,
       disabled: isSyncing,
       onSelect: () => onSyncRepository(repository),
@@ -1363,6 +1379,7 @@ function RepositorySidebar({
   const optimisticReadAtByRepository = useWorkbenchUnreadStore(
     (state) => state.optimisticReadAtByRepository,
   );
+  const syncProgressByRepoId = useSyncProgressStore((s) => s.byRepoId);
   const sidebarWidthRef = useRef(sidebarWidth);
   const normalizedRepositorySearch = repositorySearch.trim().toLowerCase();
 
@@ -1705,6 +1722,7 @@ function RepositorySidebar({
               isMonitored: monitoredRepos.some((r) => r.repository.id === contextMenu.repository.id),
               isSyncing: syncingRepoIds.has(contextMenu.repository.id),
               isPinned: pinnedRepoIds.has(contextMenu.repository.id),
+              syncProgress: syncProgressByRepoId[contextMenu.repository.id]?.progress,
               onRemoveFromMonitoring,
               onToggleRepositoryActive,
               onSyncRepository,
@@ -1845,6 +1863,7 @@ function RepositorySidebar({
             isMonitored: monitoredRepos.some((r) => r.repository.id === contextMenu.repository.id),
             isSyncing: syncingRepoIds.has(contextMenu.repository.id),
             isPinned: pinnedRepoIds.has(contextMenu.repository.id),
+            syncProgress: syncProgressByRepoId[contextMenu.repository.id]?.progress,
             onRemoveFromMonitoring,
             onToggleRepositoryActive,
             onSyncRepository,
@@ -2975,6 +2994,259 @@ function BranchMonitorSheet({
   );
 }
 
+function getWebhookStatusMeta(status: WebhookStatus) {
+  switch (status) {
+    case WebhookStatus.ACTIVE:
+      return {
+        label: '已配置（GitHub 上有效）',
+        Icon: CheckCircle2,
+        badgeClass: 'border-success/40 bg-success/10 text-success-foreground',
+      };
+    case WebhookStatus.INSUFFICIENT_SCOPE:
+      return {
+        label: '权限不足，请重新授权',
+        Icon: ShieldAlert,
+        badgeClass: 'border-warning/40 bg-warning/10 text-warning-foreground',
+      };
+    case WebhookStatus.NOT_FOUND:
+      return {
+        label: 'GitHub 上不存在',
+        Icon: AlertTriangle,
+        badgeClass: 'border-warning/40 bg-warning/10 text-warning-foreground',
+      };
+    case WebhookStatus.FAILED:
+      return {
+        label: '配置失败',
+        Icon: AlertTriangle,
+        badgeClass: 'border-destructive/40 bg-destructive/10 text-destructive',
+      };
+    case WebhookStatus.NOT_CONFIGURED:
+    default:
+      return {
+        label: '未配置',
+        Icon: AlertTriangle,
+        badgeClass: 'border-border bg-secondary text-muted-foreground',
+      };
+  }
+}
+
+function RepositoryWebhookSection({ repository }: { repository: Repository }) {
+  const [secretVisible, setSecretVisible] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const autoRetryTriggeredRef = useRef(false);
+  const statusQuery = useWebhookStatusQuery(repository.id);
+  const retryMutation = useRetryWebhookMutation();
+  const testMutation = useTestWebhookMutation();
+  const data = statusQuery.data;
+
+  const handleCopy = (text: string, label: string) => {
+    void navigator.clipboard.writeText(text).then(
+      () => toast.success(`${label}已复制`),
+      () => toast.error(`复制${label}失败`),
+    );
+  };
+
+  const handleRetry = async () => {
+    try {
+      const result = await retryMutation.mutateAsync(repository.id);
+      if (result.webhookStatus === WebhookStatus.ACTIVE) {
+        toast.success('Webhook 重建成功');
+      } else {
+        toast.warning(
+          `Webhook 仍未配置成功：${result.webhookError ?? result.webhookStatus}`,
+        );
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '重建失败');
+    }
+  };
+
+  // OAuth 重新授权回来后自动 retry（URL 带 ?webhook_recheck=1）
+  useEffect(() => {
+    if (autoRetryTriggeredRef.current) {
+      return;
+    }
+    if (searchParams.get('webhook_recheck') !== '1') {
+      return;
+    }
+    autoRetryTriggeredRef.current = true;
+
+    // 先清除参数避免刷新页面又触发
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('webhook_recheck');
+    setSearchParams(nextParams, { replace: true });
+
+    toast.info('授权完成，正在自动重新创建 webhook…');
+    void handleRetry();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  const handleTest = async () => {
+    try {
+      await testMutation.mutateAsync(repository.id);
+      toast.success('已要求 GitHub 重发 ping，请稍候查看 Recent Deliveries');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '测试失败');
+    }
+  };
+
+  if (statusQuery.isLoading) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          正在加载 webhook 状态…
+        </div>
+      </div>
+    );
+  }
+
+  if (statusQuery.isError || !data) {
+    return (
+      <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4">
+        <div className="flex items-center gap-2 text-sm text-destructive">
+          <AlertTriangle className="h-4 w-4" />
+          无法加载 webhook 状态
+        </div>
+      </div>
+    );
+  }
+
+  const meta = getWebhookStatusMeta(data.status);
+  const StatusIcon = meta.Icon;
+  const secretDisplay = data.secret
+    ? secretVisible
+      ? data.secret
+      : '•'.repeat(Math.min(data.secret.length, 32))
+    : '未生成';
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Webhook className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-semibold text-foreground">Webhook 配置</span>
+        </div>
+        <Badge variant="outline" className={cn('gap-1 rounded-full text-[11px]', meta.badgeClass)}>
+          <StatusIcon className="h-3 w-3" />
+          {meta.label}
+        </Badge>
+      </div>
+
+      <div className="mt-3 space-y-2 text-xs">
+        <div className="flex items-center gap-2">
+          <span className="w-14 shrink-0 text-muted-foreground">URL</span>
+          <code className="min-w-0 flex-1 truncate rounded bg-secondary px-2 py-1 text-foreground">
+            {data.url}
+          </code>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => handleCopy(data.url, 'URL')}
+            aria-label="复制 URL"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="w-14 shrink-0 text-muted-foreground">Secret</span>
+          <code className="min-w-0 flex-1 truncate rounded bg-secondary px-2 py-1 font-mono text-foreground">
+            {secretDisplay}
+          </code>
+          {data.secret ? (
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => setSecretVisible((value) => !value)}
+                aria-label={secretVisible ? '隐藏 secret' : '显示 secret'}
+              >
+                {secretVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => handleCopy(data.secret as string, 'Secret')}
+                aria-label="复制 secret"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          ) : null}
+        </div>
+
+        {data.lastError ? (
+          <div className="flex items-start gap-2">
+            <span className="w-14 shrink-0 text-muted-foreground">错误</span>
+            <span className="min-w-0 flex-1 text-destructive">{data.lastError}</span>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        {data.status === WebhookStatus.INSUFFICIENT_SCOPE ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="default"
+            className="gap-1.5"
+            onClick={() => {
+              const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+              const authUrl = authService.getGithubAuthUrl(returnPath);
+              if (isDesktopRuntime()) {
+                void window.repoPulseDesktop?.openExternal(authUrl);
+                toast.info('已在浏览器打开 GitHub 授权页，授权完成后请回应用点 "重新创建"');
+              } else {
+                window.location.href = authUrl;
+              }
+            }}
+          >
+            <ShieldAlert className="h-3.5 w-3.5" />
+            重新授权 GitHub 权限
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          onClick={handleRetry}
+          disabled={retryMutation.isPending}
+        >
+          {retryMutation.isPending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RotateCcw className="h-3.5 w-3.5" />
+          )}
+          重新创建
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          onClick={handleTest}
+          disabled={testMutation.isPending || !data.webhookId}
+        >
+          {testMutation.isPending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <TestTube2 className="h-3.5 w-3.5" />
+          )}
+          发送测试
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function RepositoryConversation({
   repository,
   messages,
@@ -3212,6 +3484,7 @@ function RepositoryConversation({
       </div>
       <ScrollArea className="min-h-0 flex-1 min-w-0">
         <div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 py-6">
+          <RepositoryWebhookSection repository={repository} />
           {filteredMessages.length > 0 ? (
             filteredMessages.map((message) => {
               const shouldRenderUnreadBoundary =
@@ -6592,7 +6865,6 @@ export function DesktopWorkbench() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isBranchMonitorOpen, setIsBranchMonitorOpen] = useState(false);
   const [isContributorsOpen, setIsContributorsOpen] = useState(false);
-  const [syncingRepoIds, setSyncingRepoIds] = useState<Set<string>>(() => new Set());
   const [newlyMonitoredRepoIds, setNewlyMonitoredRepoIds] = useState<Set<string>>(() => new Set());
   const [watchFeedType, setWatchFeedType] = useState('');
   const [ignoredFeedIds, setIgnoredFeedIds] = useState<Set<string>>(() => new Set());
@@ -6694,6 +6966,11 @@ export function DesktopWorkbench() {
     toast.success(`已切换到${type === 'issue' ? 'Issue' : type === 'pull-request' ? 'PR' : 'Push'}视图`);
   };
 
+  const syncProgressByRepoId = useSyncProgressStore((s) => s.byRepoId);
+  const syncingRepoIds = useMemo(
+    () => new Set(Object.keys(syncProgressByRepoId)),
+    [syncProgressByRepoId],
+  );
   const repositoriesQuery = useRepositoryListQuery();
   const notificationsQuery = useNotificationsQuery();
   const unreadNotificationCountQuery = useUnreadNotificationCountQuery();
@@ -7316,31 +7593,13 @@ export function DesktopWorkbench() {
     if (syncingRepoIds.has(repository.id)) {
       return;
     }
-    setSyncingRepoIds((current) => {
-      const next = new Set(current);
-      next.add(repository.id);
-      return next;
-    });
     try {
-      await repositoryService.sync(repository.id);
-      await Promise.all([
-        repositoriesQuery.refetch(),
-        eventsQuery.refetch(),
-        approvalsQuery.refetch(),
-      ]);
-      toast.success(`${repository.fullName} 已同步`);
+      const { jobId } = await repositoryService.sync(repository.id);
+      useSyncProgressStore.getState().start(repository.id, jobId);
+      toast.success(`已开始同步 ${repository.fullName}`);
     } catch (error) {
       console.error(error);
-      toast.error('同步仓库失败');
-    } finally {
-      setSyncingRepoIds((current) => {
-        if (!current.has(repository.id)) {
-          return current;
-        }
-        const next = new Set(current);
-        next.delete(repository.id);
-        return next;
-      });
+      toast.error('同步入队失败');
     }
   };
 

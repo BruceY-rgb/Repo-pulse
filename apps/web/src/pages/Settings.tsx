@@ -38,6 +38,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Spinner } from '@/components/ui/spinner';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Webhook, RotateCcw, Copy } from 'lucide-react';
+import type { ApiUrlConfig, BatchRetryWebhooksResult } from '@/services/settings.service';
+import {
   NotificationExceptionDraftCard,
 } from '@/components/settings/notifications/NotificationExceptionDraftCard';
 import {
@@ -131,6 +143,15 @@ export function Settings() {
   const [aiSaving, setAiSaving] = useState(false);
   const [aiSaved, setAiSaved] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
+
+  // Webhook API_URL 配置状态
+  const [apiUrlConfig, setApiUrlConfig] = useState<ApiUrlConfig>({ value: '', source: 'default' });
+  const [apiUrlInput, setApiUrlInput] = useState('');
+  const [apiUrlLoading, setApiUrlLoading] = useState(false);
+  const [apiUrlSaving, setApiUrlSaving] = useState(false);
+  const [retryDialogOpen, setRetryDialogOpen] = useState(false);
+  const [retryRunning, setRetryRunning] = useState(false);
+  const [retryResult, setRetryResult] = useState<BatchRetryWebhooksResult | null>(null);
 
   // 连接测试状态
   const [testingConnection, setTestingConnection] = useState(false);
@@ -233,6 +254,22 @@ export function Settings() {
     loadAIConfig();
   }, []);
 
+  useEffect(() => {
+    const loadApiUrl = async () => {
+      setApiUrlLoading(true);
+      try {
+        const cfg = await settingsService.getApiUrlConfig();
+        setApiUrlConfig(cfg);
+        setApiUrlInput(cfg.value);
+      } catch (error) {
+        console.error('Failed to load API_URL config:', error);
+      } finally {
+        setApiUrlLoading(false);
+      }
+    };
+    loadApiUrl();
+  }, []);
+
   // 加载通知配置
   useEffect(() => {
     const loadNotifPrefs = async () => {
@@ -280,6 +317,64 @@ export function Settings() {
     } finally {
       setAiSaving(false);
     }
+  };
+
+  const handleSaveApiUrl = async () => {
+    const trimmed = apiUrlInput.trim().replace(/\/+$/, '');
+    if (!trimmed || !/^https?:\/\//i.test(trimmed)) {
+      toast.error('请填写以 http(s):// 开头的有效 URL');
+      return;
+    }
+    if (trimmed === apiUrlConfig.value) {
+      toast.info('URL 未变化，无需保存');
+      return;
+    }
+    setApiUrlSaving(true);
+    try {
+      const updated = await settingsService.updateApiUrlConfig(trimmed);
+      setApiUrlConfig(updated);
+      setApiUrlInput(updated.value);
+      toast.success('Webhook URL 已保存');
+      setRetryResult(null);
+      setRetryDialogOpen(true);
+    } catch (error) {
+      const message =
+        typeof error === 'object' && error !== null && 'message' in error
+          ? String((error as { message?: string }).message)
+          : '保存失败';
+      toast.error(message);
+    } finally {
+      setApiUrlSaving(false);
+    }
+  };
+
+  const handleBatchRetryWebhooks = async () => {
+    setRetryRunning(true);
+    try {
+      const result = await settingsService.batchRetryWebhooks();
+      setRetryResult(result);
+      if (result.succeeded === result.total) {
+        toast.success(`已重建 ${result.succeeded}/${result.total} 个 webhook`);
+      } else {
+        toast.warning(`${result.succeeded}/${result.total} 个成功，${result.failed} 个失败`);
+      }
+    } catch (error) {
+      const message =
+        typeof error === 'object' && error !== null && 'message' in error
+          ? String((error as { message?: string }).message)
+          : '批量重建失败';
+      toast.error(message);
+    } finally {
+      setRetryRunning(false);
+    }
+  };
+
+  const handleCopyApiUrl = () => {
+    if (!apiUrlConfig.value) return;
+    void navigator.clipboard.writeText(apiUrlConfig.value).then(
+      () => toast.success('URL 已复制'),
+      () => toast.error('复制失败'),
+    );
   };
 
   const handleTestConnection = async () => {
@@ -1250,6 +1345,82 @@ export function Settings() {
 
           <Card className="card-github">
             <CardHeader>
+              <div className="flex items-center gap-2">
+                <Webhook className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-base font-semibold text-white">Webhook URL</CardTitle>
+              </div>
+              <CardDescription className="text-xs text-muted-foreground">
+                cloudflared 公网 URL 每次重启会变。在这里修改后立即生效，并可一键批量同步到所有仓库的 GitHub webhook。
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="api-url-input">API_URL</Label>
+                <Input
+                  id="api-url-input"
+                  value={apiUrlInput}
+                  onChange={(event) => setApiUrlInput(event.target.value)}
+                  placeholder="https://xxx.trycloudflare.com"
+                  disabled={apiUrlLoading || apiUrlSaving}
+                />
+                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <span>当前来源：</span>
+                    <Badge variant="outline" className="text-[10px]">
+                      {apiUrlConfig.source === 'db'
+                        ? '数据库（已自定义）'
+                        : apiUrlConfig.source === 'env'
+                          ? '环境变量（.env）'
+                          : '默认值'}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span>Webhook 实际值：</span>
+                    <code className="rounded bg-secondary px-2 py-0.5 font-mono text-foreground">
+                      {apiUrlConfig.value || '—'}/webhooks/github
+                    </code>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={handleCopyApiUrl}
+                      aria-label="复制 URL"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  className="btn-x-primary gap-2"
+                  onClick={handleSaveApiUrl}
+                  disabled={apiUrlSaving || apiUrlLoading}
+                >
+                  {apiUrlSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  保存
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => {
+                    setRetryResult(null);
+                    setRetryDialogOpen(true);
+                  }}
+                  disabled={apiUrlSaving}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  批量重建 webhook
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="card-github">
+            <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base font-semibold text-white">{t('settings.integrations.apiKeys')}</CardTitle>
                 <Button size="sm" className="btn-x-primary gap-2">
@@ -1604,6 +1775,73 @@ export function Settings() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <AlertDialog
+        open={retryDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && retryRunning) return;
+          setRetryDialogOpen(open);
+          if (!open) {
+            setRetryResult(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {retryResult ? '批量重建结果' : '批量重建 webhook'}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                {retryResult ? (
+                  <>
+                    <p>
+                      成功 <span className="font-semibold text-foreground">{retryResult.succeeded}</span> /{' '}
+                      <span className="font-semibold text-foreground">{retryResult.total}</span>，失败{' '}
+                      <span className="font-semibold text-destructive">{retryResult.failed}</span>
+                    </p>
+                    {retryResult.failures.length > 0 ? (
+                      <div className="max-h-48 overflow-y-auto rounded-lg border border-border bg-background p-2 text-xs">
+                        {retryResult.failures.map((failure) => (
+                          <div key={failure.repositoryId} className="border-b border-border py-1 last:border-b-0">
+                            <p className="font-medium text-foreground">{failure.fullName}</p>
+                            <p className="text-muted-foreground">{failure.status}: {failure.error ?? '未知错误'}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <p>
+                    将遍历你作为 ADMIN 的所有 active 仓库，删除 GitHub 上的旧 webhook 并用当前 API_URL 重新注册。可能耗时数秒到数十秒。
+                  </p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={retryRunning}>{retryResult ? '关闭' : '取消'}</AlertDialogCancel>
+            {!retryResult ? (
+              <AlertDialogAction
+                onClick={(event) => {
+                  event.preventDefault();
+                  void handleBatchRetryWebhooks();
+                }}
+                disabled={retryRunning}
+              >
+                {retryRunning ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    重建中…
+                  </>
+                ) : (
+                  '开始重建'
+                )}
+              </AlertDialogAction>
+            ) : null}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

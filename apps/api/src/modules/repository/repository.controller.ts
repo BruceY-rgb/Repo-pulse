@@ -5,20 +5,24 @@ import {
   Patch,
   Delete,
   Body,
+  HttpCode,
   Param,
   Query,
   UseGuards,
   Req,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { QUEUE_NAMES } from '@repo-pulse/shared';
 import { RepositoryService } from './repository.service';
 import { UserService } from '../user/user.service';
 import {
   CreateRepositoryDto,
   UpdateRepositoryDto,
   RepositoryQueryDto,
-  RepositorySyncSummaryDto,
 } from './dto/repository.dto';
+import type { RepositorySyncJob } from './repository-sync.processor';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
@@ -31,6 +35,8 @@ export class RepositoryController {
   constructor(
     private readonly repositoryService: RepositoryService,
     private readonly userService: UserService,
+    @InjectQueue(QUEUE_NAMES.REPOSITORY_SYNC)
+    private readonly syncQueue: Queue<RepositorySyncJob>,
   ) {}
 
   @Post()
@@ -132,17 +138,49 @@ export class RepositoryController {
   }
 
   @Post(':id/sync')
-  @ApiOperation({ summary: 'Sync repository history' })
-  async sync(@Req() req: Request, @Param('id') id: string): Promise<RepositorySyncSummaryDto> {
+  @HttpCode(202)
+  @ApiOperation({ summary: 'Enqueue repository history sync (async)' })
+  async sync(@Req() req: Request, @Param('id') id: string) {
     const userId = (req.user as { sub: string }).sub;
-    return this.repositoryService.syncForUser(userId, id);
+    const job = await this.syncQueue.add('sync', {
+      repositoryId: id,
+      userId,
+    });
+    return { status: 'queued' as const, jobId: job.id };
   }
 
   @Post(':id/webhook')
-  @ApiOperation({ summary: '重新注册 Webhook' })
-  async registerWebhook(@Req() req: Request, @Param('id') id: string): Promise<any> {
+  @ApiOperation({ summary: 'Recreate webhook on GitHub for this repository' })
+  async registerWebhook(@Req() req: Request, @Param('id') id: string) {
     const userId = (req.user as { sub: string }).sub;
-    const repository = await this.repositoryService.registerWebhook(userId, id);
-    return repository;
+    return this.repositoryService.retryWebhook(userId, id);
+  }
+
+  @Post('batch-retry-webhooks')
+  @ApiOperation({ summary: 'Re-register webhook for every active repo where caller is ADMIN' })
+  async batchRetryWebhooks(@Req() req: Request) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.batchRetryWebhooks(userId);
+  }
+
+  @Get(':id/webhook')
+  @ApiOperation({ summary: 'Get repository webhook status (live-checked against GitHub)' })
+  async getWebhookStatus(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.getWebhookStatus(userId, id);
+  }
+
+  @Post(':id/webhook/retry')
+  @ApiOperation({ summary: 'Recreate webhook on GitHub for this repository' })
+  async retryWebhook(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.retryWebhook(userId, id);
+  }
+
+  @Post(':id/webhook/test')
+  @ApiOperation({ summary: 'Ask GitHub to redeliver a ping event for this webhook' })
+  async testWebhook(@Req() req: Request, @Param('id') id: string) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.testWebhook(userId, id);
   }
 }
