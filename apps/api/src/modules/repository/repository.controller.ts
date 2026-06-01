@@ -10,6 +10,7 @@ import {
   Query,
   UseGuards,
   Req,
+  Logger,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { RepositoryService } from './repository.service';
@@ -23,12 +24,15 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
+import { RequestTimeoutMs } from '../../common/decorators/request-timeout.decorator';
 
 @ApiTags('Repository Management')
 @ApiBearerAuth()
 @UseGuards(AuthGuard('jwt'))
 @Controller('repositories')
 export class RepositoryController {
+  private readonly logger = new Logger(RepositoryController.name);
+
   constructor(
     private readonly repositoryService: RepositoryService,
     private readonly userService: UserService,
@@ -162,10 +166,14 @@ export class RepositoryController {
   }
 
   @Post(':id/sync')
+  @RequestTimeoutMs(0)
   @ApiOperation({ summary: 'Sync repository history' })
-  async sync(@Req() req: Request, @Param('id') id: string): Promise<RepositorySyncSummaryDto> {
+  async sync(@Req() req: Request, @Param('id') id: string): Promise<any> {
     const userId = (req.user as { sub: string }).sub;
-    return this.repositoryService.syncForUser(userId, id);
+    this.repositoryService.syncForUser(userId, id).catch((err) => {
+      this.logger.error(`Background sync failed for repository ${id}: ${err.message}`, err.stack);
+    });
+    return { success: true, message: 'Sync started in background' };
   }
 
   @Post(':id/webhook')

@@ -59,6 +59,7 @@ import {
 } from '@/hooks/queries/use-repository-queries';
 import { dashboardQueryKeys } from '@/hooks/queries/use-dashboard-queries';
 import type { Repository, SearchResult } from '@/types/api';
+import { toast } from 'sonner';
 
 type CandidateSource = 'search' | 'my' | 'starred';
 type FilterMode = 'all' | 'active' | 'inactive';
@@ -252,6 +253,12 @@ export function Repositories() {
   };
 
   const updateRepositoryStatus = async (id: string, isActive: boolean) => {
+    const repository = repositories.find((item) => item.id === id);
+    if (repository?.canOperate === false) {
+      toast.error('只读监控仓库不能启用或停用');
+      return;
+    }
+
     await updateMutation.mutateAsync({ id, isActive });
     await refreshRepositories();
   };
@@ -339,7 +346,7 @@ export function Repositories() {
               size="sm"
               className="gap-2"
               onClick={() => updateRepositoryStatus(repo.id, !repo.isActive)}
-              disabled={isUpdating || isAnyActionPending}
+              disabled={repo.canOperate === false || isUpdating || isAnyActionPending}
             >
               {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
               {repo.isActive ? t('repositories.actions.disable') : t('repositories.actions.enable')}

@@ -729,23 +729,13 @@ export class WorkbenchService {
   }
 
   private toRepositoryView(
-    repository: {
-      id: string;
-      name: string;
-      fullName: string;
-      url: string;
-      defaultBranch: string;
-    },
+    repository: Repository,
     membership: RepositoryAccessMembership,
     isMonitored: boolean,
   ) {
     const isEditable = isEditableRepositoryAccessLevel(membership.accessLevel);
     return {
-      id: repository.id,
-      name: repository.name,
-      fullName: repository.fullName,
-      url: repository.url,
-      defaultBranch: repository.defaultBranch,
+      ...repository,
       accessLevel: this.mapAccessLevelToApi(membership.accessLevel),
       canOperate: isEditable,
       isMonitored,

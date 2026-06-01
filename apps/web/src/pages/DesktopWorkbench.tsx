@@ -929,6 +929,8 @@ function getRepositoryContextMenuItems({
   onMarkRead: (repository: Repository) => void;
   onFilterByType: (repository: Repository, type: string) => void;
 }) {
+  const canOperateRepository = repository.canOperate !== false;
+
   return [
     {
       key: 'remove-monitoring',
@@ -941,6 +943,7 @@ function getRepositoryContextMenuItems({
       key: 'toggle-active',
       label: repository.isActive ? '停用' : '启用',
       icon: PauseCircle,
+      disabled: !canOperateRepository,
       onSelect: () => onToggleRepositoryActive(repository),
     },
     {
@@ -7302,6 +7305,11 @@ export function DesktopWorkbench() {
   };
 
   const toggleRepositoryActive = async (repository: Repository) => {
+    if (repository.canOperate === false) {
+      toast.error('只读监控仓库不能启用或停用');
+      return;
+    }
+
     try {
       await repositoryService.update(repository.id, { isActive: !repository.isActive });
       await queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.all });
@@ -7311,6 +7319,49 @@ export function DesktopWorkbench() {
       toast.error('更新仓库状态失败');
     }
   };
+
+  useEffect(() => {
+    const handleSyncEvent = (event: globalThis.Event) => {
+      const customEvent = event as CustomEvent;
+      const { eventName, repositoryId, reason } = customEvent.detail || {};
+      if (!repositoryId) return;
+
+      if (eventName === 'repository.sync.progress') {
+        setSyncingRepoIds((current) => {
+          if (current.has(repositoryId)) return current;
+          const next = new Set(current);
+          next.add(repositoryId);
+          return next;
+        });
+      } else if (eventName === 'repository.synced') {
+        setSyncingRepoIds((current) => {
+          if (!current.has(repositoryId)) return current;
+          const next = new Set(current);
+          next.delete(repositoryId);
+          return next;
+        });
+        toast.success('仓库同步成功');
+        void Promise.all([
+          repositoriesQuery.refetch(),
+          eventsQuery.refetch(),
+          approvalsQuery.refetch(),
+        ]);
+      } else if (eventName === 'repository.sync.failed') {
+        setSyncingRepoIds((current) => {
+          if (!current.has(repositoryId)) return current;
+          const next = new Set(current);
+          next.delete(repositoryId);
+          return next;
+        });
+        toast.error(`仓库同步失败: ${reason || '未知错误'}`);
+      }
+    };
+
+    window.addEventListener('repo-pulse:repository-sync', handleSyncEvent);
+    return () => {
+      window.removeEventListener('repo-pulse:repository-sync', handleSyncEvent);
+    };
+  }, [repositoriesQuery, eventsQuery, approvalsQuery]);
 
   const syncRepository = async (repository: Repository) => {
     if (syncingRepoIds.has(repository.id)) {
@@ -7323,16 +7374,10 @@ export function DesktopWorkbench() {
     });
     try {
       await repositoryService.sync(repository.id);
-      await Promise.all([
-        repositoriesQuery.refetch(),
-        eventsQuery.refetch(),
-        approvalsQuery.refetch(),
-      ]);
-      toast.success(`${repository.fullName} 已同步`);
+      toast.info(`${repository.fullName} 同步已在后台开始`);
     } catch (error) {
       console.error(error);
-      toast.error('同步仓库失败');
-    } finally {
+      toast.error('开始同步失败');
       setSyncingRepoIds((current) => {
         if (!current.has(repository.id)) {
           return current;

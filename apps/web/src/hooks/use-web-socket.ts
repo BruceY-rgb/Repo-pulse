@@ -686,7 +686,7 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
       });
 
       socket.on(REALTIME_EVENTS.EVENT_REPLAY_DONE, (payload: EventReplayDonePayload) => {
-        debugRealtime('event.replay-done', payload);
+        debugRealtime('event.replay-done', payload as unknown as Record<string, unknown>);
         storeLastSeq(payload.repositoryId, payload.lastSeq);
       });
 

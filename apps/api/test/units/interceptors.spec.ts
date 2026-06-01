@@ -62,8 +62,12 @@ describe('TransformInterceptor', () => {
 
 // ── TimeoutInterceptor ─────────────────────────────────────────────────────
 describe('TimeoutInterceptor', () => {
-  const interceptor = new TimeoutInterceptor();
-  const mockContext = {} as any;
+  const reflector = { getAllAndOverride: jest.fn().mockReturnValue(undefined) } as any;
+  const interceptor = new TimeoutInterceptor(reflector);
+  const mockContext = {
+    getHandler: jest.fn(),
+    getClass: jest.fn(),
+  } as any;
 
   function makeNext(value: any) {
     return { handle: () => of(value) } as any;
@@ -90,6 +94,20 @@ describe('TimeoutInterceptor', () => {
     const original = new Error('db failure');
     const next = { handle: () => throwError(() => original) } as any;
     interceptor.intercept(mockContext, next).subscribe({
+      error: (err) => {
+        expect(err).toBe(original);
+        done();
+      },
+    });
+  });
+
+  it('skips timeout handling when metadata timeoutMs <= 0', (done) => {
+    const disabledReflector = { getAllAndOverride: jest.fn().mockReturnValue(0) } as any;
+    const noTimeoutInterceptor = new TimeoutInterceptor(disabledReflector);
+    const original = new TimeoutError();
+    const next = { handle: () => throwError(() => original) } as any;
+
+    noTimeoutInterceptor.intercept(mockContext, next).subscribe({
       error: (err) => {
         expect(err).toBe(original);
         done();
