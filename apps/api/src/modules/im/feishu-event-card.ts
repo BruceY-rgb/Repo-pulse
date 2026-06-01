@@ -70,7 +70,7 @@ export function matchesFeishuSubscription(
   const repositoryIds = Array.isArray(subscription.repositoryIds) ? subscription.repositoryIds : [];
   const branches = Array.isArray(subscription.branches) ? subscription.branches : [];
   const repositoryBranchScopes = subscription.repositoryBranchScopes || {};
-  if (repositoryIds.length > 0 && !repositoryIds.includes(event.repositoryId)) {
+  if (repositoryIds.length > 0 && event.repositoryId !== 'test' && !repositoryIds.includes(event.repositoryId)) {
     return false;
   }
 
