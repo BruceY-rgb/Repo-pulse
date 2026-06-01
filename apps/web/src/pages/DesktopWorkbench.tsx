@@ -137,6 +137,7 @@ import { Dashboard } from '@/pages/Dashboard';
 import { Repositories } from '@/pages/Repositories';
 import { Reports } from '@/pages/Reports';
 import { Settings as SettingsPage } from '@/pages/Settings';
+import { SiriAnalysisPanel } from '@/components/analysis/SiriAnalysisPanel';
 import type {
   Event,
   Repository,
@@ -2221,6 +2222,7 @@ function ConversationBubble({
   onRejectMessage,
   approvalActionId,
   onContextMenu,
+  onOpenSiriAnalysis,
 }: {
   message: ConversationMessage;
   repository: Repository;
@@ -2230,6 +2232,7 @@ function ConversationBubble({
   onRejectMessage: (message: ConversationMessage) => void;
   approvalActionId?: string;
   onContextMenu: (event: MouseEvent<HTMLDivElement>, message: ConversationMessage) => void;
+  onOpenSiriAnalysis?: (eventId: string, eventTitle: string) => void;
 }) {
   const Icon = message.kind === 'approval'
     ? ShieldAlert
@@ -2280,7 +2283,7 @@ function ConversationBubble({
           className="gap-2"
           onClick={(event) => {
             event.stopPropagation();
-            toast.info(`AI 正在分析：${message.title}`);
+            onOpenSiriAnalysis?.(message.id, message.title);
           }}
         >
           <Sparkles className="h-3.5 w-3.5" />
@@ -2418,6 +2421,7 @@ function MessageDetailSheet({
   onApproveMessage,
   onRejectMessage,
   approvalActionId,
+  onOpenSiriAnalysis,
 }: {
   message: ConversationMessage | null;
   repository: Repository | undefined | null;
@@ -2426,6 +2430,7 @@ function MessageDetailSheet({
   onApproveMessage: (message: ConversationMessage) => void;
   onRejectMessage: (message: ConversationMessage) => void;
   approvalActionId?: string;
+  onOpenSiriAnalysis?: (eventId: string, eventTitle: string) => void;
 }) {
   if (!message || !repository) {
     return null;
@@ -2589,7 +2594,7 @@ function MessageDetailSheet({
                           key={action.key}
                           variant="ghost"
                           className="gap-2 rounded-xl text-primary/80 hover:text-primary hover:bg-primary/10 transition-all"
-                          onClick={() => toast.info(`AI 正在分析：${message.title}`)}
+                          onClick={() => onOpenSiriAnalysis?.(message.id, message.title)}
                         >
                           <Sparkles className="h-4 w-4" />
                           {action.label}
@@ -2988,6 +2993,7 @@ function RepositoryConversation({
   onRejectMessage,
   approvalActionId,
   onOpenDetail,
+  onOpenSiriAnalysis,
 }: {
   repository: Repository;
   messages: ConversationMessage[];
@@ -2998,6 +3004,7 @@ function RepositoryConversation({
   onRejectMessage: (message: ConversationMessage) => void;
   approvalActionId?: string;
   onOpenDetail: (message: ConversationMessage | null) => void;
+  onOpenSiriAnalysis?: (eventId: string, eventTitle: string) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [activeFilter, setActiveFilter] = useState<MessageFilterKey>('all');
@@ -3230,6 +3237,7 @@ function RepositoryConversation({
                     onApproveMessage={onApproveMessage}
                     onRejectMessage={onRejectMessage}
                     approvalActionId={approvalActionId}
+                    onOpenSiriAnalysis={onOpenSiriAnalysis}
                     onContextMenu={(event, selectedMessage) => {
                       event.preventDefault();
                       const position = getSafeContextMenuPosition(
@@ -6597,6 +6605,15 @@ export function DesktopWorkbench() {
   const [isContributorsOpen, setIsContributorsOpen] = useState(false);
   const [syncingRepoIds, setSyncingRepoIds] = useState<Set<string>>(() => new Set());
   const [newlyMonitoredRepoIds, setNewlyMonitoredRepoIds] = useState<Set<string>>(() => new Set());
+  const [siriAnalysis, setSiriAnalysis] = useState<{
+    isOpen: boolean;
+    eventId: string;
+    eventTitle: string;
+  }>({
+    isOpen: false,
+    eventId: '',
+    eventTitle: '',
+  });
   const [watchFeedType, setWatchFeedType] = useState('');
   const [ignoredFeedIds, setIgnoredFeedIds] = useState<Set<string>>(() => new Set());
   const [feedSearchKeyword, setFeedSearchKeyword] = useState('');
@@ -7480,6 +7497,7 @@ export function DesktopWorkbench() {
                 onRejectMessage={handleRejectMessage}
                 approvalActionId={approvalActionId}
                 onOpenDetail={setSelectedMessage}
+                onOpenSiriAnalysis={(eventId, eventTitle) => setSiriAnalysis({ isOpen: true, eventId, eventTitle })}
               />
             ) : null}
 
@@ -7578,6 +7596,7 @@ export function DesktopWorkbench() {
           onApproveMessage={handleApproveMessage}
           onRejectMessage={handleRejectMessage}
           approvalActionId={approvalActionId}
+          onOpenSiriAnalysis={(eventId, eventTitle) => setSiriAnalysis({ isOpen: true, eventId, eventTitle })}
         />
         <Dialog open={isAddRepositoryOpen} onOpenChange={setIsAddRepositoryOpen}>
           <DialogContent className="max-w-md bg-card border-border text-foreground">
@@ -7717,6 +7736,12 @@ export function DesktopWorkbench() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        <SiriAnalysisPanel
+          eventId={siriAnalysis.eventId}
+          eventTitle={siriAnalysis.eventTitle}
+          isOpen={siriAnalysis.isOpen}
+          onClose={() => setSiriAnalysis((prev) => ({ ...prev, isOpen: false }))}
+        />
       </div>
     </TooltipProvider>
   );
