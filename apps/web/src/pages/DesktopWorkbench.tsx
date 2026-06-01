@@ -1490,6 +1490,8 @@ function RepositorySidebar({
     const avatarUrl = getRepositoryAvatarUrl(repo);
     const latestMessage = item.latestMessagePreview || '等待新的仓库事件';
     const isSyncing = syncingRepoIds.has(repo.id);
+    const syncProgress = syncProgressByRepoId[repo.id]?.progress;
+    const hasWebhookWarning = !repo.webhookId;
     const hasPendingApproval = item.hasPendingApproval || item.pendingApprovalCount > 0;
     const hasPendingAgentAction = item.hasPendingAgentAction || item.pendingAgentActionCount > 0;
     const hasUnreadRiskAttention =
@@ -1540,10 +1542,15 @@ function RepositorySidebar({
               {repo.fullName}
             </p>
             {isSyncing ? (
-              <Loader2
-                className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
-                aria-label="同步中"
-              />
+              <>
+                <Loader2
+                  className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
+                  aria-label="同步中"
+                />
+                <span className="shrink-0 text-xs font-medium text-muted-foreground">
+                  {Math.round(syncProgress ?? 0)}%
+                </span>
+              </>
             ) : null}
           </div>
           <p className="mt-1 block max-w-full truncate text-xs text-muted-foreground" title={latestMessage}>
@@ -1579,6 +1586,17 @@ function RepositorySidebar({
             </Badge>
             <GitBranch className="h-3 w-3 shrink-0" />
             <span className="min-w-0 truncate">{repo.defaultBranch}</span>
+            {hasWebhookWarning ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <AlertTriangle
+                    className="h-3 w-3 shrink-0 text-warning-foreground"
+                    aria-label="Webhook 未配置"
+                  />
+                </TooltipTrigger>
+                <TooltipContent side="right">Webhook 未配置，点击进入仓库详情修复</TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
         </div>
       </Link>
@@ -1617,6 +1635,8 @@ function RepositorySidebar({
               const unread = Math.min(getEffectiveUnread(item), 99);
               const avatarUrl = getRepositoryAvatarUrl(repo);
               const isSyncing = syncingRepoIds.has(repo.id);
+              const syncProgress = syncProgressByRepoId[repo.id]?.progress;
+              const hasWebhookWarning = !repo.webhookId;
               const repoKindLabel = item.kind === 'editable' ? '可操作仓库' : '只读监控';
 
               const compactLink = (
@@ -1670,6 +1690,14 @@ function RepositorySidebar({
                     <div className="max-w-[240px]">
                       <p className="font-medium">{repo.fullName}</p>
                       <p className="text-xs text-muted-foreground">{repoKindLabel}</p>
+                      {isSyncing ? (
+                        <p className="text-xs text-muted-foreground">
+                          同步中 {Math.round(syncProgress ?? 0)}%
+                        </p>
+                      ) : null}
+                      {hasWebhookWarning ? (
+                        <p className="text-xs text-warning-foreground">Webhook 未配置</p>
+                      ) : null}
                       <p className="truncate text-xs text-muted-foreground">{item.latestMessagePreview}</p>
                     </div>
                   </TooltipContent>
