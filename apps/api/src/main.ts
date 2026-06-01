@@ -7,7 +7,7 @@ import cookieParser from 'cookie-parser';
 import { json } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
-import { join } from 'path';
+import { jsonBigIntReplacer } from './common/utils/json-serialization';
 
 async function bootstrap() {
   // 保留 Raw Body 供 Webhook 验签使用
@@ -15,6 +15,7 @@ async function bootstrap() {
     rawBody: true,
     bodyParser: false,
   });
+  app.getHttpAdapter().getInstance().set('json replacer', jsonBigIntReplacer);
 
   app.use(json({ limit: '20mb' }));
 
