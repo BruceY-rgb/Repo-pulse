@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef, type KeyboardEvent } from 'react';
 import {
   AlertTriangle,
   CheckCircle,
