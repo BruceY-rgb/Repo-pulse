@@ -20,6 +20,7 @@ import {
   RepositorySyncSummaryDto,
 } from './dto/repository.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 
 @ApiTags('Repository Management')
@@ -43,6 +44,7 @@ export class RepositoryController {
   }
 
   @Get()
+  @Throttle({ default: { limit: 300, ttl: 60000 } })
   @ApiOperation({ summary: 'List repositories' })
   async findAll(@Req() req: Request, @Query() query: RepositoryQueryDto) {
     const userId = (req.user as { sub: string }).sub;
@@ -99,6 +101,7 @@ export class RepositoryController {
   }
 
   @Get(':id/branches')
+  @Throttle({ default: { limit: 300, ttl: 60000 } })
   @ApiOperation({ summary: 'Get repository branches' })
   async getBranches(@Req() req: Request, @Param('id') id: string) {
     const userId = (req.user as { sub: string }).sub;

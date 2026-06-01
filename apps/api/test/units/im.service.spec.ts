@@ -1,8 +1,40 @@
 import { ImService } from '../../src/modules/im/im.service';
 
+const mockWecomSendMessage = jest.fn();
+const mockWecomReplyStream = jest.fn();
+const mockWecomReplyWelcome = jest.fn();
+const mockWecomHandlers: Record<string, Array<(...args: any[]) => void>> = {};
+
 const mockUserFindUnique = jest.fn();
 const mockUserFindMany = jest.fn();
 const mockUserUpdate = jest.fn();
+
+jest.mock('@wecom/aibot-node-sdk', () => {
+  class MockWSClient {
+    on(event: string, handler: (...args: any[]) => void) {
+      mockWecomHandlers[event] = [...(mockWecomHandlers[event] || []), handler];
+      return this;
+    }
+
+    connect() {
+      for (const handler of mockWecomHandlers.authenticated || []) handler();
+      return this;
+    }
+
+    disconnect() {}
+
+    sendMessage = mockWecomSendMessage;
+    replyStream = mockWecomReplyStream;
+    replyWelcome = mockWecomReplyWelcome;
+  }
+
+  return {
+    __esModule: true,
+    default: { WSClient: MockWSClient },
+    WSClient: MockWSClient,
+    generateReqId: jest.fn(() => 'stream-id'),
+  };
+});
 
 jest.mock('@repo-pulse/database', () => ({
   prisma: {
@@ -25,6 +57,12 @@ describe('ImService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    for (const key of Object.keys(mockWecomHandlers)) {
+      delete mockWecomHandlers[key];
+    }
+    mockWecomSendMessage.mockResolvedValue({ headers: { req_id: 'ack' } });
+    mockWecomReplyStream.mockResolvedValue({ headers: { req_id: 'reply-ack' } });
+    mockWecomReplyWelcome.mockResolvedValue({ headers: { req_id: 'welcome-ack' } });
     // onModuleInit calls restoreFeishuBridges → prisma.user.findMany
     mockUserFindMany.mockResolvedValue([]);
     service = new ImService();
@@ -137,6 +175,16 @@ describe('ImService', () => {
     expect(result).toEqual(subs);
   });
 
+  it('filters subscriptions by provider while keeping legacy subscriptions as feishu', async () => {
+    const subs = [
+      { id: 's1', chatId: 'c1', enabled: true, repositoryIds: [], branches: [], events: [], repositoryBranchScopes: {} },
+      { id: 's2', provider: 'dingtalk', chatId: 'c2', enabled: true, repositoryIds: [], branches: [], events: [], repositoryBranchScopes: {} },
+    ];
+    mockUserFindUnique.mockResolvedValue(makePrefs({ subscriptions: subs }));
+    await expect(service.listSubscriptions('u1', 'feishu')).resolves.toEqual([subs[0]]);
+    await expect(service.listSubscriptions('u1', 'dingtalk')).resolves.toEqual([subs[1]]);
+  });
+
   // ── saveSubscriptions — normalizes data ───────────────────────────────────
   it('deduplicates repositoryIds and branches', async () => {
     mockUserFindUnique.mockResolvedValue(makePrefs({}));
@@ -155,6 +203,24 @@ describe('ImService', () => {
     expect(result[0].events).toEqual(['PUSH']);
   });
 
+  it('saves provider subscriptions without replacing other providers', async () => {
+    const feishuSub = { id: 'f1', provider: 'feishu', chatId: 'cf', enabled: true, repositoryIds: [], branches: [], events: [], repositoryBranchScopes: {} };
+    mockUserFindUnique.mockResolvedValue(makePrefs({ subscriptions: [feishuSub] }));
+    mockUserUpdate.mockResolvedValue({});
+    const result = await service.saveSubscriptions('u1', 'dingtalk', [
+      {
+        id: 'd1', chatId: 'cd', enabled: true,
+        repositoryIds: ['r1'],
+        branches: [],
+        repositoryBranchScopes: {},
+        events: ['PUSH'],
+      },
+    ]);
+    expect(result[0].provider).toBe('dingtalk');
+    const saved = mockUserUpdate.mock.calls[0][0].data.preferences.im.subscriptions;
+    expect(saved).toEqual([feishuSub, result[0]]);
+  });
+
   // ── createPairingCode ─────────────────────────────────────────────────────
   it('creates a pairing code and returns it with expiry', async () => {
     mockUserFindUnique.mockResolvedValue(makePrefs({}));
@@ -171,5 +237,78 @@ describe('ImService', () => {
     await service.createPairingCode('u1');
     const saved = mockUserUpdate.mock.calls[0][0].data.preferences.im.pairingCodes;
     expect(saved.every((c: any) => c.code !== 'OLD0')).toBe(true);
+  });
+
+  it('creates provider-specific pairing codes', async () => {
+    mockUserFindUnique.mockResolvedValue(makePrefs({}));
+    mockUserUpdate.mockResolvedValue({});
+    await service.createPairingCode('u1', 'dingtalk');
+    const saved = mockUserUpdate.mock.calls[0][0].data.preferences.im.pairingCodes;
+    expect(saved[0].provider).toBe('dingtalk');
+  });
+
+  it('sends wecom test notification through the Bot WebSocket channel', async () => {
+    mockUserFindUnique.mockResolvedValue(makePrefs({
+      wecom: { botId: 'bot-1', secret: 'sec-1', state: 'connected' },
+      bindings: [{ provider: 'wecom', openId: 'user-1', chatId: 'chat-1', boundAt: '' }],
+    }));
+    mockUserUpdate.mockResolvedValue({});
+
+    const result = await service.sendWecomTestNotification('u1');
+
+    expect(result.sent).toBe(1);
+    expect(mockWecomSendMessage).toHaveBeenCalledWith(
+      'chat-1',
+      expect.objectContaining({
+        msgtype: 'markdown',
+        markdown: expect.objectContaining({ content: expect.stringContaining('Repo-Pulse') }),
+      }),
+    );
+  });
+
+  it('binds wecom chat when a Bot WebSocket text message contains a valid pairing code', async () => {
+    const futureExpiry = new Date(Date.now() + 60000).toISOString();
+    mockUserFindUnique.mockResolvedValue(makePrefs({}));
+    mockUserUpdate.mockResolvedValue({});
+
+    await service.saveWecomConnection('u1', { botId: 'bot-1', secret: 'sec-1' });
+
+    mockUserFindMany.mockResolvedValueOnce([{
+      id: 'u1',
+      preferences: {
+        im: {
+          wecom: { botId: 'bot-1', secret: 'sec-1', state: 'connected' },
+          pairingCodes: [{ code: 'WECOM123', provider: 'wecom', userId: 'u1', expiresAt: futureExpiry, createdAt: '' }],
+        },
+      },
+    }]);
+
+    const frame = {
+      headers: { req_id: 'req-1' },
+      body: {
+        msgid: 'msg-1',
+        aibotid: 'bot-1',
+        chatid: 'chat-1',
+        chattype: 'group',
+        from: { userid: 'user-1' },
+        msgtype: 'text',
+        text: { content: '/bind WECOM123' },
+      },
+    };
+
+    for (const handler of mockWecomHandlers.message || []) handler(frame);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const saved = mockUserUpdate.mock.calls
+      .map((call) => call[0].data.preferences.im)
+      .find((im) => im.bindings?.[0]?.provider === 'wecom');
+    expect(saved).toBeDefined();
+    expect(saved?.bindings[0]).toMatchObject({ provider: 'wecom', openId: 'user-1', chatId: 'chat-1' });
+    expect(mockWecomReplyStream).toHaveBeenCalledWith(
+      frame,
+      'stream-id',
+      expect.stringContaining('绑定成功'),
+      true,
+    );
   });
 });

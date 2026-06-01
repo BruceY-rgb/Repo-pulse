@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import {
   AlertTriangle,
   CheckCircle,
@@ -81,12 +81,22 @@ const FEISHU_PERMISSION_SCOPES_JSON = JSON.stringify({
 
 function getErrorMessage(error: unknown): string {
   if (error && typeof error === 'object' && 'response' in error) {
-    const response = (error as { response?: { data?: { message?: string } } }).response;
+    const response = (error as { response?: { status?: number; data?: { message?: string } } }).response;
+    if (response?.status === 401) return '登录已过期，请重新登录';
     if (response?.data?.message) return response.data.message;
   }
 
   if (error instanceof Error) return error.message;
   return 'Request failed';
+}
+
+function isUnauthorizedError(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === 'object' &&
+    'response' in error &&
+    (error as { response?: { status?: number } }).response?.status === 401,
+  );
 }
 
 function isConnected(status: FeishuConnectionStatus | null): boolean {
@@ -151,6 +161,12 @@ function formatBranchSummary(branches: string[], fallbackLabel: string) {
   return `${branches[0]} +${branches.length - 1}`;
 }
 
+function handleKeyboardClick(event: KeyboardEvent, action: () => void) {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault();
+  action();
+}
+
 interface FeishuRepositorySubscriptionItemProps {
   repo: Repository;
   checked: boolean;
@@ -188,10 +204,12 @@ function FeishuRepositorySubscriptionItem({
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--github-border)]/80 bg-white/[0.02]">
       <div className="flex items-center gap-3 px-3 py-2">
-        <button
-          type="button"
+        <div
+          role="button"
+          tabIndex={0}
           className="flex min-w-0 flex-1 items-center gap-3 text-left"
           onClick={() => onToggleRepository(repo.id)}
+          onKeyDown={(event) => handleKeyboardClick(event, () => onToggleRepository(repo.id))}
         >
           <Checkbox checked={checked} className="pointer-events-none border-[var(--github-border)]" />
           <GitBranch className="h-4 w-4 shrink-0 text-[var(--github-text-secondary)]" />
@@ -201,7 +219,7 @@ function FeishuRepositorySubscriptionItem({
               {checked ? branchSummary : notSelectedLabel}
             </p>
           </div>
-        </button>
+        </div>
         <Button
           type="button"
           variant="ghost"
@@ -250,11 +268,13 @@ function FeishuRepositorySubscriptionItem({
                 const branchChecked = selectedBranches.includes(branch.name);
 
                 return (
-                  <button
+                  <div
                     key={`${repo.id}-${branch.name}`}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     className="flex items-center gap-3 rounded-lg border border-[var(--github-border)]/70 bg-white/[0.02] px-3 py-2 text-left transition-colors hover:border-[var(--github-accent)]/40 hover:bg-white/[0.05]"
                     onClick={() => onToggleBranch(repo.id, branch.name)}
+                    onKeyDown={(event) => handleKeyboardClick(event, () => onToggleBranch(repo.id, branch.name))}
                   >
                     <Checkbox checked={branchChecked} className="pointer-events-none border-[var(--github-border)]" />
                     <span className="min-w-0 flex-1 truncate text-sm text-white">{branch.name}</span>
@@ -263,7 +283,7 @@ function FeishuRepositorySubscriptionItem({
                         default
                       </span>
                     ) : null}
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -316,18 +336,34 @@ export function FeishuIntegrationDialog({
     }
     setStatusError('');
     try {
-      const [nextStatus, nextSubscriptions] = await Promise.all([
-        imService.getImStatus(),
-        imService.listSubscriptions().catch(() => []),
-      ]);
+      const nextStatus = await imService.getImStatus();
       const feishuStatus = nextStatus.feishu ?? null;
       setStatus(feishuStatus);
       setAppId(feishuStatus?.appId ?? '');
-      setSubscriptions(nextSubscriptions);
       onConnectionChange?.(isConnected(feishuStatus));
+
+      void imService.listSubscriptions()
+        .then((nextSubscriptions) => {
+          setSubscriptions(
+            nextSubscriptions.length > 0
+              ? nextSubscriptions
+              : [createDefaultSubscription(t('settings.integrations.feishu.defaultChat'))],
+          );
+        })
+        .catch((subscriptionError) => {
+          if (!isUnauthorizedError(subscriptionError)) {
+            setStatusError(getErrorMessage(subscriptionError));
+          }
+          setSubscriptions([createDefaultSubscription(t('settings.integrations.feishu.defaultChat'))]);
+        });
+
       return feishuStatus;
     } catch (error) {
       setStatusError(getErrorMessage(error));
+      setSubscriptions([createDefaultSubscription(t('settings.integrations.feishu.defaultChat'))]);
+      if (isUnauthorizedError(error)) {
+        onOpenChange(false);
+      }
       setStatus(null);
       onConnectionChange?.(false);
       return null;
@@ -336,7 +372,7 @@ export function FeishuIntegrationDialog({
         setLoadingStatus(false);
       }
     }
-  }, [onConnectionChange]);
+  }, [onConnectionChange, onOpenChange, t]);
 
   const loadRepositories = useCallback(async () => {
     setLoadingRepositories(true);
@@ -353,8 +389,18 @@ export function FeishuIntegrationDialog({
 
   useEffect(() => {
     if (!open) return;
-    void refreshStatus();
-    void loadRepositories();
+    let cancelled = false;
+
+    void (async () => {
+      const nextStatus = await refreshStatus();
+      if (!cancelled && nextStatus) {
+        await loadRepositories();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [loadRepositories, open, refreshStatus]);
 
   useEffect(() => {
@@ -642,12 +688,7 @@ export function FeishuIntegrationDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {loadingStatus ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center py-10">
-            <Loader2 className="h-5 w-5 animate-spin text-[var(--github-accent)]" />
-          </div>
-        ) : (
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col gap-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col gap-4">
             <TabsList className="grid w-full shrink-0 grid-cols-4 border border-[var(--github-border)] bg-[var(--github-surface)]">
               <TabsTrigger value="credentials">{t('settings.integrations.feishu.tab.credentials')}</TabsTrigger>
               <TabsTrigger value="test">{t('settings.integrations.feishu.tab.test')}</TabsTrigger>
@@ -656,6 +697,13 @@ export function FeishuIntegrationDialog({
             </TabsList>
 
             <TabsContent value="credentials" className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+              {loadingStatus ? (
+                <div className="flex items-center gap-2 rounded-lg border border-[var(--github-border)] bg-white/5 px-3 py-2 text-xs text-[var(--github-text-secondary)]">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--github-accent)]" />
+                  {t('settings.integrations.feishu.stageState.unknown')}
+                </div>
+              ) : null}
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="feishu-app-id">{t('settings.integrations.feishu.appId')}</Label>
@@ -789,12 +837,7 @@ export function FeishuIntegrationDialog({
                     tabIndex={0}
                     className="flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left hover:bg-white/5"
                     onClick={selectAllRepositories}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        selectAllRepositories();
-                      }
-                    }}
+                    onKeyDown={(event) => handleKeyboardClick(event, selectAllRepositories)}
                   >
                     <Checkbox
                       checked={allRepositoriesSelected}
@@ -913,7 +956,6 @@ export function FeishuIntegrationDialog({
               </div>
             </TabsContent>
           </Tabs>
-        )}
 
         <Separator className="shrink-0 bg-[var(--github-border)]" />
 

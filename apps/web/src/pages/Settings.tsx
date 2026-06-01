@@ -52,6 +52,7 @@ import {
   type NotificationTemplateValue,
 } from '@/components/settings/notifications/NotificationTemplateGallery';
 import { FeishuIntegrationDialog } from '@/components/settings/integrations/FeishuIntegrationDialog';
+import { ImChannelIntegrationDialog } from '@/components/settings/integrations/ImChannelIntegrationDialog';
 import {
   createExceptionRuleFromFilterRule,
   createFilterRulePayloadFromDraft,
@@ -87,8 +88,11 @@ import type {
   NotificationChannel,
   NotificationPreferences,
 } from '@/services/notification.service';
-import { imService } from '@/services/im.service';
+import { imService, type ImProvider } from '@/services/im.service';
 import feishuLogo from '@/assets/integrations/feishu.svg';
+import dingtalkLogo from '@/assets/integrations/dingtalk.svg';
+import wecomLogo from '@/assets/integrations/wecom.svg';
+import wechatLogo from '@/assets/integrations/wechat.svg';
 
 const apiKeys = [
   { name: 'Production API Key', key: 'rp_live_xxxxxxxxxxxx', created: '2025-01-15', lastUsed: '2 hours ago' },
@@ -100,7 +104,13 @@ export function Settings() {
   const queryClient = useQueryClient();
   const [saved, setSaved] = useState(false);
   const [feishuDialogOpen, setFeishuDialogOpen] = useState(false);
-  const [feishuConnected, setFeishuConnected] = useState(false);
+  const [imDialogOpen, setImDialogOpen] = useState<Exclude<ImProvider, 'feishu'> | null>(null);
+  const [imConnected, setImConnected] = useState<Record<ImProvider, boolean>>({
+    feishu: false,
+    dingtalk: false,
+    wecom: false,
+    wechat: false,
+  });
 
   // 用户信息状态
   const [userLoading, setUserLoading] = useState(false);
@@ -181,21 +191,26 @@ export function Settings() {
   }, []);
 
   useEffect(() => {
-    const loadFeishuStatus = async () => {
+    const loadImStatus = async () => {
       try {
         const status = await imService.getImStatus();
-        const feishuStatus = status.feishu;
-        setFeishuConnected(Boolean(
-          feishuStatus?.connected ||
-          feishuStatus?.state === 'connected' ||
-          feishuStatus?.state === 'ready',
-        ));
+        setImConnected({
+          feishu: Boolean(status.feishu?.connected || status.feishu?.state === 'connected' || status.feishu?.state === 'ready'),
+          dingtalk: Boolean(status.dingtalk?.connected || status.dingtalk?.state === 'connected' || status.dingtalk?.state === 'ready'),
+          wecom: Boolean(status.wecom?.connected || status.wecom?.state === 'connected' || status.wecom?.state === 'ready'),
+          wechat: Boolean(status.wechat?.connected || status.wechat?.state === 'connected' || status.wechat?.state === 'ready'),
+        });
       } catch {
-        setFeishuConnected(false);
+        setImConnected({
+          feishu: false,
+          dingtalk: false,
+          wecom: false,
+          wechat: false,
+        });
       }
     };
 
-    loadFeishuStatus();
+    loadImStatus();
   }, []);
 
   // 加载 AI 配置
@@ -1011,12 +1026,18 @@ export function Settings() {
             <CardContent className="space-y-4">
               {[
                 { provider: 'GitHub', username: userProfile.githubId ? userProfile.name || 'Connected' : 'Not connected', connected: !!userProfile.githubId, icon: Github },
-                { provider: 'Feishu', username: feishuConnected ? t('settings.integrations.feishu.ready') : t('settings.integrations.feishu.notConfigured'), connected: feishuConnected, logo: feishuLogo, action: 'feishu' },
+                { provider: 'Feishu', username: imConnected.feishu ? t('settings.integrations.feishu.ready') : t('settings.integrations.feishu.notConfigured'), connected: imConnected.feishu, logo: feishuLogo, action: 'feishu' as const },
+                { provider: '钉钉', username: imConnected.dingtalk ? t('settings.integrations.feishu.ready') : t('settings.integrations.feishu.notConfigured'), connected: imConnected.dingtalk, logo: dingtalkLogo, action: 'dingtalk' as const },
+                { provider: '企业微信', username: imConnected.wecom ? t('settings.integrations.feishu.ready') : t('settings.integrations.feishu.notConfigured'), connected: imConnected.wecom, logo: wecomLogo, action: 'wecom' as const },
+                { provider: '微信', username: imConnected.wechat ? t('settings.integrations.feishu.ready') : t('settings.integrations.feishu.notConfigured'), connected: imConnected.wechat, logo: wechatLogo, action: 'wechat' as const },
                 { provider: 'Slack', username: 'Not configured', connected: false, icon: Slack },
                 { provider: 'Email', username: userProfile.email || 'Not configured', connected: !!userProfile.email, icon: Mail },
               ].map((account) => {
                 const Icon = account.icon;
                 const isFeishu = account.action === 'feishu';
+                const imProvider = account.action === 'dingtalk' || account.action === 'wecom' || account.action === 'wechat'
+                  ? account.action
+                  : null;
                 return (
                   <div key={account.provider} className="flex items-center justify-between p-4 rounded-lg bg-white/5">
                     <div className="flex items-center gap-4">
@@ -1049,6 +1070,22 @@ export function Settings() {
                               : t('settings.integrations.feishu.configure')}
                           </Button>
                         </>
+                      ) : imProvider ? (
+                        <>
+                          {account.connected ? (
+                            <Badge className="bg-green-400/20 text-green-400">{t('settings.integrations.connected')}</Badge>
+                          ) : null}
+                          <Button
+                            size="sm"
+                            className={account.connected ? "border-[var(--github-border)]" : "btn-x-primary"}
+                            variant={account.connected ? "outline" : undefined}
+                            onClick={() => setImDialogOpen(imProvider)}
+                          >
+                            {account.connected
+                              ? t('settings.integrations.feishu.manage')
+                              : t('settings.integrations.feishu.configure')}
+                          </Button>
+                        </>
                       ) : account.connected ? (
                         <>
                           <Badge className="bg-green-400/20 text-green-400">{t('settings.integrations.connected')}</Badge>
@@ -1071,8 +1108,19 @@ export function Settings() {
           <FeishuIntegrationDialog
             open={feishuDialogOpen}
             onOpenChange={setFeishuDialogOpen}
-            onConnectionChange={setFeishuConnected}
+            onConnectionChange={(connected) =>
+              setImConnected((current) => ({ ...current, feishu: connected }))}
           />
+          {imDialogOpen ? (
+            <ImChannelIntegrationDialog
+              key={imDialogOpen}
+              provider={imDialogOpen}
+              open
+              onOpenChange={(open) => setImDialogOpen(open ? imDialogOpen : null)}
+              onConnectionChange={(nextProvider, connected) =>
+                setImConnected((current) => ({ ...current, [nextProvider]: connected }))}
+            />
+          ) : null}
 
           <Card className="card-github">
             <CardHeader>

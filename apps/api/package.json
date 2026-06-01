@@ -36,12 +36,14 @@
     "@repo-pulse/database": "workspace:*",
     "@repo-pulse/shared": "workspace:*",
     "@types/jsonwebtoken": "^9.0.10",
+    "@wecom/aibot-node-sdk": "^1.0.7",
     "axios": "^1.13.6",
     "bcrypt": "^5.1.1",
     "bullmq": "^5.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "cookie-parser": "^1.4.7",
+    "dingtalk-stream-sdk-nodejs": "^2.0.4",
     "helmet": "^8.0.0",
     "ioredis": "^5.4.0",
     "joi": "^17.13.0",
@@ -112,7 +114,10 @@
       "!src/**/*.d.ts"
     ],
     "coverageDirectory": "coverage",
-    "coverageReporters": ["lcov", "text-summary"],
+    "coverageReporters": [
+      "lcov",
+      "text-summary"
+    ],
     "coverageThreshold": {
       "global": {
         "lines": 65,

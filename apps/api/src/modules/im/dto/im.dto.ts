@@ -10,6 +10,9 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
+export const IM_PROVIDERS = ['feishu', 'dingtalk', 'wecom', 'wechat'] as const;
+export type ImProvider = typeof IM_PROVIDERS[number];
+
 export class SaveFeishuConnectionDto {
   @IsString()
   @IsNotEmpty()
@@ -20,16 +23,67 @@ export class SaveFeishuConnectionDto {
   appSecret!: string;
 }
 
+export class SaveDingTalkConnectionDto {
+  @IsString()
+  @IsNotEmpty()
+  clientId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  clientSecret!: string;
+
+  @IsOptional()
+  @IsString()
+  botName?: string;
+}
+
+export class SaveWecomConnectionDto {
+  @IsString()
+  @IsNotEmpty()
+  botId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  secret!: string;
+
+  @IsOptional()
+  @IsString()
+  botName?: string;
+}
+
+export class SaveWechatConnectionDto {
+  @IsString()
+  @IsNotEmpty()
+  botToken!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  ilinkBotId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  ilinkUserId!: string;
+
+  @IsOptional()
+  @IsString()
+  baseUrl?: string;
+}
+
 export class CreatePairingCodeDto {
   @IsString()
-  @IsIn(['feishu'])
-  provider!: 'feishu';
+  @IsIn(IM_PROVIDERS)
+  provider!: ImProvider;
 }
 
 export class ImSubscriptionDto {
   @IsString()
   @IsNotEmpty()
   id!: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(IM_PROVIDERS)
+  provider?: ImProvider;
 
   @IsOptional()
   @IsString()
@@ -61,8 +115,8 @@ export class ImSubscriptionDto {
 
 export class SaveSubscriptionsDto {
   @IsString()
-  @IsIn(['feishu'])
-  provider!: 'feishu';
+  @IsIn(IM_PROVIDERS)
+  provider!: ImProvider;
 
   @IsArray()
   @ValidateNested({ each: true })

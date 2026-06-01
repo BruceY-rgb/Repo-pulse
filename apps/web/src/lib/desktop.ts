@@ -109,5 +109,5 @@ export function getSocketUrl(namespace: string) {
 }
 
 export function getLoginRoute() {
-  return isDesktopRuntime() ? '#/login' : '/login';
+  return isDesktopRuntime() && window.location.protocol === 'file:' ? '#/login' : '/login';
 }

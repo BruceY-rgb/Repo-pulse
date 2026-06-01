@@ -36,8 +36,13 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError<ApiResponse<null>>) => {
     const originalRequest = error.config as typeof error.config & { _retry?: boolean };
+    const requestUrl = originalRequest?.url ?? '';
 
-    if (error.response?.status === 401 && !originalRequest?._retry) {
+    if (
+      error.response?.status === 401 &&
+      !originalRequest?._retry &&
+      !requestUrl.includes('/auth/refresh')
+    ) {
       if (isRefreshing) {
         // 如果正在刷新，等待刷新完成后重试
         return new Promise((resolve, reject) => {
@@ -71,6 +76,7 @@ apiClient.interceptors.response.use(
         notifySubscribers(false);
         // 刷新失败，重定向到登录页
         window.location.href = getLoginRoute();
+        return Promise.reject(error);
       }
     }
 

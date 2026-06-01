@@ -10,6 +10,13 @@ import type {
   SearchResult,
 } from '@/types/api';
 
+const REPOSITORY_READ_CACHE_TTL_MS = 1500;
+const repositoryListReadCache = new Map<string, { expiresAt: number; promise: Promise<Repository[]> }>();
+
+function clearRepositoryReadCache() {
+  repositoryListReadCache.clear();
+}
+
 export function normalizeBranchOption(rawBranch: unknown): RepositoryBranchScopeOption | null {
   if (typeof rawBranch === 'string') {
     const name = rawBranch.trim();
@@ -51,9 +58,26 @@ export function normalizeBranchOption(rawBranch: unknown): RepositoryBranchScope
 
 export const repositoryService = {
   async getAll(isActive?: boolean): Promise<Repository[]> {
+    const key = isActive === undefined ? 'all' : String(isActive);
+    const now = Date.now();
+    const cached = repositoryListReadCache.get(key);
+    if (cached && cached.expiresAt > now) {
+      return cached.promise;
+    }
+
     const params = isActive !== undefined ? { isActive } : {};
-    const { data } = await apiClient.get<ApiResponse<Repository[]>>('/repositories', { params });
-    return data.data;
+    const promise = apiClient
+      .get<ApiResponse<Repository[]>>('/repositories', { params })
+      .then(({ data }) => data.data)
+      .catch((error) => {
+        if (repositoryListReadCache.get(key)?.promise === promise) {
+          repositoryListReadCache.delete(key);
+        }
+        throw error;
+      });
+
+    repositoryListReadCache.set(key, { expiresAt: now + REPOSITORY_READ_CACHE_TTL_MS, promise });
+    return promise;
   },
 
   async getById(id: string): Promise<Repository> {
@@ -63,16 +87,19 @@ export const repositoryService = {
 
   async create(dto: CreateRepositoryDto): Promise<Repository> {
     const { data } = await apiClient.post<ApiResponse<Repository>>('/repositories', dto);
+    clearRepositoryReadCache();
     return data.data;
   },
 
   async update(id: string, dto: UpdateRepositoryDto): Promise<Repository> {
     const { data } = await apiClient.patch<ApiResponse<Repository>>(`/repositories/${id}`, dto);
+    clearRepositoryReadCache();
     return data.data;
   },
 
   async delete(id: string): Promise<void> {
     await apiClient.delete(`/repositories/${id}`);
+    clearRepositoryReadCache();
   },
 
   async sync(id: string): Promise<Repository> {
@@ -81,6 +108,7 @@ export const repositoryService = {
       undefined,
       { timeout: 0 },
     );
+    clearRepositoryReadCache();
     return data.data;
   },
 

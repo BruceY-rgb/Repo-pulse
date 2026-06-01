@@ -1,7 +1,7 @@
 import { apiClient } from './api-client';
 import type { ApiResponse } from '@/types/api';
 
-export type ImProvider = 'feishu';
+export type ImProvider = 'feishu' | 'dingtalk' | 'wecom' | 'wechat';
 export type ImConnectionState = 'not_configured' | 'configured' | 'connected' | 'ready' | 'error';
 
 export interface ImStageStatus {
@@ -15,19 +15,47 @@ export interface FeishuConnectionStatus {
   state: ImConnectionState;
   connected: boolean;
   appId?: string;
+  clientId?: string;
+  botId?: string;
+  ilinkBotId?: string;
+  qrCodeUrl?: string;
   botName?: string;
   summary?: string;
   nextStep?: string;
   stages?: ImStageStatus[];
 }
 
+export type ImConnectionStatus = FeishuConnectionStatus;
+
 export interface ImStatus {
-  feishu?: FeishuConnectionStatus;
+  feishu?: ImConnectionStatus;
+  dingtalk?: ImConnectionStatus;
+  wecom?: ImConnectionStatus;
+  wechat?: ImConnectionStatus;
 }
 
 export interface SaveFeishuConnectionInput {
   appId: string;
   appSecret: string;
+}
+
+export interface SaveDingTalkConnectionInput {
+  clientId: string;
+  clientSecret: string;
+  botName?: string;
+}
+
+export interface SaveWecomConnectionInput {
+  botId: string;
+  secret: string;
+  botName?: string;
+}
+
+export interface SaveWechatConnectionInput {
+  botToken: string;
+  ilinkBotId: string;
+  ilinkUserId: string;
+  baseUrl?: string;
 }
 
 export interface FeishuConnectionTestResult {
@@ -43,6 +71,27 @@ export interface FeishuTestNotificationResult {
   message: string;
 }
 
+export type ImTestNotificationResult = FeishuTestNotificationResult;
+
+export interface WecomQrGenerateResult {
+  ok: boolean;
+  status: 'pending' | 'success' | 'error';
+  scode?: string;
+  authUrl?: string;
+  error?: string;
+}
+
+export interface WecomQrCheckResult {
+  ok: boolean;
+  status: 'pending' | 'success' | 'error';
+  pollStatus?: string;
+  botId?: string;
+  secret?: string;
+  botName?: string;
+  connection?: ImConnectionStatus;
+  error?: string;
+}
+
 export interface PairingCodeResult {
   code: string;
   expiresAt: string;
@@ -50,6 +99,7 @@ export interface PairingCodeResult {
 
 export interface ImSubscription {
   id: string;
+  provider?: ImProvider;
   chatName?: string;
   chatId?: string;
   repositoryIds: string[];
@@ -61,6 +111,19 @@ export interface ImSubscription {
 
 export interface SaveSubscriptionsInput {
   subscriptions: ImSubscription[];
+}
+
+const READ_CACHE_TTL_MS = 1500;
+let imStatusReadCache: { expiresAt: number; promise: Promise<ImStatus> } | null = null;
+const subscriptionReadCache = new Map<ImProvider, { expiresAt: number; promise: Promise<ImSubscription[]> }>();
+
+function clearImReadCache(provider?: ImProvider) {
+  imStatusReadCache = null;
+  if (provider) {
+    subscriptionReadCache.delete(provider);
+  } else {
+    subscriptionReadCache.clear();
+  }
 }
 
 function unwrap<T>(payload: ApiResponse<T> | T): T {
@@ -78,8 +141,23 @@ function unwrap<T>(payload: ApiResponse<T> | T): T {
 
 export const imService = {
   async getImStatus(): Promise<ImStatus> {
-    const { data } = await apiClient.get<ApiResponse<ImStatus> | ImStatus>('/im/status');
-    return unwrap(data);
+    const now = Date.now();
+    if (imStatusReadCache && imStatusReadCache.expiresAt > now) {
+      return imStatusReadCache.promise;
+    }
+
+    const promise = apiClient
+      .get<ApiResponse<ImStatus> | ImStatus>('/im/status')
+      .then(({ data }) => unwrap(data))
+      .catch((error) => {
+        if (imStatusReadCache?.promise === promise) {
+          imStatusReadCache = null;
+        }
+        throw error;
+      });
+
+    imStatusReadCache = { expiresAt: now + READ_CACHE_TTL_MS, promise };
+    return promise;
   },
 
   async saveFeishuConnection(input: SaveFeishuConnectionInput): Promise<FeishuConnectionStatus> {
@@ -87,6 +165,97 @@ export const imService = {
       '/im/feishu/connections',
       input,
     );
+    clearImReadCache('feishu');
+    return unwrap(data);
+  },
+
+  async saveDingTalkConnection(input: SaveDingTalkConnectionInput): Promise<ImConnectionStatus> {
+    const { data } = await apiClient.post<ApiResponse<ImConnectionStatus> | ImConnectionStatus>(
+      '/im/dingtalk/connections',
+      input,
+    );
+    clearImReadCache('dingtalk');
+    return unwrap(data);
+  },
+
+  async testDingTalkConnection(input: SaveDingTalkConnectionInput): Promise<FeishuConnectionTestResult> {
+    const { data } = await apiClient.post<ApiResponse<FeishuConnectionTestResult> | FeishuConnectionTestResult>(
+      '/im/dingtalk/test',
+      input,
+    );
+    return unwrap(data);
+  },
+
+  async saveWecomConnection(input: SaveWecomConnectionInput): Promise<ImConnectionStatus> {
+    const { data } = await apiClient.post<ApiResponse<ImConnectionStatus> | ImConnectionStatus>(
+      '/im/wecom/connections',
+      input,
+    );
+    clearImReadCache('wecom');
+    return unwrap(data);
+  },
+
+  async generateWecomQrCode(): Promise<WecomQrGenerateResult> {
+    const { data } = await apiClient.post<ApiResponse<WecomQrGenerateResult> | WecomQrGenerateResult>(
+      '/im/wecom/qr-codes',
+    );
+    return unwrap(data);
+  },
+
+  async checkWecomQrCode(scode: string): Promise<WecomQrCheckResult> {
+    const { data } = await apiClient.get<ApiResponse<WecomQrCheckResult> | WecomQrCheckResult>(
+      '/im/wecom/qr-codes',
+      { params: { scode } },
+    );
+    return unwrap(data);
+  },
+
+  async startWecom(): Promise<ImConnectionStatus> {
+    const { data } = await apiClient.post<ApiResponse<ImConnectionStatus> | ImConnectionStatus>(
+      '/im/wecom/start',
+    );
+    clearImReadCache('wecom');
+    return unwrap(data);
+  },
+
+  async startWechatLogin(): Promise<ImConnectionStatus> {
+    const { data } = await apiClient.post<ApiResponse<ImConnectionStatus> | ImConnectionStatus>(
+      '/im/wechat/login',
+    );
+    clearImReadCache('wechat');
+    return unwrap(data);
+  },
+
+  async saveWechatConnection(input: SaveWechatConnectionInput): Promise<ImConnectionStatus> {
+    const { data } = await apiClient.post<ApiResponse<ImConnectionStatus> | ImConnectionStatus>(
+      '/im/wechat/connections',
+      input,
+    );
+    clearImReadCache('wechat');
+    return unwrap(data);
+  },
+
+  async startWechat(): Promise<ImConnectionStatus> {
+    const { data } = await apiClient.post<ApiResponse<ImConnectionStatus> | ImConnectionStatus>(
+      '/im/wechat/start',
+    );
+    clearImReadCache('wechat');
+    return unwrap(data);
+  },
+
+  async stopWechat(): Promise<ImConnectionStatus> {
+    const { data } = await apiClient.post<ApiResponse<ImConnectionStatus> | ImConnectionStatus>(
+      '/im/wechat/stop',
+    );
+    clearImReadCache('wechat');
+    return unwrap(data);
+  },
+
+  async logoutWechat(): Promise<ImConnectionStatus> {
+    const { data } = await apiClient.post<ApiResponse<ImConnectionStatus> | ImConnectionStatus>(
+      '/im/wechat/logout',
+    );
+    clearImReadCache('wechat');
     return unwrap(data);
   },
 
@@ -98,10 +267,10 @@ export const imService = {
     return unwrap(data);
   },
 
-  async createPairingCode(): Promise<PairingCodeResult> {
+  async createPairingCode(provider: ImProvider = 'feishu'): Promise<PairingCodeResult> {
     const { data } = await apiClient.post<ApiResponse<PairingCodeResult> | PairingCodeResult>(
       '/im/pairing-codes',
-      { provider: 'feishu' },
+      { provider },
     );
     return unwrap(data);
   },
@@ -113,19 +282,44 @@ export const imService = {
     return unwrap(data);
   },
 
-  async listSubscriptions(): Promise<ImSubscription[]> {
-    const { data } = await apiClient.get<ApiResponse<ImSubscription[]> | ImSubscription[]>(
-      '/im/subscriptions',
-      { params: { provider: 'feishu' } },
+  async sendProviderTestNotification(provider: ImProvider): Promise<ImTestNotificationResult> {
+    if (provider === 'feishu') return this.sendFeishuTestNotification();
+    const { data } = await apiClient.post<ApiResponse<ImTestNotificationResult> | ImTestNotificationResult>(
+      `/im/${provider}/test-notification`,
     );
     return unwrap(data);
   },
 
-  async saveSubscriptions(input: SaveSubscriptionsInput): Promise<ImSubscription[]> {
+  async listSubscriptions(provider: ImProvider = 'feishu'): Promise<ImSubscription[]> {
+    const now = Date.now();
+    const cached = subscriptionReadCache.get(provider);
+    if (cached && cached.expiresAt > now) {
+      return cached.promise;
+    }
+
+    const promise = apiClient
+      .get<ApiResponse<ImSubscription[]> | ImSubscription[]>(
+        '/im/subscriptions',
+        { params: { provider } },
+      )
+      .then(({ data }) => unwrap(data))
+      .catch((error) => {
+        if (subscriptionReadCache.get(provider)?.promise === promise) {
+          subscriptionReadCache.delete(provider);
+        }
+        throw error;
+      });
+
+    subscriptionReadCache.set(provider, { expiresAt: now + READ_CACHE_TTL_MS, promise });
+    return promise;
+  },
+
+  async saveSubscriptions(input: SaveSubscriptionsInput, provider: ImProvider = 'feishu'): Promise<ImSubscription[]> {
     const { data } = await apiClient.post<ApiResponse<ImSubscription[]> | ImSubscription[]>(
       '/im/subscriptions',
-      { provider: 'feishu', ...input },
+      { provider, ...input },
     );
+    clearImReadCache(provider);
     return unwrap(data);
   },
 };
