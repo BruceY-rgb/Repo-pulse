@@ -66,7 +66,11 @@ describe('ApprovalService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockUserRepoFindMany.mockResolvedValue([{ repositoryId: 'r1' }]);
-    service = new ApprovalService();
+    service = new ApprovalService(
+      { broadcastApprovalUpdated: jest.fn() } as unknown as ConstructorParameters<
+        typeof ApprovalService
+      >[0],
+    );
   });
 
   // ── createFromAIAnalysis ───────────────────────────────────────────────────

@@ -18,6 +18,7 @@ import {
   parseRepositoryBranchScopesParam,
 } from '../../common/utils/repository-branch-scope';
 import { getAccessibleRepositoryIds } from '../../common/utils/repository-access';
+import { EventGateway } from '../event/event.gateway';
 
 export interface CreateApprovalDto {
   eventId: string;
@@ -33,6 +34,30 @@ export interface UpdateApprovalDto {
 @Injectable()
 export class ApprovalService {
   private readonly logger = new Logger(ApprovalService.name);
+
+  constructor(private readonly eventGateway: EventGateway) {}
+
+  /** 审批状态变更后向对应仓库 Room 广播 approval.updated（失败不影响主流程）。 */
+  private emitApprovalUpdated(
+    updated: Approval,
+    event: { id: string; repositoryId: string },
+  ): void {
+    try {
+      this.eventGateway.broadcastApprovalUpdated({
+        approvalId: updated.id,
+        repositoryId: event.repositoryId,
+        eventId: event.id,
+        status: updated.status,
+        updatedAt: (updated.reviewedAt ?? new Date()).toISOString(),
+      });
+    } catch (error) {
+      this.logger.warn(
+        `approval_updated_broadcast_failed id=${updated.id} reason=${
+          error instanceof Error ? error.message : 'unknown_error'
+        }`,
+      );
+    }
+  }
 
   private async resolveRepositoryIds(
     userId: string,
@@ -247,7 +272,7 @@ export class ApprovalService {
       throw new ForbiddenException(`Approval is not pending: ${approvalId}`);
     }
 
-    return prisma.approval.update({
+    const updated = await prisma.approval.update({
       where: { id: approvalId },
       data: {
         status: ApprovalStatus.APPROVED,
@@ -256,6 +281,8 @@ export class ApprovalService {
         reviewedAt: new Date(),
       },
     });
+    this.emitApprovalUpdated(updated, approval.event);
+    return updated;
   }
 
   async reject(
@@ -268,7 +295,7 @@ export class ApprovalService {
       throw new ForbiddenException(`Approval is not pending: ${approvalId}`);
     }
 
-    return prisma.approval.update({
+    const updated = await prisma.approval.update({
       where: { id: approvalId },
       data: {
         status: ApprovalStatus.REJECTED,
@@ -277,6 +304,8 @@ export class ApprovalService {
         reviewedAt: new Date(),
       },
     });
+    this.emitApprovalUpdated(updated, approval.event);
+    return updated;
   }
 
   async editAndApprove(
@@ -290,7 +319,7 @@ export class ApprovalService {
       throw new ForbiddenException(`Approval is not pending: ${approvalId}`);
     }
 
-    return prisma.approval.update({
+    const updated = await prisma.approval.update({
       where: { id: approvalId },
       data: {
         status: ApprovalStatus.EDITED,
@@ -300,6 +329,8 @@ export class ApprovalService {
         reviewedAt: new Date(),
       },
     });
+    this.emitApprovalUpdated(updated, approval.event);
+    return updated;
   }
 
   async delete(userId: string, approvalId: string): Promise<void> {

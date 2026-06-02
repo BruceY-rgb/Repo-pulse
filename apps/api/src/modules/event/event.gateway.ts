@@ -14,6 +14,7 @@ import * as jwt from 'jsonwebtoken';
 import { PrismaClient } from '@repo-pulse/database';
 import {
   AnalysisCompletedPayload,
+  ApprovalUpdatedPayload,
   EventCreatedPayload,
   EventReplayDonePayload,
   REALTIME_EVENTS,
@@ -309,6 +310,15 @@ export class EventGateway
     );
     this.logger.log(
       `Broadcast ${REALTIME_EVENTS.ANALYSIS_COMPLETED} to room ${roomName} eventId=${payload.eventId}`,
+    );
+  }
+
+  broadcastApprovalUpdated(payload: ApprovalUpdatedPayload) {
+    const roomName = `repo:${payload.repositoryId}`;
+    this.server.to(roomName).emit(REALTIME_EVENTS.APPROVAL_UPDATED, payload);
+    this.metricsService.observeEmitLatency(REALTIME_EVENTS.APPROVAL_UPDATED, 0);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.APPROVAL_UPDATED} to room ${roomName} approvalId=${payload.approvalId} status=${payload.status}`,
     );
   }
 
