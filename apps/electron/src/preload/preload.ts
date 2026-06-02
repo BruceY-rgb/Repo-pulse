@@ -1,4 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import type { DesktopRealtimeMessage } from '@repo-pulse/shared';
 
 contextBridge.exposeInMainWorld('repoPulseDesktop', {
   isDesktop: true,
@@ -42,5 +43,20 @@ contextBridge.exposeInMainWorld('repoPulseDesktop', {
   git: {
     getStatus: (params: { cwd: string }) => ipcRenderer.invoke('git:get-status', params),
     selectDirectory: (params: { repositoryUrl: string }) => ipcRenderer.invoke('git:select-directory', params),
+  },
+  realtime: {
+    connect: () => ipcRenderer.invoke('realtime:connect'),
+    subscribe: (params: { repositoryId: string; sinceSeq?: number }) =>
+      ipcRenderer.invoke('realtime:subscribe', params),
+    leave: (params: { repositoryId: string }) => ipcRenderer.invoke('realtime:leave', params),
+    disconnect: () => ipcRenderer.invoke('realtime:disconnect'),
+    onMessage: (callback: (message: DesktopRealtimeMessage) => void) => {
+      const subscription = (_event: IpcRendererEvent, message: DesktopRealtimeMessage) =>
+        callback(message);
+      ipcRenderer.on('desktop:realtime', subscription);
+      return () => {
+        ipcRenderer.removeListener('desktop:realtime', subscription);
+      };
+    },
   },
 });

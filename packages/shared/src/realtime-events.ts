@@ -77,3 +77,14 @@ export interface RealtimeEventPayloadMap {
 
 export type RealtimeEventPayload<E extends RealtimeEventName> =
   RealtimeEventPayloadMap[E];
+
+/**
+ * 桌面端（Electron）单一 IPC 信封通道载荷。
+ *
+ * 主进程把 socket.io 收到的实时事件统一封装为 { name, payload }，经
+ * 'desktop:realtime' 通道转发给渲染进程；渲染进程按 name 分发到对应处理器。
+ * 仅类型层面新增，不改动 REALTIME_EVENTS（不影响处理器穷尽性约束）。
+ */
+export type DesktopRealtimeMessage = {
+  [K in RealtimeEventName]: { name: K; payload: RealtimeEventPayloadMap[K] };
+}[RealtimeEventName];

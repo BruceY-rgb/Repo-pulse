@@ -1,3 +1,5 @@
+import type { DesktopRealtimeMessage } from '@repo-pulse/shared';
+
 type RepoPulseDesktopBridge = {
   isDesktop: true;
   platform: 'aix' | 'darwin' | 'freebsd' | 'linux' | 'openbsd' | 'sunos' | 'win32' | string;
@@ -53,6 +55,13 @@ type RepoPulseDesktopBridge = {
       cwd?: string;
       branch?: string;
     }>;
+  };
+  realtime?: {
+    connect: () => Promise<void>;
+    subscribe: (params: { repositoryId: string; sinceSeq?: number }) => Promise<void>;
+    leave: (params: { repositoryId: string }) => Promise<void>;
+    disconnect: () => Promise<void>;
+    onMessage: (callback: (message: DesktopRealtimeMessage) => void) => () => void;
   };
 };
 

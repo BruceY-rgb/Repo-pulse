@@ -4,6 +4,7 @@ import { URL } from 'node:url';
 import { AgentWorkspaceManager } from './lib/agent-workspace-manager';
 import { AgentOrchestrator } from './lib/agent-orchestrator';
 import { GitManager } from './lib/git-manager';
+import { RealtimeBridge } from './lib/realtime-bridge';
 
 const isDev = !app.isPackaged;
 const devServerUrl = process.env.VITE_DEV_SERVER_URL ?? 'http://127.0.0.1:5173';
@@ -11,6 +12,7 @@ const devServerUrl = process.env.VITE_DEV_SERVER_URL ?? 'http://127.0.0.1:5173';
 let mainWindow: BrowserWindow | null = null;
 let workspaceManager: AgentWorkspaceManager | null = null;
 let agentOrchestrator: AgentOrchestrator | null = null;
+let realtimeBridge: RealtimeBridge | null = null;
 
 function getPreloadPath() {
   return path.join(__dirname, '../preload/preload.js');
@@ -49,6 +51,12 @@ function createMainWindow() {
 
   workspaceManager = new AgentWorkspaceManager();
   agentOrchestrator = new AgentOrchestrator(mainWindow);
+  realtimeBridge = new RealtimeBridge(mainWindow);
+
+  mainWindow.on('closed', () => {
+    realtimeBridge?.dispose();
+    realtimeBridge = null;
+  });
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
@@ -75,6 +83,22 @@ function createMainWindow() {
 }
 
 function registerIpcHandlers() {
+  ipcMain.handle('realtime:connect', () => {
+    realtimeBridge?.connect();
+  });
+
+  ipcMain.handle('realtime:subscribe', (_event, params: { repositoryId: string; sinceSeq?: number }) => {
+    realtimeBridge?.subscribe(params.repositoryId, params.sinceSeq);
+  });
+
+  ipcMain.handle('realtime:leave', (_event, params: { repositoryId: string }) => {
+    realtimeBridge?.leave(params.repositoryId);
+  });
+
+  ipcMain.handle('realtime:disconnect', () => {
+    realtimeBridge?.disconnect();
+  });
+
   ipcMain.handle('desktop:open-external', async (_event, rawUrl: string) => {
     const url = new URL(rawUrl);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {

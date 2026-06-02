@@ -16,7 +16,7 @@ import { workbenchQueryKeys } from '@/hooks/queries/use-workbench-queries';
 import { analysisQueryKeys } from '@/hooks/use-analysis';
 import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
 import { useSyncProgressStore } from '@/stores/sync-progress.store';
-import { getSocketUrl } from '@/lib/desktop';
+import { getSocketUrl, isDesktopRuntime } from '@/lib/desktop';
 import { useWorkbenchUnreadStore } from '@/stores/workbench-unread.store';
 import { getLastSeq, setLastSeq } from '@/lib/event-seq';
 
@@ -203,7 +203,10 @@ export function createRealtimeHandlers(
   };
 }
 
-export function useRepositoryRealtimeSubscription(repositoryIds?: string | string[]) {
+function useSocketIoRealtimeSubscription(
+  repositoryIds: string | string[] | undefined,
+  enabled: boolean,
+) {
   const queryClient = useQueryClient();
   const { data: currentUser, isLoading: isAuthLoading } = useCurrentUserQuery();
   const socketRef = useRef<Socket | null>(null);
@@ -248,7 +251,7 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
   }, [currentUser?.id, getTargetRepositoryIds]);
 
   const connect = useCallback(() => {
-    if (!currentUser || isAuthLoading || socketRef.current || connectTimeoutRef.current !== null) {
+    if (!enabled || !currentUser || isAuthLoading || socketRef.current || connectTimeoutRef.current !== null) {
       return;
     }
 
@@ -288,7 +291,7 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
 
       socketRef.current = socket;
     }, 0);
-  }, [currentUser, isAuthLoading, queryClient, socketNamespace, syncRoomSubscriptions]);
+  }, [enabled, currentUser, isAuthLoading, queryClient, socketNamespace, syncRoomSubscriptions]);
 
   const disconnect = useCallback(() => {
     if (connectTimeoutRef.current !== null) {
@@ -304,7 +307,7 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
   }, []);
 
   useEffect(() => {
-    if (!currentUser || isAuthLoading) {
+    if (!enabled || !currentUser || isAuthLoading) {
       disconnect();
       return;
     }
@@ -313,7 +316,7 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
     return () => {
       disconnect();
     };
-  }, [connect, currentUser, disconnect, isAuthLoading]);
+  }, [connect, currentUser, disconnect, enabled, isAuthLoading]);
 
   useEffect(() => {
     syncRoomSubscriptions();
@@ -329,4 +332,104 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
       subscribedRoomsRef.current = new Set();
     };
   }, [syncRoomSubscriptions]);
+}
+
+/**
+ * 桌面端（Electron）实时订阅：经主进程 IPC 接收实时事件，绕过浏览器 socket.io，
+ * 复用与 web 完全相同的 createRealtimeHandlers 处理逻辑。
+ *
+ * 连接生命周期：登录后调用一次 connect（主进程保证幂等），本 hook 卸载时只取消
+ * onMessage 监听，不主动 disconnect（连接绑定登录态/应用，由主进程统一管理）。
+ */
+function useIpcRealtimeSubscription(
+  repositoryIds: string | string[] | undefined,
+  enabled: boolean,
+) {
+  const queryClient = useQueryClient();
+  const { data: currentUser, isLoading: isAuthLoading } = useCurrentUserQuery();
+  const subscribedRoomsRef = useRef<Set<string>>(new Set());
+
+  const getTargetRepositoryIds = useCallback(() => {
+    if (Array.isArray(repositoryIds)) {
+      return repositoryIds.filter(Boolean);
+    }
+
+    return repositoryIds ? [repositoryIds] : [];
+  }, [repositoryIds]);
+
+  useEffect(() => {
+    if (!enabled || !currentUser || isAuthLoading) {
+      return;
+    }
+
+    const bridge = window.repoPulseDesktop?.realtime;
+    if (!bridge) {
+      return;
+    }
+
+    const handlers = createRealtimeHandlers(queryClient, currentUser.id);
+    const unsubscribe = bridge.onMessage((message) => {
+      if (import.meta.env.DEV) {
+        console.log('[ipc-realtime] recv', message.name);
+      }
+      (handlers[message.name] as (payload: unknown) => void)(message.payload);
+    });
+
+    void bridge.connect();
+
+    return () => {
+      unsubscribe();
+    };
+  }, [enabled, currentUser, isAuthLoading, queryClient]);
+
+  useEffect(() => {
+    if (!enabled || !currentUser || isAuthLoading) {
+      return;
+    }
+
+    const bridge = window.repoPulseDesktop?.realtime;
+    if (!bridge) {
+      return;
+    }
+
+    const userId = currentUser.id;
+    const nextRooms = new Set(getTargetRepositoryIds());
+
+    for (const id of nextRooms) {
+      if (!subscribedRoomsRef.current.has(id)) {
+        const sinceSeq = getLastSeq(userId, id);
+        void bridge.subscribe(
+          typeof sinceSeq === 'number'
+            ? { repositoryId: id, sinceSeq }
+            : { repositoryId: id },
+        );
+      }
+    }
+
+    for (const id of subscribedRoomsRef.current) {
+      if (!nextRooms.has(id)) {
+        void bridge.leave({ repositoryId: id });
+      }
+    }
+
+    subscribedRoomsRef.current = nextRooms;
+
+    return () => {
+      const current = window.repoPulseDesktop?.realtime;
+      for (const id of subscribedRoomsRef.current) {
+        void current?.leave({ repositoryId: id });
+      }
+      subscribedRoomsRef.current = new Set();
+    };
+  }, [enabled, currentUser, isAuthLoading, getTargetRepositoryIds]);
+}
+
+/**
+ * 仓库实时订阅。桌面端走 Electron IPC（主进程持有唯一连接），其余环境走 socket.io。
+ * 两条分支互斥，共用同一套 React Query 失效逻辑（createRealtimeHandlers）。
+ */
+export function useRepositoryRealtimeSubscription(repositoryIds?: string | string[]) {
+  const isDesktop = isDesktopRuntime();
+  useSocketIoRealtimeSubscription(repositoryIds, !isDesktop);
+  useIpcRealtimeSubscription(repositoryIds, isDesktop);
 }
