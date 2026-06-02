@@ -13,6 +13,7 @@ import {
   normalizeRepositoryBranchScopes,
   parseRepositoryBranchScopesParam,
 } from '../../common/utils/repository-branch-scope';
+import { EventGateway } from '../event/event.gateway';
 
 export interface NotificationPreferences {
   channels: NotificationChannel[];
@@ -53,7 +54,41 @@ export class NotificationService {
     private readonly webhookChannel: WebhookChannel,
     private readonly wecomChannel: WecomChannel,
     private readonly wechatChannel: WechatChannel,
+    private readonly eventGateway: EventGateway,
   ) {}
+
+  /**
+   * IN_APP 通知落库成功后，向该用户的 Room 定向推送 notification.new（含最新未读数），
+   * 触发前端红点即时刷新。非 IN_APP 渠道跳过；广播失败不影响通知主流程。
+   */
+  private async maybeEmitNotificationNew(
+    dto: SendNotificationDto,
+    notificationId: string,
+  ): Promise<void> {
+    if (dto.channel !== NotificationChannel.IN_APP) {
+      return;
+    }
+    try {
+      const unreadCount = await this.getUnreadCount(dto.userId);
+      this.eventGateway.broadcastNotificationNew(dto.userId, {
+        userId: dto.userId,
+        unreadCount,
+        notification: {
+          id: notificationId,
+          title: dto.title,
+          content: dto.content,
+          eventId: dto.eventId ?? null,
+          createdAt: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `notification_new_broadcast_failed id=${notificationId} reason=${
+          error instanceof Error ? error.message : 'unknown_error'
+        }`,
+      );
+    }
+  }
 
   private async resolveRepositoryIds(
     userId: string,
@@ -207,6 +242,10 @@ export class NotificationService {
       this.logger.log(
         `${result.success ? 'notification_sent' : 'notification_failed'} notificationId=${notification.id} channel=${dto.channel} userId=${dto.userId}`,
       );
+
+      if (result.success) {
+        await this.maybeEmitNotificationNew(dto, notification.id);
+      }
 
       return {
         ...notification,

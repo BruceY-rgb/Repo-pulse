@@ -10,6 +10,7 @@ export const REALTIME_EVENTS = {
   ANALYSIS_COMPLETED: 'analysis.completed',
   ANALYSIS_STARTED: 'analysis.started',
   ANALYSIS_FAILED: 'analysis.failed',
+  NOTIFICATION_NEW: 'notification.new',
 } as const;
 
 export type RealtimeEventName =
@@ -74,6 +75,18 @@ export interface AnalysisFailedPayload {
   reason: string;
 }
 
+export interface NotificationNewPayload {
+  userId: string;
+  unreadCount: number;
+  notification: {
+    id: string;
+    title: string;
+    content: string;
+    eventId?: string | null;
+    createdAt: string;
+  };
+}
+
 export interface EventReplayDonePayload {
   repositoryId: string;
   replayed: number;
@@ -91,6 +104,7 @@ export interface RealtimeEventPayloadMap {
   [REALTIME_EVENTS.ANALYSIS_COMPLETED]: AnalysisCompletedPayload;
   [REALTIME_EVENTS.ANALYSIS_STARTED]: AnalysisStartedPayload;
   [REALTIME_EVENTS.ANALYSIS_FAILED]: AnalysisFailedPayload;
+  [REALTIME_EVENTS.NOTIFICATION_NEW]: NotificationNewPayload;
 }
 
 export type RealtimeEventPayload<E extends RealtimeEventName> =

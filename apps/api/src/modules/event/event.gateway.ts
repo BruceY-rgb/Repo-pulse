@@ -19,6 +19,7 @@ import {
   ApprovalUpdatedPayload,
   EventCreatedPayload,
   EventReplayDonePayload,
+  NotificationNewPayload,
   REALTIME_EVENTS,
   RepositorySyncFailedPayload,
   RepositorySyncProgressPayload,
@@ -119,6 +120,9 @@ export class EventGateway
       const decoded = jwt.verify(token, this.jwtSecret) as JwtPayload;
       client.userId = decoded.sub;
       client.email = decoded.email;
+      // 每个已认证 socket 加入按用户的 Room，支撑 notification.new 等用户级定向推送
+      // （web 与桌面主进程客户端同样受益）。
+      client.join(`user:${decoded.sub}`);
       this.trackedSockets.set(client.id, {
         userId: decoded.sub,
         email: decoded.email,
@@ -339,6 +343,15 @@ export class EventGateway
     this.metricsService.observeEmitLatency(REALTIME_EVENTS.ANALYSIS_FAILED, 0);
     this.logger.warn(
       `Broadcast ${REALTIME_EVENTS.ANALYSIS_FAILED} to room ${roomName} eventId=${payload.eventId} reason=${payload.reason}`,
+    );
+  }
+
+  broadcastNotificationNew(userId: string, payload: NotificationNewPayload) {
+    const roomName = `user:${userId}`;
+    this.server.to(roomName).emit(REALTIME_EVENTS.NOTIFICATION_NEW, payload);
+    this.metricsService.observeEmitLatency(REALTIME_EVENTS.NOTIFICATION_NEW, 0);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.NOTIFICATION_NEW} to room ${roomName} unread=${payload.unreadCount} notificationId=${payload.notification.id}`,
     );
   }
 

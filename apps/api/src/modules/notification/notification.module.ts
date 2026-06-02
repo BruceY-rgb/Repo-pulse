@@ -9,11 +9,13 @@ import { WecomChannel } from './channels/wecom.channel';
 import { WechatChannel } from './channels/wechat.channel';
 import { UserModule } from '../user/user.module';
 import { ImModule } from '../im/im.module';
+import { EventModule } from '../event/event.module';
 
 @Module({
   imports: [
     UserModule,
     forwardRef(() => ImModule),
+    forwardRef(() => EventModule),
   ],
   controllers: [NotificationController],
   providers: [

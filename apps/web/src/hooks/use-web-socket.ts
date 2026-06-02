@@ -187,6 +187,11 @@ export function createRealtimeHandlers(
       queryClient.invalidateQueries({ queryKey: analysisQueryKeys.detail(eventId) });
       queryClient.invalidateQueries({ queryKey: analysisQueryKeys.list() });
     },
+    [REALTIME_EVENTS.NOTIFICATION_NEW]: () => {
+      // 用户级事件（无需按 repositoryId 过滤）：刷新未读数与通知列表，驱动红点。
+      queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
+      queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
+    },
     [REALTIME_EVENTS.APPROVAL_UPDATED]: ({ repositoryId }) => {
       queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
       queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
