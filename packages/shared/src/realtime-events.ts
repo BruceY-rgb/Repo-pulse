@@ -8,6 +8,8 @@ export const REALTIME_EVENTS = {
   REPOSITORY_SYNCED: 'repository.synced',
   REPOSITORY_SYNC_FAILED: 'repository.sync.failed',
   ANALYSIS_COMPLETED: 'analysis.completed',
+  ANALYSIS_STARTED: 'analysis.started',
+  ANALYSIS_FAILED: 'analysis.failed',
 } as const;
 
 export type RealtimeEventName =
@@ -58,6 +60,20 @@ export interface AnalysisCompletedPayload {
   completedAt: string;
 }
 
+export interface AnalysisStartedPayload {
+  eventId: string;
+  repositoryId: string;
+  startedAt: string;
+  source: 'auto' | 'manual';
+}
+
+export interface AnalysisFailedPayload {
+  eventId: string;
+  repositoryId: string;
+  failedAt: string;
+  reason: string;
+}
+
 export interface EventReplayDonePayload {
   repositoryId: string;
   replayed: number;
@@ -73,6 +89,8 @@ export interface RealtimeEventPayloadMap {
   [REALTIME_EVENTS.REPOSITORY_SYNCED]: RepositorySyncedPayload;
   [REALTIME_EVENTS.REPOSITORY_SYNC_FAILED]: RepositorySyncFailedPayload;
   [REALTIME_EVENTS.ANALYSIS_COMPLETED]: AnalysisCompletedPayload;
+  [REALTIME_EVENTS.ANALYSIS_STARTED]: AnalysisStartedPayload;
+  [REALTIME_EVENTS.ANALYSIS_FAILED]: AnalysisFailedPayload;
 }
 
 export type RealtimeEventPayload<E extends RealtimeEventName> =

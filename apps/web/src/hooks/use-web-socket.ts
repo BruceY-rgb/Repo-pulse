@@ -177,6 +177,16 @@ export function createRealtimeHandlers(
       queryClient.invalidateQueries({ queryKey: analysisQueryKeys.detail(eventId) });
       queryClient.invalidateQueries({ queryKey: analysisQueryKeys.list() });
     },
+    [REALTIME_EVENTS.ANALYSIS_STARTED]: ({ eventId }) => {
+      // 分析开始：刷新分析详情/列表以反映“进行中”状态。
+      queryClient.invalidateQueries({ queryKey: analysisQueryKeys.detail(eventId) });
+      queryClient.invalidateQueries({ queryKey: analysisQueryKeys.list() });
+    },
+    [REALTIME_EVENTS.ANALYSIS_FAILED]: ({ eventId, reason }) => {
+      toast.error(`AI 分析失败：${reason}`);
+      queryClient.invalidateQueries({ queryKey: analysisQueryKeys.detail(eventId) });
+      queryClient.invalidateQueries({ queryKey: analysisQueryKeys.list() });
+    },
     [REALTIME_EVENTS.APPROVAL_UPDATED]: ({ repositoryId }) => {
       queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
       queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });

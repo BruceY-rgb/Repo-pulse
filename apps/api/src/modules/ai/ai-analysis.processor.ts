@@ -47,6 +47,25 @@ export class AIProcessor extends WorkerHost {
       return;
     }
 
+    // 在真正分析前取一次 repositoryId，供 started/completed/failed 三处复用。
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      select: { repositoryId: true },
+    });
+    const repositoryId = event?.repositoryId ?? null;
+    if (!repositoryId) {
+      this.logger.warn(`broadcast_skipped_event_missing eventId=${eventId}`);
+    }
+
+    if (repositoryId) {
+      this.eventGateway.broadcastAnalysisStarted({
+        eventId,
+        repositoryId,
+        startedAt: new Date().toISOString(),
+        source,
+      });
+    }
+
     try {
       const analysis = await this.aiService.analyzeEvent(eventId, force ?? false);
       this.logger.log(`AI analysis completed for event: ${eventId}`);
@@ -61,24 +80,24 @@ export class AIProcessor extends WorkerHost {
       }
 
       // 所有流程完成后通知前端刷新
-      const event = await prisma.event.findUnique({
-        where: { id: eventId },
-        select: { repositoryId: true },
-      });
-      if (event) {
+      if (repositoryId) {
         this.eventGateway.broadcastAnalysisCompleted({
           eventId,
-          repositoryId: event.repositoryId,
+          repositoryId,
           completedAt: new Date().toISOString(),
         });
-      } else {
-        this.logger.warn(
-          `broadcast_skipped_event_missing eventId=${eventId}`,
-        );
       }
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       this.logger.error(`ai_analysis_failed eventId=${eventId} reason=${err.message}`, err.stack);
+      if (repositoryId) {
+        this.eventGateway.broadcastAnalysisFailed({
+          eventId,
+          repositoryId,
+          failedAt: new Date().toISOString(),
+          reason: err.message,
+        });
+      }
       throw error;
     }
   }

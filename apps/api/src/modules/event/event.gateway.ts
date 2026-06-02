@@ -14,6 +14,8 @@ import * as jwt from 'jsonwebtoken';
 import { PrismaClient } from '@repo-pulse/database';
 import {
   AnalysisCompletedPayload,
+  AnalysisFailedPayload,
+  AnalysisStartedPayload,
   ApprovalUpdatedPayload,
   EventCreatedPayload,
   EventReplayDonePayload,
@@ -319,6 +321,24 @@ export class EventGateway
     this.metricsService.observeEmitLatency(REALTIME_EVENTS.APPROVAL_UPDATED, 0);
     this.logger.log(
       `Broadcast ${REALTIME_EVENTS.APPROVAL_UPDATED} to room ${roomName} approvalId=${payload.approvalId} status=${payload.status}`,
+    );
+  }
+
+  broadcastAnalysisStarted(payload: AnalysisStartedPayload) {
+    const roomName = `repo:${payload.repositoryId}`;
+    this.server.to(roomName).emit(REALTIME_EVENTS.ANALYSIS_STARTED, payload);
+    this.metricsService.observeEmitLatency(REALTIME_EVENTS.ANALYSIS_STARTED, 0);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.ANALYSIS_STARTED} to room ${roomName} eventId=${payload.eventId} source=${payload.source}`,
+    );
+  }
+
+  broadcastAnalysisFailed(payload: AnalysisFailedPayload) {
+    const roomName = `repo:${payload.repositoryId}`;
+    this.server.to(roomName).emit(REALTIME_EVENTS.ANALYSIS_FAILED, payload);
+    this.metricsService.observeEmitLatency(REALTIME_EVENTS.ANALYSIS_FAILED, 0);
+    this.logger.warn(
+      `Broadcast ${REALTIME_EVENTS.ANALYSIS_FAILED} to room ${roomName} eventId=${payload.eventId} reason=${payload.reason}`,
     );
   }
 
