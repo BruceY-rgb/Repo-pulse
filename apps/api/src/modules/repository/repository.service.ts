@@ -960,8 +960,12 @@ export class RepositoryService {
     if (!membership) {
       throw new ForbiddenException('You do not have access to this repository');
     }
-    if (membership.role !== 'ADMIN') {
-      throw new ForbiddenException('Admin role required to manage webhooks');
+    // 用可靠的 accessMode 判定能否管理 webhook，而非脆弱的 legacy role：
+    // role 列默认值为 MEMBER，且 sync / upsert 等多处写入不一致，导致同步发现的
+    // 仓库 role 常为 MEMBER，永远过不了 role==='ADMIN' 门禁。accessMode 在 DB 中
+    // 始终正确维护（可编辑=EDITABLE，只读=MONITOR）。
+    if (membership.accessMode !== RepositoryAccessMode.EDITABLE) {
+      throw new ForbiddenException('Editable access required to manage webhooks');
     }
 
     const [owner, repo] = this.parseRepositoryPath(repository.fullName);

@@ -94,7 +94,9 @@ export class SyncService {
         try {
           const accessLevel = this.resolveGithubAccessLevel(repo, user.githubLogin);
           const accessMode = this.resolveAccessMode(accessLevel);
-          const role: Role = accessMode === RepositoryAccessMode.EDITABLE ? 'MEMBER' : 'VIEWER';
+          // 可编辑仓库赋 ADMIN，与手动添加路径（repository.service.create）一致，
+          // 否则 webhook 管理接口的 role==='ADMIN' 门禁会对同步发现的仓库一律 403。
+          const role: Role = accessMode === RepositoryAccessMode.EDITABLE ? 'ADMIN' : 'VIEWER';
           let existing = await prisma.repository.findFirst({
             where: { externalId: String(repo.id) },
           });
