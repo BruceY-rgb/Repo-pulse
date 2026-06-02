@@ -261,6 +261,19 @@ export function GitTreePanel({
     }
   }, [cwd, fetchGitStatus, refreshTrigger]);
 
+  // 主进程本地 git 监听检测到变化时，若是当前面板的本地仓库则即时重载。
+  useEffect(() => {
+    if (!isDesktopRuntime() || !cwd) return;
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ cwd?: string }>).detail;
+      if (detail?.cwd === cwd) {
+        void fetchGitStatus();
+      }
+    };
+    window.addEventListener('repo-pulse:local-git-changed', handler);
+    return () => window.removeEventListener('repo-pulse:local-git-changed', handler);
+  }, [cwd, fetchGitStatus]);
+
   const handleAssociateLocalWorkspace = async () => {
     if (!isDesktopRuntime() || !repositoryUrl) return;
     try {

@@ -7,6 +7,7 @@ import {
   type EventReplayDonePayload,
   type RealtimeEventName,
 } from '@repo-pulse/shared';
+import { LocalGitWatcher } from './local-git-watcher';
 
 /** 主进程 → 渲染进程的单一实时信封通道。 */
 const REALTIME_CHANNEL = 'desktop:realtime';
@@ -35,8 +36,14 @@ export class RealtimeBridge {
   private readonly roomRefCount = new Map<string, number>();
   /** 每个房间已知的最新 seq，用于重连时带 sinceSeq 补发。 */
   private readonly roomLastSeq = new Map<string, number>();
+  /** 本地 git 监听器：本地有该仓库 clone 时监听其 git 状态（仅前端刷新）。 */
+  private readonly localGitWatcher: LocalGitWatcher;
 
-  constructor(private readonly mainWindow: BrowserWindow) {}
+  constructor(private readonly mainWindow: BrowserWindow) {
+    this.localGitWatcher = new LocalGitWatcher(mainWindow, API_BASE_URL, () =>
+      this.readAccessToken(),
+    );
+  }
 
   /** 建立连接。幂等：已存在 socket 则直接返回（渲染进程多个 hook 实例可安全重复调用）。 */
   connect(): void {
@@ -87,6 +94,8 @@ export class RealtimeBridge {
     }
     if (next === 1) {
       this.joinRoom(repositoryId);
+      // 本地有该仓库 clone 时启动本地 git 监听（独立于 socket，登出/退出才停）。
+      void this.localGitWatcher.watch(repositoryId);
     }
   }
 
@@ -95,6 +104,7 @@ export class RealtimeBridge {
     const current = this.roomRefCount.get(repositoryId) ?? 0;
     if (current <= 1) {
       this.roomRefCount.delete(repositoryId);
+      this.localGitWatcher.unwatch(repositoryId);
       if (this.socket?.connected) {
         this.socket.emit('leave:repository', { repositoryId });
       }
@@ -112,6 +122,7 @@ export class RealtimeBridge {
     }
     this.roomRefCount.clear();
     this.roomLastSeq.clear();
+    this.localGitWatcher.disposeAll();
   }
 
   dispose(): void {

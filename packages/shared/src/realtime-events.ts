@@ -111,12 +111,39 @@ export type RealtimeEventPayload<E extends RealtimeEventName> =
   RealtimeEventPayloadMap[E];
 
 /**
+ * 桌面端本地事件（仅 Electron 主进程产生，后端网关从不 emit）。
+ * 当本地存在该仓库的 clone 时，主进程轮询本地 git 状态，变化即推送。
+ */
+export const DESKTOP_LOCAL_EVENTS = {
+  LOCAL_GIT_CHANGED: 'local.git.changed',
+} as const;
+
+export interface LocalGitChangedPayload {
+  repositoryId: string;
+  /** 本地 clone 的 git 根目录。 */
+  cwd: string;
+  branch: string;
+  /** 当前 HEAD 提交短哈希。 */
+  headCommit: string;
+  headMessage: string;
+  /** 工作树未提交改动数量。 */
+  pendingChanges: number;
+  detectedAt: string;
+}
+
+/**
  * 桌面端（Electron）单一 IPC 信封通道载荷。
  *
- * 主进程把 socket.io 收到的实时事件统一封装为 { name, payload }，经
- * 'desktop:realtime' 通道转发给渲染进程；渲染进程按 name 分发到对应处理器。
- * 仅类型层面新增，不改动 REALTIME_EVENTS（不影响处理器穷尽性约束）。
+ * 主进程把实时事件统一封装为 { name, payload }，经 'desktop:realtime' 通道
+ * 转发给渲染进程；渲染进程按 name 分发。包含两类来源：
+ * 1. 后端网关的 REALTIME_EVENTS.*（经主进程 socket.io 客户端转发）；
+ * 2. 主进程本地探测的 DESKTOP_LOCAL_EVENTS.*（如 local.git.changed）。
  */
-export type DesktopRealtimeMessage = {
-  [K in RealtimeEventName]: { name: K; payload: RealtimeEventPayloadMap[K] };
-}[RealtimeEventName];
+export type DesktopRealtimeMessage =
+  | {
+      [K in RealtimeEventName]: { name: K; payload: RealtimeEventPayloadMap[K] };
+    }[RealtimeEventName]
+  | {
+      name: typeof DESKTOP_LOCAL_EVENTS.LOCAL_GIT_CHANGED;
+      payload: LocalGitChangedPayload;
+    };

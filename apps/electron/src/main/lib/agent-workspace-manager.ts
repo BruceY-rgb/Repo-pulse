@@ -113,6 +113,15 @@ export class AgentWorkspaceManager {
     };
   }
 
+  /**
+   * 仅定位：给定远程地址，返回本机已存在且 remote 匹配的 clone 的 git 根目录；找不到返回 null。
+   * 供本地 git 监听（LocalGitWatcher）判断「本地是否有该仓库」。
+   */
+  async locateLocalRepo(remoteUrl: string): Promise<string | null> {
+    const workspace = await this.findLocalWorkspace(remoteUrl);
+    return workspace?.cwd ?? null;
+  }
+
   private async findLocalWorkspace(gitUrl: string): Promise<PreparedAgentWorkspace | null> {
     const targetRemote = normalizeGitRemote(gitUrl);
     if (!targetRemote) return null;

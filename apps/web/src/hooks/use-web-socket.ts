@@ -5,6 +5,7 @@ import { io } from 'socket.io-client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  DESKTOP_LOCAL_EVENTS,
   REALTIME_EVENTS,
   type RealtimeEventName,
   type RealtimeEventPayloadMap,
@@ -386,6 +387,16 @@ function useIpcRealtimeSubscription(
     const unsubscribe = bridge.onMessage((message) => {
       if (import.meta.env.DEV) {
         console.log('[ipc-realtime] recv', message.name);
+      }
+      // 本地 git 事件（仅桌面）：刷新仓库详情/分支，并派发窗口事件供 GitTreePanel 重载。
+      if (message.name === DESKTOP_LOCAL_EVENTS.LOCAL_GIT_CHANGED) {
+        const { repositoryId } = message.payload;
+        queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.detail(repositoryId) });
+        queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.branches(repositoryId) });
+        window.dispatchEvent(
+          new CustomEvent('repo-pulse:local-git-changed', { detail: message.payload }),
+        );
+        return;
       }
       (handlers[message.name] as (payload: unknown) => void)(message.payload);
     });
