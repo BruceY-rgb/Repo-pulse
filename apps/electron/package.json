@@ -11,7 +11,7 @@
     "build:main": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "fetch:cloudflared": "node scripts/fetch-cloudflared.mjs",
-    "package": "pnpm run build && electron-builder",
+    "package": "pnpm run fetch:cloudflared && pnpm run build && electron-builder",
     "start": "electron ."
   },
   "build": {
@@ -28,6 +28,10 @@
       {
         "from": "../web/dist",
         "to": "web/dist"
+      },
+      {
+        "from": "resources/bin",
+        "to": "bin"
       }
     ],
     "mac": {

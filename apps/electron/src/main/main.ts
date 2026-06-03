@@ -8,7 +8,7 @@ import { RealtimeBridge } from './lib/realtime-bridge';
 import { WebhookProxy } from './lib/tunnel/webhook-proxy';
 import { TunnelManager } from './lib/tunnel/tunnel-manager';
 import { TunnelOrchestrator } from './lib/tunnel/tunnel-orchestrator';
-import type { TunnelStatus } from './lib/tunnel/types';
+import type { TunnelStatus, OrchestratorResult } from './lib/tunnel/types';
 import type { DesktopTunnelStatus } from '@repo-pulse/shared';
 
 const isDev = !app.isPackaged;
@@ -102,6 +102,34 @@ function buildTunnelStatus(): DesktopTunnelStatus {
 }
 
 /**
+ * 把 orchestrator.applyPublicUrl() 的结果转成给渲染层 M3 状态卡的「降级提示」并主动推送。
+ * 隧道本身已 running（publicUrl 已就绪），但「让后端 webhook 指向它」这一步出问题时：
+ *   - needsAdmin（写 API_URL 被 403）：推 error，文案「需要管理员权限，无法自动配置 webhook」。
+ *   - 其它失败（如 webhook 批量重建部分失败）：推 error，透出 orchestrator 给的可读 error。
+ * 隧道仍可用（公网 URL 有效），只是 webhook 自动配置未成功；UI 据此提示用户手动处理。
+ * 成功（apiUrlSet && !error）则不额外推送，沿用 TunnelManager 已推的 running 状态。
+ */
+function reportOrchestrationOutcome(result: OrchestratorResult, publicUrl: string): void {
+  let error: string | null = null;
+  if (!result.apiUrlSet && result.needsAdmin) {
+    error = '需要管理员权限，无法自动配置 webhook';
+  } else if (result.error) {
+    // apiUrlSet=false 的其它失败，或 apiUrlSet=true 但 webhook 重建失败，均透出可读原因。
+    error = `隧道已就绪，但 webhook 自动配置失败：${result.error}`;
+  }
+  if (!error) {
+    return;
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('tunnel:status', {
+      state: 'error',
+      publicUrl,
+      error,
+    } satisfies DesktopTunnelStatus);
+  }
+}
+
+/**
  * 启动「自动隧道 → 自动 webhook」编排链路（幂等，仅首次 realtime:connect 真正执行）：
  *   WebhookProxy.start() 拿临时端口 → TunnelManager.start() spawn cloudflared 拿公网 URL →
  *   TunnelOrchestrator.applyPublicUrl(publicUrl) 写后端 API_URL + 批量重建 webhook。
@@ -135,6 +163,8 @@ async function startTunnelOrchestrationOnce(): Promise<void> {
     } else {
       console.log('[main] tunnel orchestration complete:', JSON.stringify(result.rebuild));
     }
+    // 隧道 running 但 webhook 配置失败时，主动推降级提示给渲染层（needsAdmin / 重建失败）。
+    reportOrchestrationOutcome(result, publicUrl);
   } catch (error) {
     // 失败不可崩主流程：允许下次 realtime:connect 重试。
     tunnelStarted = false;
@@ -178,6 +208,8 @@ async function refreshTunnel(): Promise<DesktopTunnelStatus> {
     } else {
       console.log('[main] tunnel:refresh complete:', JSON.stringify(result.rebuild));
     }
+    // 同首启：webhook 配置失败时推降级提示。隧道已就绪（newUrl 有效），仅自动配 webhook 失败。
+    reportOrchestrationOutcome(result, newUrl);
     return buildTunnelStatus();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
