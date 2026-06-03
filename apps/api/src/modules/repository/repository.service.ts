@@ -817,18 +817,31 @@ export class RepositoryService {
     );
 
     if (repository.platform === Platform.GITHUB && repository.webhookId) {
+      let deleted = false;
       try {
         await this.githubService.deleteWebhook(owner, repo, repository.webhookId, accessToken);
+        deleted = true;
       } catch (error) {
+        // GitHub 已返回 404（hook 不存在）也视为「已清理」，避免把已消失的 id 永久保留
+        const status = (error as { response?: { status?: number } })?.response?.status;
+        if (status === 404) {
+          deleted = true;
+        }
         const message = error instanceof Error ? error.message : 'unknown_error';
         this.logger.warn(
-          `webhook_retry_cleanup_failed repo=${repository.fullName} message=${message}`,
+          `webhook_retry_cleanup_failed repo=${repository.fullName} status=${status ?? 'unknown'} message=${message}`,
         );
       }
-      await this.prisma.repository.update({
-        where: { id: repository.id },
-        data: { webhookId: null },
-      });
+      // 防御孤儿：仅在删除确实成功（或 hook 已不存在）时才清空 DB webhookId。
+      // 若 delete 因瞬时错误失败仍清空 id，则旧 hook 会在 GitHub 上残留且再也无法被定位删除
+      // （隧道 URL 每次启动唯一，provisionWebhook 的自愈仅按当前 URL 匹配，命中不了旧 URL 的孤儿）。
+      // 保留 id 可让下一次 retry 用同一 id 再次（幂等）尝试删除。
+      if (deleted) {
+        await this.prisma.repository.update({
+          where: { id: repository.id },
+          data: { webhookId: null },
+        });
+      }
     }
 
     let webhookSecret = repository.webhookSecret;
@@ -889,12 +902,32 @@ export class RepositoryService {
       select: { id: true, fullName: true },
     });
 
-    const results = await Promise.allSettled(
-      repos.map(async (repo) => ({
-        repo,
-        result: await this.retryWebhook(userId, repo.id),
-      })),
-    );
+    // 受限并发：每个 retryWebhook 内部对 GitHub 发起多次 API 调用（delete + list + create），
+    // 全量并发（如 70+ 仓库）极易触发 GitHub secondary rate limit / abuse detection。
+    // 此处把并发收敛为分块串行（块内并发 BATCH_RETRY_CONCURRENCY，块间延迟 BATCH_RETRY_DELAY_MS），
+    // 不引入第三方依赖（如 p-limit），返回结构与对外行为保持不变。
+    const BATCH_RETRY_CONCURRENCY = 4;
+    const BATCH_RETRY_DELAY_MS = 300;
+
+    const results: Array<
+      PromiseSettledResult<{ repo: (typeof repos)[number]; result: WebhookProvisionResult }>
+    > = [];
+
+    for (let offset = 0; offset < repos.length; offset += BATCH_RETRY_CONCURRENCY) {
+      const chunk = repos.slice(offset, offset + BATCH_RETRY_CONCURRENCY);
+      const chunkResults = await Promise.allSettled(
+        chunk.map(async (repo) => ({
+          repo,
+          result: await this.retryWebhook(userId, repo.id),
+        })),
+      );
+      results.push(...chunkResults);
+
+      // 块间小延迟，进一步降速以规避 GitHub abuse detection（最后一块不再等待）
+      if (offset + BATCH_RETRY_CONCURRENCY < repos.length) {
+        await new Promise((resolve) => setTimeout(resolve, BATCH_RETRY_DELAY_MS));
+      }
+    }
 
     let succeeded = 0;
     const failures: Array<{ repositoryId: string; fullName: string; status: WebhookStatus; error?: string }> = [];

@@ -1,4 +1,4 @@
-import type { DesktopRealtimeMessage } from '@repo-pulse/shared';
+import type { DesktopRealtimeMessage, DesktopTunnelStatus } from '@repo-pulse/shared';
 
 type RepoPulseDesktopBridge = {
   isDesktop: true;
@@ -62,6 +62,10 @@ type RepoPulseDesktopBridge = {
     leave: (params: { repositoryId: string }) => Promise<void>;
     disconnect: () => Promise<void>;
     onMessage: (callback: (message: DesktopRealtimeMessage) => void) => () => void;
+  };
+  tunnel?: {
+    refresh: () => Promise<DesktopTunnelStatus>;
+    onStatus: (callback: (status: DesktopTunnelStatus) => void) => () => void;
   };
 };
 

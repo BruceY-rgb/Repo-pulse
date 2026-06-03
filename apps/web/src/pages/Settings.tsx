@@ -65,6 +65,7 @@ import {
 } from '@/components/settings/notifications/NotificationTemplateGallery';
 import { FeishuIntegrationDialog } from '@/components/settings/integrations/FeishuIntegrationDialog';
 import { ImChannelIntegrationDialog } from '@/components/settings/integrations/ImChannelIntegrationDialog';
+import { DesktopTunnelStatusCard } from '@/components/settings/integrations/TunnelStatusCard';
 import {
   createExceptionRuleFromFilterRule,
   createFilterRulePayloadFromDraft,
@@ -1418,6 +1419,9 @@ export function Settings() {
               </div>
             </CardContent>
           </Card>
+
+          {/* 桌面端实时连接（隧道）状态 + 刷新（仅桌面运行时渲染） */}
+          <DesktopTunnelStatusCard />
 
           <Card className="card-github">
             <CardHeader>

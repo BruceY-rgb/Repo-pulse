@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { DesktopRealtimeMessage } from '@repo-pulse/shared';
+import type { DesktopRealtimeMessage, DesktopTunnelStatus } from '@repo-pulse/shared';
 
 contextBridge.exposeInMainWorld('repoPulseDesktop', {
   isDesktop: true,
@@ -56,6 +56,17 @@ contextBridge.exposeInMainWorld('repoPulseDesktop', {
       ipcRenderer.on('desktop:realtime', subscription);
       return () => {
         ipcRenderer.removeListener('desktop:realtime', subscription);
+      };
+    },
+  },
+  tunnel: {
+    refresh: (): Promise<DesktopTunnelStatus> => ipcRenderer.invoke('tunnel:refresh'),
+    onStatus: (callback: (status: DesktopTunnelStatus) => void) => {
+      const subscription = (_event: IpcRendererEvent, status: DesktopTunnelStatus) =>
+        callback(status);
+      ipcRenderer.on('tunnel:status', subscription);
+      return () => {
+        ipcRenderer.removeListener('tunnel:status', subscription);
       };
     },
   },

@@ -9,6 +9,7 @@ import { WebhookProxy } from './lib/tunnel/webhook-proxy';
 import { TunnelManager } from './lib/tunnel/tunnel-manager';
 import { TunnelOrchestrator } from './lib/tunnel/tunnel-orchestrator';
 import type { TunnelStatus } from './lib/tunnel/types';
+import type { DesktopTunnelStatus } from '@repo-pulse/shared';
 
 const isDev = !app.isPackaged;
 const devServerUrl = process.env.VITE_DEV_SERVER_URL ?? 'http://127.0.0.1:5173';
@@ -24,6 +25,10 @@ let tunnelManager: TunnelManager | null = null;
 let tunnelOrchestrator: TunnelOrchestrator | null = null;
 /** 隧道编排只起一次：重复的 realtime:connect 不重复 spawn cloudflared。 */
 let tunnelStarted = false;
+/** 最近一次 tunnel:refresh 的时间戳（ms），用于防抖（< 3s 内重复点击直接忽略）。 */
+let lastTunnelRefreshAt = 0;
+/** tunnel:refresh 防抖窗口。 */
+const TUNNEL_REFRESH_DEBOUNCE_MS = 3_000;
 
 function getPreloadPath() {
   return path.join(__dirname, '../preload/preload.js');
@@ -68,6 +73,35 @@ async function readAccessToken(): Promise<string | null> {
 }
 
 /**
+ * TunnelManager 的状态回调：log + 把状态实时推给渲染进程（'tunnel:status' 通道），
+ * 让 UI 能看到 starting/running/error 与 publicUrl。`TunnelStatus` 与跨进程
+ * `DesktopTunnelStatus` 字段同构，可直接透传。
+ */
+function onTunnelStatus(status: TunnelStatus): void {
+  console.log(
+    `[main] tunnel status: ${status.state}` +
+      `${status.publicUrl ? ` ${status.publicUrl}` : ''}` +
+      `${status.error ? ` (${status.error})` : ''}`,
+  );
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('tunnel:status', status satisfies DesktopTunnelStatus);
+  }
+}
+
+/** 从当前 TunnelManager 读出快照状态（未实例化则视为 idle）。供 IPC 返回值用。 */
+function buildTunnelStatus(): DesktopTunnelStatus {
+  if (!tunnelManager) {
+    return { state: 'idle' };
+  }
+  const state = tunnelManager.getState();
+  const publicUrl = tunnelManager.getPublicUrl();
+  if (state === 'running' && publicUrl) {
+    return { state, publicUrl };
+  }
+  return { state };
+}
+
+/**
  * 启动「自动隧道 → 自动 webhook」编排链路（幂等，仅首次 realtime:connect 真正执行）：
  *   WebhookProxy.start() 拿临时端口 → TunnelManager.start() spawn cloudflared 拿公网 URL →
  *   TunnelOrchestrator.applyPublicUrl(publicUrl) 写后端 API_URL + 批量重建 webhook。
@@ -89,13 +123,7 @@ async function startTunnelOrchestrationOnce(): Promise<void> {
     tunnelManager = new TunnelManager({
       cloudflaredPath: resolveCloudflaredPath(),
       targetPort: port,
-      onStatus: (status: TunnelStatus) => {
-        console.log(
-          `[main] tunnel status: ${status.state}` +
-            `${status.publicUrl ? ` ${status.publicUrl}` : ''}` +
-            `${status.error ? ` (${status.error})` : ''}`,
-        );
-      },
+      onStatus: onTunnelStatus,
     });
     const publicUrl = await tunnelManager.start();
     console.log(`[main] tunnel running at ${publicUrl}, applying to backend...`);
@@ -112,6 +140,49 @@ async function startTunnelOrchestrationOnce(): Promise<void> {
     tunnelStarted = false;
     const message = error instanceof Error ? error.message : String(error);
     console.warn('[main] tunnel orchestration failed:', message);
+  }
+}
+
+/**
+ * 「刷新隧道」：重启 cloudflared 拿新公网 URL 并重新应用到后端（写 API_URL + 重建 webhook）。
+ * - 防抖：距上次刷新 < TUNNEL_REFRESH_DEBOUNCE_MS 直接忽略，返回当前快照。
+ * - 已存在 TunnelManager → restart() 拿新 URL → orchestrator.applyPublicUrl()。
+ * - 尚未启动 → 走 startTunnelOrchestrationOnce 首次启动逻辑。
+ * 全程 try/catch，失败返回 { state: 'error', error }。
+ */
+async function refreshTunnel(): Promise<DesktopTunnelStatus> {
+  const now = Date.now();
+  if (now - lastTunnelRefreshAt < TUNNEL_REFRESH_DEBOUNCE_MS) {
+    console.log('[main] tunnel:refresh debounced; returning current status');
+    return buildTunnelStatus();
+  }
+  lastTunnelRefreshAt = now;
+
+  try {
+    if (!webhookProxy || !tunnelOrchestrator) {
+      return { state: 'error', error: 'tunnel components not initialized' };
+    }
+    // 尚未首次启动：复用幂等首启逻辑（内部会实例化 TunnelManager + 应用到后端）。
+    if (!tunnelManager) {
+      await startTunnelOrchestrationOnce();
+      return buildTunnelStatus();
+    }
+    // 已有隧道：重启拿新 URL 后重新应用到后端。
+    const newUrl = await tunnelManager.restart();
+    console.log(`[main] tunnel refreshed at ${newUrl}, re-applying to backend...`);
+    const result = await tunnelOrchestrator.applyPublicUrl(newUrl);
+    if (!result.apiUrlSet) {
+      console.warn('[main] tunnel:refresh api-url not set:', result.error);
+    } else if (result.error) {
+      console.warn('[main] tunnel:refresh webhook rebuild issue:', result.error);
+    } else {
+      console.log('[main] tunnel:refresh complete:', JSON.stringify(result.rebuild));
+    }
+    return buildTunnelStatus();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn('[main] tunnel:refresh failed:', message);
+    return { state: 'error', error: message };
   }
 }
 
@@ -214,6 +285,10 @@ function registerIpcHandlers() {
 
   ipcMain.handle('realtime:disconnect', () => {
     realtimeBridge?.disconnect();
+  });
+
+  ipcMain.handle('tunnel:refresh', async (): Promise<DesktopTunnelStatus> => {
+    return refreshTunnel();
   });
 
   ipcMain.handle('desktop:open-external', async (_event, rawUrl: string) => {
