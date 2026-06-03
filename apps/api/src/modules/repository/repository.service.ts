@@ -885,7 +885,7 @@ export class RepositoryService {
   }
 
   /**
-   * 批量重建用户作为 ADMIN 的所有 active 仓库 webhook
+   * 批量重建用户可编辑（accessMode=EDITABLE）的所有 active 仓库 webhook
    * 用于 API_URL 变更后批量同步到 GitHub（复用 retryWebhook 内部的自愈机制）
    */
   async batchRetryWebhooks(userId: string): Promise<{
@@ -897,7 +897,10 @@ export class RepositoryService {
     const repos = await this.prisma.repository.findMany({
       where: {
         isActive: true,
-        users: { some: { userId, role: 'ADMIN' } },
+        // 用 accessMode===EDITABLE 而非 role==='ADMIN':仓库 role 常为 MEMBER（默认值，多路径写入不一致），
+        // 永远过不了 role==='ADMIN' → 批量匹配 0 个仓库。accessMode 在 DB 中始终正确维护
+        // （可编辑=EDITABLE），与单仓 loadRepositoryForWebhookOps 的门禁口径一致。
+        users: { some: { userId, accessMode: RepositoryAccessMode.EDITABLE } },
       },
       select: { id: true, fullName: true },
     });

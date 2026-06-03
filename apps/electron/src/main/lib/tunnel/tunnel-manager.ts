@@ -8,7 +8,10 @@ import type { TunnelManagerOptions, TunnelState, TunnelStatus } from './types';
 
 /** 从 cloudflared 输出里抓 quick tunnel 公网 URL。 */
 const TRYCLOUDFLARE_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/;
-/** 启动总超时：URL 出现 + 边缘路由生效都要在此窗口内完成。 */
+/**
+ * 启动总超时：cloudflared 至少要在此窗口内打印出 URL。
+ * 注意：URL 出现后边缘就绪探测是 best-effort，超时不再致命（见 start()）。
+ */
 const START_TIMEOUT_MS = 45_000;
 /** 边缘就绪探测：单次 HTTP 请求超时。 */
 const PROBE_TIMEOUT_MS = 5_000;
@@ -16,6 +19,11 @@ const PROBE_TIMEOUT_MS = 5_000;
 const PROBE_MAX_ATTEMPTS = 20;
 /** 两次探测之间的间隔。 */
 const PROBE_INTERVAL_MS = 1_500;
+/**
+ * 边缘就绪探测的总时间预算（用于「未确认即继续」告警文案，仅展示用途）。
+ * 探不到不致命：到此预算仍未确认则告警后继续置 running（见 waitForEdge / start）。
+ */
+const EDGE_PROBE_BUDGET_MS = PROBE_MAX_ATTEMPTS * (PROBE_TIMEOUT_MS + PROBE_INTERVAL_MS);
 const DEFAULT_MAX_RETRIES = 3;
 /**
  * 公共 DNS 兜底解析器：部分受限网络的默认解析器不解析 *.trycloudflare.com
@@ -57,8 +65,14 @@ export class TunnelManager {
   }
 
   /**
-   * 启动隧道：spawn cloudflared → 抓 URL → 探测边缘就绪 → resolve publicUrl。
-   * 总超时内未就绪则置 error 并 reject。
+   * 启动隧道：spawn cloudflared → 抓 URL → 尽力探测边缘就绪 → resolve publicUrl。
+   *
+   * 边缘就绪探测是 best-effort：探到可达则照常置 running；本机在探测预算内探不到
+   * （受限网络对 *.trycloudflare.com 解不出 / 边缘从本机不可达）也**不**视为失败 ——
+   * cloudflared 已打印 URL 即代表它本身已连上 cloudflare 边缘，而真正访问隧道的是
+   * GitHub（公网），不是本机。故此时打一条告警后仍以已捕获 URL 置 running 并 resolve。
+   *
+   * 仅在 cloudflared 启动阶段异常退出 / spawn 失败 / 总超时（连 URL 都没出现）时才 reject。
    */
   start(): Promise<string> {
     if (this.state === 'running' && this.publicUrl) {
@@ -83,12 +97,15 @@ export class TunnelManager {
       );
       this.child = child;
 
+      // 启动总超时只守「URL 必须出现」：URL 一出现就清掉它（见 onChunk），
+      // 之后边缘就绪探测自带预算且超时非致命，不再受此计时器约束。
       const overallTimer = setTimeout(() => {
         if (settled) {
           return;
         }
         settled = true;
-        this.fail('tunnel start timed out before edge became ready');
+        // 连 URL 都没出现 → cloudflared 没起来，仍按失败处理。
+        this.fail('tunnel start timed out before url appeared');
         reject(new Error('[tunnel-manager] start timed out'));
       }, START_TIMEOUT_MS);
 
@@ -102,18 +119,23 @@ export class TunnelManager {
           return;
         }
         capturedUrl = match[0];
+        // URL 已出现 → cloudflared 已连边缘；解除「URL 必须出现」超时，避免它误判后续探测。
+        clearTimeout(overallTimer);
         console.log(`[tunnel-manager] captured url=${capturedUrl}, probing edge readiness...`);
-        // 抓到 URL 不立即就绪；轮询边缘确认路由生效后再 resolve。
+        // 抓到 URL 不一定立即可服务；尽力探测边缘路由生效（探到则有价值），
+        // 但探不到也不致命：cloudflared 已打印 URL=已连边缘，访问隧道的是 GitHub（公网）非本机。
         void this.waitForEdge(capturedUrl).then((ready) => {
           if (settled) {
             return;
           }
           settled = true;
-          clearTimeout(overallTimer);
           if (!ready) {
-            this.fail('tunnel url appeared but edge never became reachable');
-            reject(new Error('[tunnel-manager] edge readiness probe failed'));
-            return;
+            // best-effort：本机未在预算内确认可达 → 告警后仍以已捕获 URL 置 running。
+            // 不 reject、不杀 cloudflared、不计为失败（不触发 maxRetries）。
+            console.warn(
+              `[tunnel-manager] edge not locally confirmed within ${EDGE_PROBE_BUDGET_MS}ms; ` +
+                'proceeding with url (GitHub reaches the tunnel externally)',
+            );
           }
           this.publicUrl = capturedUrl;
           this.retries = 0;

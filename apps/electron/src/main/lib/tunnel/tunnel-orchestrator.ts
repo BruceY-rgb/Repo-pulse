@@ -190,10 +190,16 @@ function parseBatchBody(text: string): {
     const parsed: unknown = JSON.parse(text);
     if (parsed && typeof parsed === 'object') {
       const obj = parsed as Record<string, unknown>;
+      // 后端统一用响应拦截器把结果包成 { code, data, message, timestamp }，
+      // 计数在 data 里;兼容未包裹的裸响应(回退读顶层)。
+      const src =
+        obj.data && typeof obj.data === 'object'
+          ? (obj.data as Record<string, unknown>)
+          : obj;
       return {
-        total: typeof obj.total === 'number' ? obj.total : undefined,
-        succeeded: typeof obj.succeeded === 'number' ? obj.succeeded : undefined,
-        failed: typeof obj.failed === 'number' ? obj.failed : undefined,
+        total: typeof src.total === 'number' ? src.total : undefined,
+        succeeded: typeof src.succeeded === 'number' ? src.succeeded : undefined,
+        failed: typeof src.failed === 'number' ? src.failed : undefined,
       };
     }
   } catch {
