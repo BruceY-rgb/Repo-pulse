@@ -10,6 +10,7 @@
     "build": "pnpm --filter @repo-pulse/shared build && pnpm run build:main && cross-env VITE_DESKTOP=true pnpm --filter @repo-pulse/web build",
     "build:main": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "fetch:cloudflared": "node scripts/fetch-cloudflared.mjs",
     "package": "pnpm run build && electron-builder",
     "start": "electron ."
   },

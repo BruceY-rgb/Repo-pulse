@@ -1,0 +1,6 @@
+# 构建产物
+dist/
+release/
+
+# cloudflared 二进制(按平台经 scripts/fetch-cloudflared.mjs 拉取,不入 git)
+resources/bin/
