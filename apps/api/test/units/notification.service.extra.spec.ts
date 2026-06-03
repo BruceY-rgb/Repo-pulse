@@ -36,6 +36,7 @@ import { FeishuChannel } from '@modules/notification/channels/feishu.channel';
 import { WebhookChannel } from '@modules/notification/channels/webhook.channel';
 import { WecomChannel } from '@modules/notification/channels/wecom.channel';
 import { WechatChannel } from '@modules/notification/channels/wechat.channel';
+import { EventGateway } from '@modules/event/event.gateway';
 
 async function makeService(channelMocks: { email?: any; dingtalk?: any; feishu?: any; webhook?: any; wecom?: any; wechat?: any } = {}) {
   const moduleRef: TestingModule = await Test.createTestingModule({
@@ -47,6 +48,7 @@ async function makeService(channelMocks: { email?: any; dingtalk?: any; feishu?:
       { provide: WebhookChannel, useValue: channelMocks.webhook ?? { send: jest.fn().mockResolvedValue({ success: true }) } },
       { provide: WecomChannel, useValue: channelMocks.wecom ?? { send: jest.fn().mockResolvedValue({ success: true }) } },
       { provide: WechatChannel, useValue: channelMocks.wechat ?? { send: jest.fn().mockResolvedValue({ success: true }) } },
+      { provide: EventGateway, useValue: { broadcastNotificationNew: jest.fn() } },
     ],
   }).compile();
   return moduleRef.get(NotificationService);

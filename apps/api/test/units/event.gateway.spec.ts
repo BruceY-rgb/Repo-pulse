@@ -1,4 +1,5 @@
 import * as jwt from 'jsonwebtoken';
+import { REALTIME_EVENTS } from '@repo-pulse/shared';
 import { EventGateway } from '../../src/modules/event/event.gateway';
 
 jest.mock('@nestjs/websockets', () => ({
@@ -27,18 +28,28 @@ function makeClient(overrides: Partial<{
   auth: Record<string, string>;
   headers: Record<string, string>;
 }> = {}) {
-  return {
+  // 真实的 rooms Set：gateway 用 client.rooms.has() 判断重复 join/leave，
+  // 让 join/leave mock 同步维护它，使引用计数逻辑（subCount）被真实驱动。
+  const rooms = new Set<string>();
+  const client = {
     id: overrides.id ?? 'socket-1',
     handshake: {
       auth: overrides.auth ?? {},
       headers: overrides.headers ?? {},
     },
-    join: jest.fn(),
-    leave: jest.fn(),
+    rooms,
+    join: jest.fn((room: string) => {
+      rooms.add(room);
+    }),
+    leave: jest.fn((room: string) => {
+      rooms.delete(room);
+    }),
     disconnect: jest.fn(),
     userId: undefined as string | undefined,
     email: undefined as string | undefined,
+    subCount: undefined as number | undefined,
   };
+  return client;
 }
 
 describe('EventGateway', () => {
@@ -87,6 +98,13 @@ describe('EventGateway', () => {
       });
     });
 
+    it('joins the per-user room user:<sub> for directed notification.new pushes', async () => {
+      const token = jwt.sign({ sub: 'u1', email: 'alice@example.com' }, SECRET);
+      const client = makeClient({ auth: { token } });
+      await gateway.handleConnection(client as any);
+      expect(client.join).toHaveBeenCalledWith('user:u1');
+    });
+
     it('sets userId from Bearer token in Authorization header', async () => {
       const token = jwt.sign({ sub: 'u2', email: 'bob@example.com' }, SECRET);
       const client = makeClient({ headers: { authorization: `Bearer ${token}` } });
@@ -132,9 +150,9 @@ describe('EventGateway', () => {
 
   // ── handleJoinRepository ──────────────────────────────────────────────────
   describe('handleJoinRepository', () => {
-    it('joins the correct room and returns event', () => {
+    it('joins the correct room and returns event', async () => {
       const client = makeClient();
-      const result = gateway.handleJoinRepository(client as any, { repositoryId: 'r1' });
+      const result = await gateway.handleJoinRepository(client as any, { repositoryId: 'r1' });
       expect(client.join).toHaveBeenCalledWith('repo:r1');
       expect(result).toEqual({ event: 'joined', room: 'repo:r1' });
     });
@@ -205,12 +223,109 @@ describe('EventGateway', () => {
 
   // ── broadcastAnalysisCompleted ────────────────────────────────────────────
   describe('broadcastAnalysisCompleted', () => {
-    it('emits analysis:completed globally', () => {
+    it('emits analysis:completed globally for the legacy string form', () => {
       const serverMock = (gateway as any).server;
       gateway.broadcastAnalysisCompleted('e1');
       expect(serverMock.emit).toHaveBeenCalledWith(
         'analysis:completed',
         expect.objectContaining({ type: 'analysis:completed', eventId: 'e1' }),
+      );
+    });
+
+    it('emits analysis.completed to the repo room for the payload form', () => {
+      const serverMock = (gateway as any).server;
+      const payload = {
+        eventId: 'e1',
+        repositoryId: 'r1',
+        completedAt: new Date().toISOString(),
+      };
+      gateway.broadcastAnalysisCompleted(payload);
+      expect(serverMock.to).toHaveBeenCalledWith('repo:r1');
+      expect(serverMock.emit).toHaveBeenCalledWith(
+        REALTIME_EVENTS.ANALYSIS_COMPLETED,
+        payload,
+      );
+    });
+  });
+
+  // ── broadcastApprovalUpdated ──────────────────────────────────────────────
+  describe('broadcastApprovalUpdated', () => {
+    it('emits approval.updated to the repo room', () => {
+      const serverMock = (gateway as any).server;
+      const payload = {
+        approvalId: 'a1',
+        repositoryId: 'r1',
+        eventId: 'e1',
+        status: 'APPROVED' as const,
+        updatedAt: new Date().toISOString(),
+      };
+      gateway.broadcastApprovalUpdated(payload);
+      expect(serverMock.to).toHaveBeenCalledWith('repo:r1');
+      expect(serverMock.emit).toHaveBeenCalledWith(
+        REALTIME_EVENTS.APPROVAL_UPDATED,
+        payload,
+      );
+    });
+  });
+
+  // ── broadcastAnalysisStarted ──────────────────────────────────────────────
+  describe('broadcastAnalysisStarted', () => {
+    it('emits analysis.started to the repo room', () => {
+      const serverMock = (gateway as any).server;
+      const payload = {
+        eventId: 'e1',
+        repositoryId: 'r1',
+        startedAt: new Date().toISOString(),
+        source: 'manual' as const,
+      };
+      gateway.broadcastAnalysisStarted(payload);
+      expect(serverMock.to).toHaveBeenCalledWith('repo:r1');
+      expect(serverMock.emit).toHaveBeenCalledWith(
+        REALTIME_EVENTS.ANALYSIS_STARTED,
+        payload,
+      );
+    });
+  });
+
+  // ── broadcastAnalysisFailed ───────────────────────────────────────────────
+  describe('broadcastAnalysisFailed', () => {
+    it('emits analysis.failed to the repo room', () => {
+      const serverMock = (gateway as any).server;
+      const payload = {
+        eventId: 'e1',
+        repositoryId: 'r1',
+        failedAt: new Date().toISOString(),
+        reason: 'AI key missing',
+      };
+      gateway.broadcastAnalysisFailed(payload);
+      expect(serverMock.to).toHaveBeenCalledWith('repo:r1');
+      expect(serverMock.emit).toHaveBeenCalledWith(
+        REALTIME_EVENTS.ANALYSIS_FAILED,
+        payload,
+      );
+    });
+  });
+
+  // ── broadcastNotificationNew ──────────────────────────────────────────────
+  describe('broadcastNotificationNew', () => {
+    it('emits notification.new to the per-user room (not a repo room)', () => {
+      const serverMock = (gateway as any).server;
+      const payload = {
+        userId: 'u1',
+        unreadCount: 3,
+        notification: {
+          id: 'n1',
+          title: 'Approval required',
+          content: 'summary',
+          eventId: 'e1',
+          createdAt: new Date().toISOString(),
+        },
+      };
+      gateway.broadcastNotificationNew('u1', payload);
+      expect(serverMock.to).toHaveBeenCalledWith('user:u1');
+      expect(serverMock.emit).toHaveBeenCalledWith(
+        REALTIME_EVENTS.NOTIFICATION_NEW,
+        payload,
       );
     });
   });

@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotificationChannel, NotificationStatus } from '@repo-pulse/database';
 import { NotificationService } from '@modules/notification/notification.service';
+import { EventGateway } from '@modules/event/event.gateway';
 import { EmailChannel } from '@modules/notification/channels/email.channel';
 import { DingTalkChannel } from '@modules/notification/channels/dingtalk.channel';
 import { FeishuChannel } from '@modules/notification/channels/feishu.channel';
@@ -58,6 +59,12 @@ jest.mock('@repo-pulse/database', () => {
           Object.assign(record, data);
           return record;
         }),
+        // getUnreadCount（IN_APP 落库后重算未读数用）依赖 count
+        count: jest.fn(async () => 2),
+      },
+      // getUnreadCount -> resolveRepositoryIds 依赖 userRepository.findMany
+      userRepository: {
+        findMany: jest.fn(async () => [{ repositoryId: 'r1' }]),
       },
     },
   };
@@ -65,15 +72,18 @@ jest.mock('@repo-pulse/database', () => {
 
 describe('NotificationService (unit)', () => {
   let service: NotificationService;
+  let gatewayMock: { broadcastNotificationNew: jest.Mock };
 
   beforeEach(async () => {
     userStore.clear();
     notificationStore.clear();
     notificationSeq = 0;
+    gatewayMock = { broadcastNotificationNew: jest.fn() };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         NotificationService,
+        { provide: EventGateway, useValue: gatewayMock },
         {
           provide: EmailChannel,
           useValue: {
@@ -252,6 +262,48 @@ describe('NotificationService (unit)', () => {
 
       expect(result.status).toBe(NotificationStatus.SENT);
       expect(result.sentAt).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('send - notification.new 实时广播（红点）', () => {
+    it('IN_APP 成功落库后向该用户 Room 广播 notification.new（含未读数）', async () => {
+      userStore.set('u7', { id: 'u7', preferences: {} });
+
+      await service.send({
+        userId: 'u7',
+        channel: NotificationChannel.IN_APP,
+        title: 'in-app',
+        content: 'body',
+        eventId: 'evt-9',
+      });
+
+      expect(gatewayMock.broadcastNotificationNew).toHaveBeenCalledTimes(1);
+      expect(gatewayMock.broadcastNotificationNew).toHaveBeenCalledWith(
+        'u7',
+        expect.objectContaining({
+          userId: 'u7',
+          unreadCount: 2,
+          notification: expect.objectContaining({
+            title: 'in-app',
+            content: 'body',
+            eventId: 'evt-9',
+          }),
+        }),
+      );
+    });
+
+    it('非 IN_APP 渠道不广播 notification.new', async () => {
+      userStore.set('u8', { id: 'u8', preferences: {} });
+
+      // EMAIL 渠道（未配置收件人 → FAILED），无论成败都不应广播 notification.new
+      await service.send({
+        userId: 'u8',
+        channel: NotificationChannel.EMAIL,
+        title: 'hi',
+        content: 'hello',
+      });
+
+      expect(gatewayMock.broadcastNotificationNew).not.toHaveBeenCalled();
     });
   });
 });

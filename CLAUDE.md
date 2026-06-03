@@ -67,7 +67,7 @@ Repo-Pulse 是一个 AI 驱动的代码仓库监控与管理平台，采用 Mono
 
 ## 6. 项目开发进度
 
-> **最后更新**：2025-04-02
+> **最后更新**：2026-06-03
 
 ### 已完成阶段
 
@@ -76,6 +76,7 @@ Repo-Pulse 是一个 AI 驱动的代码仓库监控与管理平台，采用 Mono
 | **Phase 1** 基础设施加固 | ✅ 已完成 | 环境变量分离、HttpOnly Cookie 认证、Webhook 验签、样式基座清理 |
 | **Phase 2** 实时数据流 | ✅ 已完成 | WebSocket Gateway、消息队列联动、React Query 迁移 |
 | **Phase 3** AI 核心引擎 | ✅ 已完成 | AI 抽象层、异步分析工作流、SSE 流式输出 |
+| **桌面端实时推送改造**（Item-4，分支 `feature/IPC-realtime-push`） | ✅ 代码完成（M0–M6），⏳ 待运行时端到端验收 | 桌面端实时从「浏览器 WebSocket」改为「Electron 主进程 socket.io 客户端 → 单一 IPC 通道 `desktop:realtime` → 渲染进程复用 `createRealtimeHandlers`」；主进程从 `session.cookies` 读 HttpOnly `access_token` 鉴权；补齐 `approval.updated`、`analysis.started/failed`、`notification.new`（按 `user:<id>` 房间）广播源 + 「本地优先」`LocalGitWatcher`；M6 补齐广播单元测试（6 spec / 98 测试全绿）。详见 `docs/realtime-push-handoff.md` 与 `docs/electron-ipc-realtime-push-plan.md`。 |
 
 ### 本次实现功能详情
 

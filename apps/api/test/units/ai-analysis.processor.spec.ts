@@ -37,7 +37,11 @@ describe('AIProcessor', () => {
   let mockApprovalService: { createFromAIAnalysis: jest.Mock };
   let mockNotificationService: { getPreferences: jest.Mock; send: jest.Mock };
   let mockEventService: { retryNotificationsAfterAnalysis: jest.Mock };
-  let mockEventGateway: { broadcastAnalysisCompleted: jest.Mock };
+  let mockEventGateway: {
+    broadcastAnalysisCompleted: jest.Mock;
+    broadcastAnalysisStarted: jest.Mock;
+    broadcastAnalysisFailed: jest.Mock;
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -50,7 +54,11 @@ describe('AIProcessor', () => {
       send: jest.fn().mockResolvedValue(undefined),
     };
     mockEventService = { retryNotificationsAfterAnalysis: jest.fn().mockResolvedValue(undefined) };
-    mockEventGateway = { broadcastAnalysisCompleted: jest.fn() };
+    mockEventGateway = {
+      broadcastAnalysisCompleted: jest.fn(),
+      broadcastAnalysisStarted: jest.fn(),
+      broadcastAnalysisFailed: jest.fn(),
+    };
 
     processor = new AIProcessor(
       mockAIService as any,
@@ -106,15 +114,51 @@ describe('AIProcessor', () => {
       expect(mockEventService.retryNotificationsAfterAnalysis).toHaveBeenCalledWith('e1');
     });
 
-    it('broadcasts analysis completed', async () => {
+    it('broadcasts analysis started then completed with the repository-scoped payload', async () => {
+      mockEventFindUnique.mockResolvedValue({ repositoryId: 'r1' });
       await processor.process(makeJob({ eventId: 'e1' }));
-      expect(mockEventGateway.broadcastAnalysisCompleted).toHaveBeenCalledWith('e1');
+      expect(mockEventGateway.broadcastAnalysisStarted).toHaveBeenCalledWith(
+        expect.objectContaining({ eventId: 'e1', repositoryId: 'r1', source: 'auto' }),
+      );
+      expect(mockEventGateway.broadcastAnalysisCompleted).toHaveBeenCalledWith(
+        expect.objectContaining({ eventId: 'e1', repositoryId: 'r1' }),
+      );
+      expect(mockEventGateway.broadcastAnalysisFailed).not.toHaveBeenCalled();
+    });
+
+    it('uses source=manual for forced (manual) analysis when broadcasting started', async () => {
+      mockEventFindUnique.mockResolvedValue({ repositoryId: 'r1' });
+      await processor.process(makeJob({ eventId: 'e1', force: true }));
+      expect(mockEventGateway.broadcastAnalysisStarted).toHaveBeenCalledWith(
+        expect.objectContaining({ eventId: 'e1', repositoryId: 'r1', source: 'manual' }),
+      );
+    });
+
+    it('broadcasts analysis failed (and not completed) when analyzeEvent throws', async () => {
+      mockEventFindUnique.mockResolvedValue({ repositoryId: 'r1' });
+      mockAIService.analyzeEvent.mockRejectedValue(new Error('AI failed'));
+      await expect(processor.process(makeJob({ eventId: 'e1' }))).rejects.toThrow('AI failed');
+      expect(mockEventGateway.broadcastAnalysisStarted).toHaveBeenCalledTimes(1);
+      expect(mockEventGateway.broadcastAnalysisFailed).toHaveBeenCalledWith(
+        expect.objectContaining({ eventId: 'e1', repositoryId: 'r1', reason: 'AI failed' }),
+      );
+      expect(mockEventGateway.broadcastAnalysisCompleted).not.toHaveBeenCalled();
+    });
+
+    it('does not broadcast lifecycle events when the event has no repositoryId', async () => {
+      mockEventFindUnique.mockResolvedValue(null);
+      await processor.process(makeJob({ eventId: 'e1' }));
+      expect(mockEventGateway.broadcastAnalysisStarted).not.toHaveBeenCalled();
+      expect(mockEventGateway.broadcastAnalysisCompleted).not.toHaveBeenCalled();
+      expect(mockEventGateway.broadcastAnalysisFailed).not.toHaveBeenCalled();
     });
 
     it('does not notify when no approval created', async () => {
       mockApprovalService.createFromAIAnalysis.mockResolvedValue(null);
       await processor.process(makeJob({ eventId: 'e1' }));
-      expect(mockEventFindUnique).not.toHaveBeenCalled();
+      // process() 现在会先查一次 repositoryId（供广播用），因此不能再断言
+      // findUnique 完全未调用；真正的"未通知"语义由 notificationService.send 未被调用表达。
+      expect(mockNotificationService.send).not.toHaveBeenCalled();
     });
 
     it('notifies users when approval created and user has IN_APP preference', async () => {

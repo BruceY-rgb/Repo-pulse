@@ -256,10 +256,13 @@ reconnect 时 gateway 会 unicast 补发至多 `REPLAY_BATCH_LIMIT=200`（`event
 - **M5-T3**（人工验证）发一条 IN_APP 通知 → **桌面与 web 红点均 +1**；用另一用户登录确认**收不到**（验证 `user:<id>` 房间隔离）。 **→ 验收点 ⑤**
 
 ### Milestone 6 —— 收尾与回归
-- **M6-T1**（代码/测试）补单元测试（§7）。
-  - 验证：`pnpm --filter api test`、`pnpm --filter web test`、`pnpm --filter @repo-pulse/electron typecheck`
-  - commit：`test: 实时推送桥与新增广播的单元测试`
-- **M6-T2**（人工验证）全链路回归：dev 桌面端逐通道（§7 e2e 清单），并 `pnpm dev:web` 浏览器端走 socket.io 回退、桌面 IPC 分支不触发。 **→ 验收点 ⑥**
+- **M6-T1**（代码/测试）✅ 已完成：补单元测试（§7）并修复被实时改造打破的既有 spec。
+  - **api 单测**（实现）：`event.gateway.spec`（新增 4 个 `broadcast*` + `analysis.completed` 载荷形态 + `user:<id>` 房间断言，并修复 `makeClient` 缺 `rooms`、`handleJoinRepository` 改 async 后未 await 的既有破损）；`approval.service.spec`（断言 approve/reject/editAndApprove 调 `broadcastApprovalUpdated` + 广播抛错不影响主流程）；`ai-analysis.processor.spec`（mock 补 started/failed、completed 改对象形态并受 repoId 守卫、补 started/failed/缺-repoId 断言）；`notification.service.spec` / `.extra.spec`（补 `EventGateway` provider 修复 DI 解析失败 + 断言 IN_APP 广播 `notification.new`、非 IN_APP 不广播）。**6 spec / 98 测试全绿**。
+  - **electron/web 单测**：`apps/electron` 与 `apps/web` **均无测试框架**（无 `test` 脚本 / jest / vitest）。`RealtimeBridge` / `LocalGitWatcher` / `createRealtimeHandlers` 按既定方案留运行时验收，以各自 `typecheck` 背书；引入测试 runner 属本特性范围外。
+  - 验证（已执行）：`pnpm --filter @repo-pulse/shared build`、`pnpm --filter api typecheck`、`pnpm --filter web typecheck`、`pnpm --filter @repo-pulse/electron typecheck` 全过。
+  - 已知既有债（非本次引入）：`test/units` 全量跑仍有 11 个 auth/github 域 suite 失败（suite 间 mock 未隔离，单独跑全绿；基线即存在）；`pnpm --filter api lint` 因 ESLint 未迁 flat-config 整体崩。
+  - commit：`test(realtime): Milestone 6 — 广播单元测试补齐 + 修复既有 spec + 进度文档`
+- **M6-T2**（人工验证，⏳ 待用户）全链路回归：dev 桌面端逐通道（§7 e2e 清单），并 `pnpm dev:web` 浏览器端走 socket.io 回退、桌面 IPC 分支不触发。 **→ 验收点 ⑥**
 
 ---
 

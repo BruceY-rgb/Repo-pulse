@@ -62,14 +62,14 @@ function makeEvent(riskLevel: string, overrides: object = {}) {
 
 describe('ApprovalService', () => {
   let service: ApprovalService;
+  let gatewayMock: { broadcastApprovalUpdated: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockUserRepoFindMany.mockResolvedValue([{ repositoryId: 'r1' }]);
+    gatewayMock = { broadcastApprovalUpdated: jest.fn() };
     service = new ApprovalService(
-      { broadcastApprovalUpdated: jest.fn() } as unknown as ConstructorParameters<
-        typeof ApprovalService
-      >[0],
+      gatewayMock as unknown as ConstructorParameters<typeof ApprovalService>[0],
     );
   });
 
@@ -130,6 +130,24 @@ describe('ApprovalService', () => {
       expect(mockApprovalUpdate).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: ApprovalStatus.APPROVED, reviewerId: 'u1' }) }),
       );
+      expect(gatewayMock.broadcastApprovalUpdated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          approvalId: 'appr-1',
+          repositoryId: 'r1',
+          eventId: 'evt-1',
+          status: ApprovalStatus.APPROVED,
+        }),
+      );
+    });
+
+    it('still resolves when the realtime broadcast throws', async () => {
+      mockApprovalFindUnique.mockResolvedValue(makeApproval());
+      mockApprovalUpdate.mockResolvedValue(makeApproval({ status: ApprovalStatus.APPROVED }));
+      gatewayMock.broadcastApprovalUpdated.mockImplementation(() => {
+        throw new Error('socket down');
+      });
+      const result = await service.approve('appr-1', 'u1');
+      expect(result.status).toBe(ApprovalStatus.APPROVED);
     });
   });
 
@@ -150,6 +168,14 @@ describe('ApprovalService', () => {
       mockApprovalUpdate.mockResolvedValue(makeApproval({ status: ApprovalStatus.REJECTED }));
       const result = await service.reject('appr-1', 'u1', 'needs work');
       expect(result.status).toBe(ApprovalStatus.REJECTED);
+      expect(gatewayMock.broadcastApprovalUpdated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          approvalId: 'appr-1',
+          repositoryId: 'r1',
+          eventId: 'evt-1',
+          status: ApprovalStatus.REJECTED,
+        }),
+      );
     });
   });
 
@@ -172,6 +198,14 @@ describe('ApprovalService', () => {
       expect(result.status).toBe(ApprovalStatus.EDITED);
       expect(mockApprovalUpdate).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: ApprovalStatus.EDITED, editedContent: 'fixed' }) }),
+      );
+      expect(gatewayMock.broadcastApprovalUpdated).toHaveBeenCalledWith(
+        expect.objectContaining({
+          approvalId: 'appr-1',
+          repositoryId: 'r1',
+          eventId: 'evt-1',
+          status: ApprovalStatus.EDITED,
+        }),
       );
     });
   });
