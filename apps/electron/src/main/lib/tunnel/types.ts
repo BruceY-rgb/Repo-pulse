@@ -30,6 +30,22 @@ export interface TunnelManagerOptions {
   maxRetries?: number;
 }
 
+/** TunnelOrchestrator.applyPublicUrl 的结果（写 API_URL + 重建 webhook 的综合产出）。 */
+export interface OrchestratorResult {
+  /** API_URL 是否成功写入后端 AppConfig。 */
+  apiUrlSet: boolean;
+  /** 写 API_URL 时被 403 拒绝（调用者非 ADMIN）；仅失败场景出现。 */
+  needsAdmin?: boolean;
+  /** webhook 批量重建结果（仅在 API_URL 成功且批量调用返回计数时存在）。 */
+  rebuild?: {
+    total: number;
+    succeeded: number;
+    failed: number;
+  };
+  /** 失败说明（任一步失败时存在，便于上层 log）。 */
+  error?: string;
+}
+
 /** WebhookProxy 构造参数。 */
 export interface WebhookProxyOptions {
   /** 转发目标源（默认本地 API）。 */
