@@ -2203,6 +2203,7 @@ function WorkbenchHeader({
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
+              <span>
               <Button
                 size="icon"
                 variant="outline"
@@ -2223,6 +2224,7 @@ function WorkbenchHeader({
                   </span>
                 )}
               </Button>
+              </span>
             </TooltipTrigger>
             <TooltipContent>
               {!repository
