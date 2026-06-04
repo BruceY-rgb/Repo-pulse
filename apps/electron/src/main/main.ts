@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
+import fs from 'node:fs';
 import { URL } from 'node:url';
 import { AgentWorkspaceManager } from './lib/agent-workspace-manager';
 import { AgentOrchestrator } from './lib/agent-orchestrator';
@@ -39,17 +40,64 @@ function getPackagedWebEntry() {
 }
 
 /**
- * 解析 cloudflared 二进制路径。
- * - 打包后：`<resources>/bin/cloudflared`（electron-builder 把 resources/bin 拷进 process.resourcesPath）。
- * - dev：`<appPath>/resources/bin/cloudflared`，dev 下 app.getAppPath() 指向 apps/electron。
- * Windows 追加 .exe。
+ * 在系统常见位置 + PATH 上查找 cloudflared（兜底用）。
+ * 注意：GUI 启动的 Electron PATH 通常很「瘦」（不含 /opt/homebrew/bin、/usr/local/bin），
+ * 故非 Windows 显式补常见安装目录，避免「终端能跑、双击打开找不到」。
+ */
+function findCloudflaredOnSystem(binary: string): string | null {
+  const dirs = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  if (process.platform !== 'win32') {
+    dirs.push('/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin');
+  }
+  for (const dir of dirs) {
+    const candidate = path.join(dir, binary);
+    try {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    } catch {
+      // 忽略不可访问目录
+    }
+  }
+  return null;
+}
+
+/**
+ * 解析 cloudflared 二进制路径，按优先级兜底以提升跨主机兼容性：
+ *   1) 环境变量 `CLOUDFLARED_PATH`（显式指定，最高优先）；
+ *   2) 随包/已 fetch 的二进制（打包后 `<resources>/bin/`，dev `<appPath>/resources/bin/`，存在才用）；
+ *   3) 系统安装的 cloudflared（PATH + 常见目录，如 brew 装的）；
+ *   4) 裸命令名兜底（再让 spawn 走 PATH；dev 终端通常能命中）。
+ * Windows 用 `cloudflared.exe`。任何一步缺失都不致命：上层 try/catch 降级，隧道不影响主流程。
  */
 function resolveCloudflaredPath(): string {
-  const dir = app.isPackaged
+  const binary = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
+
+  const override = process.env.CLOUDFLARED_PATH?.trim();
+  if (override) {
+    return override;
+  }
+
+  const bundledDir = app.isPackaged
     ? path.join(process.resourcesPath, 'bin')
     : path.join(app.getAppPath(), 'resources', 'bin');
-  const binary = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
-  return path.join(dir, binary);
+  const bundled = path.join(bundledDir, binary);
+  if (fs.existsSync(bundled)) {
+    return bundled;
+  }
+
+  const onSystem = findCloudflaredOnSystem(binary);
+  if (onSystem) {
+    console.warn(`[tunnel] bundled cloudflared missing (${bundled}); using system binary ${onSystem}`);
+    return onSystem;
+  }
+
+  console.warn(
+    `[tunnel] cloudflared not found (bundled=${bundled}, not on PATH). ` +
+      `tunnel will fail until you run 'pnpm --filter @repo-pulse/electron fetch:cloudflared' ` +
+      `or install cloudflared (or set CLOUDFLARED_PATH). falling back to bare '${binary}'.`,
+  );
+  return binary;
 }
 
 /**
