@@ -2,7 +2,10 @@ jest.mock('@repo-pulse/database', () => ({
   RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
   RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
   NotificationChannel: { EMAIL: 'EMAIL', DINGTALK: 'DINGTALK', FEISHU: 'FEISHU', WEBHOOK: 'WEBHOOK', IN_APP: 'IN_APP' },
-  prisma: {},
+  prisma: {
+    // handleGithubEnvTokenAuth 会用 prisma.user.update 把 env 登录用户升 ADMIN
+    user: { update: jest.fn(() => Promise.resolve({ id: 'u1', email: 'alice@example.com', role: 'ADMIN' })) },
+  },
   PrismaClient: jest.fn().mockImplementation(() => ({})),
 }));
 

@@ -14,11 +14,14 @@ function makeReflector(isPublic: boolean | undefined) {
 
 function makeContext(requestOverrides: Record<string, unknown> = {}) {
   const request = { user: { role: 'MEMBER' }, ...requestOverrides };
+  // GithubAuthGuard.canActivate 会在凭据检查前调 getResponse()（用于写 oauth_return cookie）
+  const response = { cookie: jest.fn() };
   return {
     getHandler: jest.fn(),
     getClass: jest.fn(),
     switchToHttp: jest.fn().mockReturnValue({
       getRequest: jest.fn().mockReturnValue(request),
+      getResponse: jest.fn().mockReturnValue(response),
     }),
   } as any;
 }
