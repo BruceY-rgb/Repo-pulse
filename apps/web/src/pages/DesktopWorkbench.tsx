@@ -7769,7 +7769,7 @@ export function DesktopWorkbench() {
           {activeView !== 'agent' && (
             <WorkbenchHeader
               activeView={activeView}
-              repository={selectedRepository}
+              repository={activeView === 'repository' ? selectedRepository : undefined}
               repositoryCanOperate={selectedRepositoryCanOperate}
               onAgent={() => openAgent(undefined, selectedRepository)}
               onSearch={() => setIsSearchOpen(true)}
