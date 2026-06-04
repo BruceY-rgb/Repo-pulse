@@ -112,7 +112,8 @@ describe('RepositoryService — isMonitored（externalId vs UUID）', () => {
       expect(other?.isMonitored).toBe(false);
     });
 
-    it('用户无监控仓库时所有结果 isMonitored 均为 false', async () => {
+    it('用户无监控范围时默认监控全部（isMonitored 均为 true）', async () => {
+      // 语义（7fe528d「分支监控逻辑完善」）：用户未显式选择监控仓库时，视为默认监控全部。
       mockGetUserMonitoredRepositoryIds.mockResolvedValue([]);
       mockRepoFindMany.mockResolvedValue([]);
       mockGithubService.getUserRepositories.mockResolvedValue([
@@ -120,8 +121,8 @@ describe('RepositoryService — isMonitored（externalId vs UUID）', () => {
       ]);
 
       const result = await service.searchUserRepositories('user-1', 'oauth-token');
-      expect(result[0].isMonitored).toBe(false);
-      // 无监控仓库时不应查询数据库
+      expect(result[0].isMonitored).toBe(true);
+      // 无监控范围时 getMonitoredGithubExternalIds 提前返回 null，不应查询数据库
       expect(mockRepoFindMany).not.toHaveBeenCalled();
     });
   });
