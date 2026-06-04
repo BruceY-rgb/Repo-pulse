@@ -301,6 +301,13 @@ export class RepositoryService {
           webhookStatus: WebhookStatus.ACTIVE,
           webhookError: null,
         });
+        await this.pruneStaleGithubWebhooks({
+          owner: params.owner,
+          repo: params.repo,
+          keepWebhookId: webhookIdStr,
+          userOAuthToken: params.userOAuthToken,
+          repositoryFullName: params.repositoryFullName,
+        });
         return {
           webhookStatus: WebhookStatus.ACTIVE,
           webhookId: webhookIdStr,
@@ -434,6 +441,13 @@ export class RepositoryService {
         webhookStatus: WebhookStatus.ACTIVE,
         webhookError: null,
       });
+      await this.pruneStaleGithubWebhooks({
+        owner: params.owner,
+        repo: params.repo,
+        keepWebhookId: newIdStr,
+        userOAuthToken: params.userOAuthToken,
+        repositoryFullName: params.repositoryFullName,
+      });
 
       this.logger.log(
         `webhook_self_heal_success repo=${params.repositoryFullName} oldId=${stale.id} newId=${newIdStr}`,
@@ -445,6 +459,54 @@ export class RepositoryService {
         `webhook_self_heal_failed repo=${params.repositoryFullName} message=${message}`,
       );
       return null;
+    }
+  }
+
+  /**
+   * 清理孤儿 webhook：隧道 URL 每次启动随机，旧 URL 的 hook 既不会被 create 命中（URL 不同，
+   * GitHub 不报 "already exists"），也不会被 retryWebhook 删除（DB 只存最新一个 id，旧 id 已丢失），
+   * 于是越积越多、全部指向已死的隧道地址（GitHub 投递恒 502 failed to connect to host）。
+   * 这里在 provision 成功后，把本 app 注册的（config.url 以 /webhooks/github 结尾）、
+   * 但不是当前要保留的那个 hook 全部删掉。非致命：清理失败仅告警，不影响主流程。
+   */
+  private async pruneStaleGithubWebhooks(params: {
+    owner: string;
+    repo: string;
+    keepWebhookId: string;
+    userOAuthToken?: string;
+    repositoryFullName: string;
+  }): Promise<void> {
+    try {
+      const hooks = await this.githubService.listWebhooks(
+        params.owner,
+        params.repo,
+        params.userOAuthToken,
+      );
+      const stale = hooks.filter(
+        (hook) =>
+          String(hook.id) !== params.keepWebhookId &&
+          (hook.config?.url ?? '').endsWith('/webhooks/github'),
+      );
+      if (stale.length === 0) {
+        return;
+      }
+      for (const hook of stale) {
+        // deleteWebhook 内部已吞掉单次删除错误（仅记日志），不会中断循环
+        await this.githubService.deleteWebhook(
+          params.owner,
+          params.repo,
+          String(hook.id),
+          params.userOAuthToken,
+        );
+      }
+      this.logger.log(
+        `webhook_prune_stale repo=${params.repositoryFullName} kept=${params.keepWebhookId} pruned=${stale.length}`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown_error';
+      this.logger.warn(
+        `webhook_prune_stale_failed repo=${params.repositoryFullName} message=${message}`,
+      );
     }
   }
 

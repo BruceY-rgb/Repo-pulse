@@ -112,6 +112,13 @@ token 用主进程 `session.cookies` 读 HttpOnly `access_token`（与 `realtime
   （hook 已不存在）时才清空 DB `webhookId`**。若删除因瞬时错误失败仍清 id，旧 hook 会在 GitHub 残留且
   再也无法定位删除（隧道 URL 每次唯一，自愈仅按当前 URL 匹配，命中不了旧孤儿）；保留 id 可让下次
   retry 用同一 id 幂等重删。
+- provisionWebhook 孤儿清理：create 成功或自愈成功后，调用 `pruneStaleGithubWebhooks` 列出该仓库全部
+  webhook，删除所有 `config.url` 以 `/webhooks/github` 结尾（即本 app 注册）、但不是当前保留 id 的 hook。
+  这补上了上一条遗留的缺口：隧道 URL 每次随机，旧 URL 的 hook 既不会被 create 命中（URL 不同，GitHub
+  不报 "Hook already exists"），也不会被 retryWebhook 删除（DB 只存最新一个 id，旧 id 已丢失），过去会
+  越积越多、全部指向已死隧道地址，GitHub 投递恒返回 502 failed to connect to host（同时出现在 GitHub
+  仓库的 Recent Deliveries 与 app 的 webhook 状态卡）。清理为非致命：失败只记 warn，不影响 webhook 主流程；
+  单次删除错误已被 `deleteWebhook` 内部吞掉，不中断循环。覆盖建仓 / retryWebhook / batchRetryWebhooks 所有入口。
 
 ## 8. 打包（M4）
 
@@ -130,6 +137,7 @@ token 用主进程 `session.cookies` 读 HttpOnly `access_token`（与 `realtime
 
 - **隧道 URL 每次随机**：cloudflared quick tunnel 每次启动都换 `*.trycloudflare.com`，因此每次应用启动都要
   重写 API_URL + 重注册全部 webhook（这是 quick tunnel 的固有特性，非 bug）。需固定域名须改用命名隧道（需 CF 账号/配置）。
+  重注册产生的旧 URL hook 由 provisionWebhook 的孤儿清理（见 §7）在下次 provision 时自动删除，不会在 GitHub 上无限累积。
 - **trycloudflare 无 SLA**：quick tunnel 是 best-effort 免费临时隧道，cloudflare 不保证可用性/稳定性；
   生产场景应换命名隧道或自有公网入口。
 - **写 API_URL 需 ADMIN**：非 ADMIN 用户被 403（`needsAdmin`），无法自动配 webhook，UI 给降级提示，需 ADMIN 操作。

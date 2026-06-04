@@ -319,6 +319,11 @@ export class GithubService {
     this.logger.log(`Webhook ${webhookId} ping requested for ${owner}/${repo}`);
   }
 
+  /** 空仓库（从无 commit）时 GitHub 对 list 类接口返回 409，属正常情况而非故障，不应记为 ERROR */
+  private isEmptyRepositoryError(error: unknown): boolean {
+    return axios.isAxiosError(error) && error.response?.status === 409;
+  }
+
   async getCommits(
     owner: string,
     repo: string,
@@ -335,7 +340,11 @@ export class GithubService {
       const response = await client.get(`/repos/${owner}/${repo}/commits`, { params });
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch commits for ${owner}/${repo}`, this.formatErrorForLog(error));
+      if (this.isEmptyRepositoryError(error)) {
+        this.logger.debug(`Empty repository, skipping commits: ${owner}/${repo}`);
+      } else {
+        this.logger.error(`Failed to fetch commits for ${owner}/${repo}`, this.formatErrorForLog(error));
+      }
       return [];
     }
   }
@@ -374,7 +383,11 @@ export class GithubService {
           lastCommitSha: branch.commit?.sha,
         }));
     } catch (error) {
-      this.logger.error(`Failed to fetch branches for ${owner}/${repo}`, this.formatErrorForLog(error));
+      if (this.isEmptyRepositoryError(error)) {
+        this.logger.debug(`Empty repository, skipping branches: ${owner}/${repo}`);
+      } else {
+        this.logger.error(`Failed to fetch branches for ${owner}/${repo}`, this.formatErrorForLog(error));
+      }
       return [];
     }
   }
@@ -392,7 +405,11 @@ export class GithubService {
       });
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch PRs for ${owner}/${repo}`, this.formatErrorForLog(error));
+      if (this.isEmptyRepositoryError(error)) {
+        this.logger.debug(`Empty repository, skipping PRs: ${owner}/${repo}`);
+      } else {
+        this.logger.error(`Failed to fetch PRs for ${owner}/${repo}`, this.formatErrorForLog(error));
+      }
       return [];
     }
   }
@@ -428,7 +445,11 @@ export class GithubService {
       });
       return response.data;
     } catch (error) {
-      this.logger.error(`Failed to fetch issues for ${owner}/${repo}`, this.formatErrorForLog(error));
+      if (this.isEmptyRepositoryError(error)) {
+        this.logger.debug(`Empty repository, skipping issues: ${owner}/${repo}`);
+      } else {
+        this.logger.error(`Failed to fetch issues for ${owner}/${repo}`, this.formatErrorForLog(error));
+      }
       return [];
     }
   }

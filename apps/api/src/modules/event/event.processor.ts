@@ -64,7 +64,12 @@ export class EventProcessor extends WorkerHost {
         branch: eventData.branch,
         sourceBranch: eventData.sourceBranch,
         targetBranch: eventData.targetBranch,
-        metadata: mergeMetadata(eventData.metadata, timeResolution.metadataPatch),
+        // 打 source='webhook' 标记：与同步来源（repository_sync / legacy_history_sync）区分，
+        // 便于从 DB 直接判断某事件是否经由 webhook 实时投递落库
+        metadata: mergeMetadata(
+          { ...eventData.metadata, source: 'webhook' },
+          timeResolution.metadataPatch,
+        ),
         rawPayload: payload,
         occurredAt: timeResolution.occurredAt,
       });

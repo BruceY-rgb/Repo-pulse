@@ -74,6 +74,7 @@ cloudflared 边缘 → 本机反代（仅 /webhooks 放行）→ 本地 API /web
 
 - **隧道 URL 每次随机**：cloudflared quick tunnel 每次启动换一个 `*.trycloudflare.com`，因此每次启动都要
   重写 API_URL + 重注册全部 webhook（quick tunnel 固有特性）。固定域名需改用命名隧道（需 CF 账号/配置）。
+  重注册遗留的旧 URL webhook 会在下次 provision 时被自动清理（见第 8.1 节），不会在 GitHub 上累积成孤儿。
 - **trycloudflare 无 SLA**：免费临时隧道，best-effort，不保证可用性 / 稳定性；生产应换命名隧道或自有公网入口。
 - **写 API_URL 需 ADMIN**：非 ADMIN 用户写 API_URL 被 403（`needsAdmin`），无法自动配 webhook，UI 给降级提示。
 - **受限网络 DNS**：部分网络系统解析器对 `*.trycloudflare.com` 返回 NXDOMAIN；已用公共 DNS（1.1.1.1/8.8.8.8）
@@ -100,3 +101,27 @@ cloudflared 边缘 → 本机反代（仅 /webhooks 放行）→ 本地 API /web
 | M2 | `99149f5` feat(electron) | `tunnel-orchestrator` + `main.ts` 在 `realtime:connect` 时幂等启动编排：隧道就绪后写 api-url + 重建 webhook |
 | M3 | `8c34718` feat(electron/api) | 隧道刷新 IPC/UI（`tunnel:refresh` 防抖 + `tunnel:status` 回推 + Settings 状态卡）+ 后端 webhook 批量限速（并发 4 + 块间 300ms）+ 孤儿修复 |
 | M4 | `8dbec5d` build(electron) | 打包 cloudflared 进 app（`extraResources` + `package` 先 fetch + `resolveCloudflaredPath`）+ `needsAdmin` / 失败降级提示 |
+
+## 8. webhook 生命周期补强
+
+本节记录 M0–M5 之后、针对真机端到端排查暴露的三个问题所做的修复，均位于后端 `apps/api`。
+
+### 8.1 孤儿 webhook 自动清理
+
+问题：隧道 URL 每次启动随机变化。旧 URL 的 webhook 既不会被 create 命中（URL 不同，GitHub 不报 "Hook already exists"），也不会被 retryWebhook 删除（DB 只保存最新一个 webhookId，旧 id 被覆盖后已丢失）。结果旧 hook 在 GitHub 上越积越多，全部指向已失效的隧道地址，GitHub 投递恒返回 502 connection_error / failed to connect to host。这条 502 会同时出现在 GitHub 仓库 Settings → Webhooks → Recent Deliveries 和 app 的 webhook 状态卡（显示「GitHub 上不存在 / Not Found」之类）。
+
+修复：`provisionWebhook`（`apps/api/src/modules/repository/repository.service.ts`）在 create 成功或自愈成功后，调用新增的 `pruneStaleGithubWebhooks`：列出该仓库全部 webhook，删除所有 `config.url` 以 `/webhooks/github` 结尾（即本 app 注册）但不是当前保留 id 的 hook。清理为非致命操作，失败只记 warn，不影响主流程；覆盖建仓、retryWebhook、batchRetryWebhooks 所有入口。
+
+效果：每次重启重注册后，旧 URL 的孤儿被自动删除，GitHub 上每个仓库最终只保留当前隧道 URL 对应的那一个 active webhook。
+
+### 8.2 webhook 事件标记来源
+
+问题：webhook 落库的事件 metadata 不含来源标记，无法从 DB 区分某条事件是经 webhook 实时投递、还是手动同步 / 历史同步（同步来源分别记为 repository_sync、legacy_history_sync）。排查实时链路是否真正投递成功时缺少依据。
+
+修复：`apps/api/src/modules/event/event.processor.ts` 在创建事件时给 metadata 注入 source='webhook'。此后可直接按 metadata.source 判定事件来源。
+
+### 8.3 空仓库 409 日志降级
+
+问题：对从未有过 commit 的空仓库，GitHub 对 list 类接口（commits / branches / pulls / issues）返回 409「Git Repository is empty」。`apps/api/src/modules/repository/services/github.service.ts` 原以 error 级别记录，对正常的空仓状态造成误导性告警噪音；同步本身正常完成、返回空数组、不中断。
+
+修复：新增 `isEmptyRepositoryError` 判别 409；getCommits / getBranches / getPullRequests / getIssues 四处 catch 对空仓 409 改用 debug 级别，其余错误仍记 error。仅日志级别变化，返回值与同步流程不变。
