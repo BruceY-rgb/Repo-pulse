@@ -263,6 +263,7 @@ export function useRepositoryRealtimeSubscription(repositoryIds?: string | strin
           queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
           queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.detail(repositoryId) });
           queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
+          queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.chatRepositories() });
           toast.success(`同步完成（${(durationMs / 1000).toFixed(1)}s）`);
         },
         [REALTIME_EVENTS.REPOSITORY_SYNC_FAILED]: ({ repositoryId, reason }) => {
