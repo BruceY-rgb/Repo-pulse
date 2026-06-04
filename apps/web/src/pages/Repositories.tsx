@@ -59,6 +59,7 @@ import {
   useUpdateRepositoryMutation,
 } from '@/hooks/queries/use-repository-queries';
 import { dashboardQueryKeys } from '@/hooks/queries/use-dashboard-queries';
+import { workbenchQueryKeys } from '@/hooks/queries/use-workbench-queries';
 import type { Repository, SearchResult } from '@/types/api';
 
 type CandidateSource = 'search' | 'my' | 'starred';
@@ -198,6 +199,7 @@ export function Repositories() {
   const refreshRepositories = async () => {
     await queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
     await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.repositories() });
+    await queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.chatRepositories() });
     await repositoriesQuery.refetch();
   };
 

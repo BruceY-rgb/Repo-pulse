@@ -36,6 +36,7 @@ import {
   Folder,
   FolderPlus,
   GitBranch,
+  GitMerge,
   Github,
   LayoutDashboard,
   Loader2,
@@ -133,6 +134,7 @@ import {
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
 import { eventService } from '@/services/event.service';
 import { approvalService, type Approval } from '@/services/approval.service';
+import { apiClient } from '@/services/api-client';
 import { repositoryService } from '@/services/repository.service';
 import { workbenchService } from '@/services/workbench.service';
 import { settingsService, PROVIDER_LABELS, type AIProvider } from '@/services/settings.service';
@@ -2205,6 +2207,7 @@ function WorkbenchHeader({
                 size="icon"
                 variant="outline"
                 aria-label="分支监控"
+                disabled={!repository}
                 onClick={onOpenBranchMonitor}
                 className={cn(
                   "relative transition-all duration-200",
@@ -2223,7 +2226,7 @@ function WorkbenchHeader({
             </TooltipTrigger>
             <TooltipContent>
               {!repository
-                ? '分支监控'
+                ? '请先选择一个仓库'
                 : !isMonitored
                 ? '分支监控 (当前仓库监控已关闭)'
                 : (selectedRepositoryBranchesCount ?? 0) > 0
@@ -2265,6 +2268,7 @@ function ConversationBubble({
   onApproveMessage,
   onRejectMessage,
   approvalActionId,
+  onMergePR,
   onContextMenu,
   onOpenSiriAnalysis,
 }: {
@@ -2275,6 +2279,7 @@ function ConversationBubble({
   onApproveMessage: (message: ConversationMessage) => void;
   onRejectMessage: (message: ConversationMessage) => void;
   approvalActionId?: string;
+  onMergePR?: (message: ConversationMessage, action: MessageAction) => void;
   onContextMenu: (event: MouseEvent<HTMLDivElement>, message: ConversationMessage) => void;
   onOpenSiriAnalysis?: (eventId: string, eventTitle: string) => void;
 }) {
@@ -2392,6 +2397,24 @@ function ConversationBubble({
       );
     }
 
+    if (action.key === 'merge_pr') {
+      return (
+        <Button
+          key={action.key}
+          size="sm"
+          variant="outline"
+          className="gap-2"
+          onClick={(event) => {
+            event.stopPropagation();
+            onMergePR?.(message, action);
+          }}
+        >
+          <GitMerge className="h-3.5 w-3.5" />
+          {action.label}
+        </Button>
+      );
+    }
+
     return null;
   }
 
@@ -2465,6 +2488,7 @@ function MessageDetailSheet({
   onApproveMessage,
   onRejectMessage,
   approvalActionId,
+  onMergePR,
   onOpenSiriAnalysis,
 }: {
   message: ConversationMessage | null;
@@ -2474,6 +2498,7 @@ function MessageDetailSheet({
   onApproveMessage: (message: ConversationMessage) => void;
   onRejectMessage: (message: ConversationMessage) => void;
   approvalActionId?: string;
+  onMergePR?: (message: ConversationMessage, action: MessageAction) => void;
   onOpenSiriAnalysis?: (eventId: string, eventTitle: string) => void;
 }) {
   if (!message || !repository) {
@@ -2641,6 +2666,19 @@ function MessageDetailSheet({
                           onClick={() => onOpenSiriAnalysis?.(message.id, message.title)}
                         >
                           <Sparkles className="h-4 w-4" />
+                          {action.label}
+                        </Button>
+                      );
+                    }
+                    if (action.key === 'merge_pr') {
+                      return (
+                        <Button
+                          key={action.key}
+                          variant="outline"
+                          className="gap-2 rounded-xl border-border/80 hover:bg-secondary transition-all"
+                          onClick={() => onMergePR?.(message, action)}
+                        >
+                          <GitMerge className="h-4 w-4" />
                           {action.label}
                         </Button>
                       );
@@ -3014,11 +3052,13 @@ function BranchMonitorSheet({
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-muted-foreground/60 mt-10">
-            <SlidersHorizontal className="h-10 w-10 text-muted-foreground/30 mb-3" />
-            <p className="text-sm font-semibold text-foreground/80">未选择有效的仓库</p>
-            <p className="text-xs text-muted-foreground/65 mt-1 max-w-[240px]">
-              请先在左侧仓库列表中选择一个您拥有编辑权限的仓库。
+          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center mt-10">
+            <div className="bg-gradient-to-br from-primary/20 via-purple-500/10 to-indigo-500/20 rounded-full p-6 mb-4 shadow-inner">
+              <GitBranch className="h-12 w-12 text-primary/60" />
+            </div>
+            <p className="text-sm font-semibold text-foreground/80">还未选择仓库</p>
+            <p className="text-xs text-muted-foreground/65 mt-1.5 max-w-[260px] leading-relaxed">
+              请从左侧仓库列表中选择一个仓库，即可配置分支监控
             </p>
           </div>
         )}
@@ -3289,6 +3329,7 @@ function RepositoryConversation({
   onApproveMessage,
   onRejectMessage,
   approvalActionId,
+  onMergePR,
   onOpenDetail,
   onOpenSiriAnalysis,
 }: {
@@ -3300,6 +3341,7 @@ function RepositoryConversation({
   onApproveMessage: (message: ConversationMessage) => void;
   onRejectMessage: (message: ConversationMessage) => void;
   approvalActionId?: string;
+  onMergePR?: (message: ConversationMessage, action: MessageAction) => void;
   onOpenDetail: (message: ConversationMessage | null) => void;
   onOpenSiriAnalysis?: (eventId: string, eventTitle: string) => void;
 }) {
@@ -3535,6 +3577,7 @@ function RepositoryConversation({
                     onApproveMessage={onApproveMessage}
                     onRejectMessage={onRejectMessage}
                     approvalActionId={approvalActionId}
+                    onMergePR={onMergePR}
                     onOpenSiriAnalysis={onOpenSiriAnalysis}
                     onContextMenu={(event, selectedMessage) => {
                       event.preventDefault();
@@ -6894,6 +6937,7 @@ export function DesktopWorkbench() {
   const params = useParams<{ view?: string; repositoryId?: string }>();
   const [searchParams] = useSearchParams();
   const [approvalActionId, setApprovalActionId] = useState<string>();
+  const [mergingActionId, setMergingActionId] = useState<string>();
   const [isPrimaryRailCollapsed, setIsPrimaryRailCollapsed] = useState(true);
   const [isRepositorySidebarCollapsed, setIsRepositorySidebarCollapsed] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<ConversationMessage | null>(null);
@@ -7547,6 +7591,22 @@ export function DesktopWorkbench() {
     }
   };
 
+  const handleMergePR = async (message: ConversationMessage, action: MessageAction) => {
+    setMergingActionId(message.id);
+    try {
+      const httpMethod = action.method?.toLowerCase() === 'get' ? apiClient.get : apiClient.post;
+      await httpMethod(action.endpoint!);
+      toast.success('Pull Request 合并请求已提交');
+      await conversationMessagesQuery.refetch();
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { message?: string } } };
+      console.error(error);
+      toast.error(err?.response?.data?.message || '合并失败');
+    } finally {
+      setMergingActionId(undefined);
+    }
+  };
+
   const persistSelectedRepositoryScope = async (
     nextRepositoryIds: string[],
     nextRepositoryBranchScopes = monitoringScope.repositoryBranchScopes ?? {},
@@ -7723,7 +7783,7 @@ export function DesktopWorkbench() {
               onMarkAllRead={handleIgnoreAllVisibleFeedItems}
               onAddRepositoryClick={() => setIsAddRepositoryOpen(true)}
               onOpenContributors={() => setIsContributorsOpen(true)}
-              isMonitored={selectedRepository ? monitoredRepositoryIds.includes(selectedRepository.id) : false}
+              isMonitored={selectedRepository ? (monitoredRepositoryIds.length === 0 || monitoredRepositoryIds.includes(selectedRepository.id)) : false}
               selectedRepositoryBranchesCount={selectedRepositoryBranches.length}
             />
           )}
@@ -7738,6 +7798,7 @@ export function DesktopWorkbench() {
                 onApproveMessage={handleApproveMessage}
                 onRejectMessage={handleRejectMessage}
                 approvalActionId={approvalActionId}
+                onMergePR={handleMergePR}
                 onOpenDetail={setSelectedMessage}
                 onOpenSiriAnalysis={(eventId, eventTitle) => setSiriAnalysis({ isOpen: true, eventId, eventTitle })}
               />
@@ -7838,6 +7899,7 @@ export function DesktopWorkbench() {
           onApproveMessage={handleApproveMessage}
           onRejectMessage={handleRejectMessage}
           approvalActionId={approvalActionId}
+          onMergePR={handleMergePR}
           onOpenSiriAnalysis={(eventId, eventTitle) => setSiriAnalysis({ isOpen: true, eventId, eventTitle })}
         />
         <Dialog open={isAddRepositoryOpen} onOpenChange={setIsAddRepositoryOpen}>
