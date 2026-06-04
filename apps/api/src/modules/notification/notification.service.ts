@@ -90,6 +90,23 @@ export class NotificationService {
     }
   }
 
+  /**
+   * 通知已读 / 全部已读 / 删除后，向该用户 Room 推送 notification.updated（含最新未读数），
+   * 驱动同一用户跨标签页 / 跨设备的红点与通知列表实时同步。广播失败不影响主流程。
+   */
+  private async emitNotificationUpdated(userId: string): Promise<void> {
+    try {
+      const unreadCount = await this.getUnreadCount(userId);
+      this.eventGateway.broadcastNotificationUpdated(userId, { userId, unreadCount });
+    } catch (error) {
+      this.logger.warn(
+        `notification_updated_broadcast_failed userId=${userId} reason=${
+          error instanceof Error ? error.message : 'unknown_error'
+        }`,
+      );
+    }
+  }
+
   private async resolveRepositoryIds(
     userId: string,
     repositoryIdsParam?: string,
@@ -379,6 +396,8 @@ export class NotificationService {
       where: { id: notificationId },
       data: { readAt: new Date() },
     });
+
+    await this.emitNotificationUpdated(userId);
   }
 
   async markAllAsRead(userId: string): Promise<void> {
@@ -386,6 +405,8 @@ export class NotificationService {
       where: { userId, readAt: null },
       data: { readAt: new Date() },
     });
+
+    await this.emitNotificationUpdated(userId);
   }
 
   async deleteNotification(notificationId: string, userId: string): Promise<void> {
@@ -400,6 +421,8 @@ export class NotificationService {
     await prisma.notification.delete({
       where: { id: notificationId },
     });
+
+    await this.emitNotificationUpdated(userId);
   }
 
   async getUnreadCount(

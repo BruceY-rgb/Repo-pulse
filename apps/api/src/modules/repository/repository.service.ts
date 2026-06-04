@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -24,6 +25,7 @@ import {
   isEditableRepositoryAccessLevel,
 } from '../../common/utils/repository-access';
 import { EventService } from '../event/event.service';
+import { EventGateway } from '../event/event.gateway';
 import { CreateRepositoryDto, UpdateRepositoryDto } from './dto/repository.dto';
 import { GithubBranchInfo, GithubRepoResponse, GithubService } from './services/github.service';
 import { GitlabBranchInfo, GitlabService } from './services/gitlab.service';
@@ -117,6 +119,7 @@ export class RepositoryService {
     private readonly gitlabService: GitlabService,
     private readonly eventService: EventService,
     private readonly appConfigService: AppConfigService = createFallbackAppConfigService(configService),
+    @Optional() private readonly eventGateway?: EventGateway,
   ) {
     this.prisma = new PrismaClient();
   }
@@ -382,6 +385,32 @@ export class RepositoryService {
       where: { id: repositoryId },
       data,
     });
+  }
+
+  /** 仓库新增/更新/webhook 状态变更后，向该用户 Room 推送 repository.updated（非致命）。 */
+  private emitRepositoryUpdated(userId: string, repositoryId: string): void {
+    try {
+      this.eventGateway?.broadcastRepositoryUpdated({ userId, repositoryId });
+    } catch (error) {
+      this.logger.warn(
+        `repository_updated_broadcast_failed repo=${repositoryId} reason=${
+          error instanceof Error ? error.message : 'unknown_error'
+        }`,
+      );
+    }
+  }
+
+  /** 仓库删除后，向该用户 Room 推送 repository.deleted（非致命）。 */
+  private emitRepositoryDeleted(userId: string, repositoryId: string): void {
+    try {
+      this.eventGateway?.broadcastRepositoryDeleted({ userId, repositoryId });
+    } catch (error) {
+      this.logger.warn(
+        `repository_deleted_broadcast_failed repo=${repositoryId} reason=${
+          error instanceof Error ? error.message : 'unknown_error'
+        }`,
+      );
+    }
   }
 
   private isHookAlreadyExistsError(error: unknown): boolean {
@@ -720,10 +749,12 @@ export class RepositoryService {
 
   async updateForUser(userId: string, id: string, dto: UpdateRepositoryDto) {
     await assertUserCanEditRepository(userId, id);
-    return this.prisma.repository.update({
+    const updated = await this.prisma.repository.update({
       where: { id },
       data: dto,
     });
+    this.emitRepositoryUpdated(userId, id);
+    return updated;
   }
 
   async delete(userId: string, id: string) {
@@ -790,6 +821,7 @@ export class RepositoryService {
       this.logger.log(`Repository membership for ${id} deleted for user ${userId}`);
     }
 
+    this.emitRepositoryDeleted(userId, id);
     return { success: true };
   }
 
@@ -915,7 +947,7 @@ export class RepositoryService {
       });
     }
 
-    return this.provisionWebhook({
+    const provisioned = await this.provisionWebhook({
       platform: repository.platform,
       owner,
       repo,
@@ -924,6 +956,8 @@ export class RepositoryService {
       webhookSecret,
       userOAuthToken: accessToken,
     });
+    this.emitRepositoryUpdated(userId, repository.id);
+    return provisioned;
   }
 
   /**

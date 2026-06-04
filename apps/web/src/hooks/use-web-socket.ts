@@ -15,6 +15,7 @@ import { notificationQueryKeys } from '@/hooks/queries/use-notification-queries'
 import { repositoryQueryKeys } from '@/hooks/queries/use-repository-queries';
 import { workbenchQueryKeys } from '@/hooks/queries/use-workbench-queries';
 import { analysisQueryKeys } from '@/hooks/use-analysis';
+import { approvalKeys } from '@/hooks/use-approvals';
 import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
 import { useSyncProgressStore } from '@/stores/sync-progress.store';
 import { getSocketUrl, isDesktopRuntime } from '@/lib/desktop';
@@ -177,6 +178,8 @@ export function createRealtimeHandlers(
       invalidateAnalysisRealtimeQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: analysisQueryKeys.detail(eventId) });
       queryClient.invalidateQueries({ queryKey: analysisQueryKeys.list() });
+      // 分析完成时后端可能据此自动创建审批；失效审批列表/待办计数，让旁观者审批页实时出现新审批
+      queryClient.invalidateQueries({ queryKey: approvalKeys.all });
     },
     [REALTIME_EVENTS.ANALYSIS_STARTED]: ({ eventId }) => {
       // 分析开始：刷新分析详情/列表以反映“进行中”状态。
@@ -199,6 +202,9 @@ export function createRealtimeHandlers(
       queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.detail(repositoryId) });
       queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
       queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
+      // 他人 approve/reject/edit 后失效审批列表/待办计数，让旁观者审批页实时刷新
+      // （原仅 window.dispatchEvent('approval-updated')，但全仓库无监听者，等于空操作）
+      queryClient.invalidateQueries({ queryKey: approvalKeys.all });
       window.dispatchEvent(new Event('approval-updated'));
     },
     [REALTIME_EVENTS.REPOSITORY_SYNC_PROGRESS]: ({ repositoryId, jobId, progress, stage }) => {
@@ -215,6 +221,23 @@ export function createRealtimeHandlers(
     [REALTIME_EVENTS.REPOSITORY_SYNC_FAILED]: ({ repositoryId, reason }) => {
       useSyncProgressStore.getState().clear(repositoryId);
       toast.error(`同步失败：${reason}`);
+    },
+    [REALTIME_EVENTS.NOTIFICATION_UPDATED]: () => {
+      // 同一用户已读/全部已读/删除通知后，跨标签页同步未读数与列表（驱动红点）。
+      queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
+      queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
+    },
+    [REALTIME_EVENTS.REPOSITORY_UPDATED]: ({ repositoryId }) => {
+      // 仓库新增/更新/webhook 状态变更：刷新仓库列表/详情与概览。
+      queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
+      queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.detail(repositoryId) });
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
+    },
+    [REALTIME_EVENTS.REPOSITORY_DELETED]: ({ repositoryId }) => {
+      // 仓库删除：刷新仓库列表/详情与概览。
+      queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
+      queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.detail(repositoryId) });
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
     },
   };
 }

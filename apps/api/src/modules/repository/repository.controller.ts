@@ -17,6 +17,7 @@ import { Queue } from 'bullmq';
 import { QUEUE_NAMES } from '@repo-pulse/shared';
 import { RepositoryService } from './repository.service';
 import { UserService } from '../user/user.service';
+import { EventGateway } from '../event/event.gateway';
 import {
   CreateRepositoryDto,
   UpdateRepositoryDto,
@@ -35,6 +36,7 @@ export class RepositoryController {
   constructor(
     private readonly repositoryService: RepositoryService,
     private readonly userService: UserService,
+    private readonly eventGateway: EventGateway,
     @InjectQueue(QUEUE_NAMES.REPOSITORY_SYNC)
     private readonly syncQueue: Queue<RepositorySyncJob>,
   ) {}
@@ -44,9 +46,15 @@ export class RepositoryController {
   async create(@Req() req: Request, @Body() dto: CreateRepositoryDto) {
     const userId = (req.user as { sub: string }).sub;
     const user = await this.userService.findById(userId);
-    return this.repositoryService.create(userId, dto, {
+    const repository = await this.repositoryService.create(userId, dto, {
       userOAuthToken: user?.githubAccessToken || undefined,
     });
+    try {
+      this.eventGateway.broadcastRepositoryUpdated({ userId, repositoryId: repository.id });
+    } catch {
+      // 实时广播为尽力而为，失败不影响创建结果
+    }
+    return repository;
   }
 
   @Get()
@@ -146,6 +154,17 @@ export class RepositoryController {
       repositoryId: id,
       userId,
     });
+    // 入队即下发首帧进度，进度条立即出现，弥补 worker 拉起到首次 stage 广播间的 1-5s 延迟
+    try {
+      this.eventGateway.broadcastRepositorySyncProgress({
+        repositoryId: id,
+        jobId: String(job.id),
+        progress: 0,
+        stage: 'commits',
+      });
+    } catch {
+      // 实时广播为尽力而为，失败不影响入队结果
+    }
     return { status: 'queued' as const, jobId: job.id };
   }
 

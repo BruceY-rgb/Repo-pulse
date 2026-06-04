@@ -11,6 +11,9 @@ export const REALTIME_EVENTS = {
   ANALYSIS_STARTED: 'analysis.started',
   ANALYSIS_FAILED: 'analysis.failed',
   NOTIFICATION_NEW: 'notification.new',
+  NOTIFICATION_UPDATED: 'notification.updated',
+  REPOSITORY_UPDATED: 'repository.updated',
+  REPOSITORY_DELETED: 'repository.deleted',
 } as const;
 
 export type RealtimeEventName =
@@ -94,6 +97,22 @@ export interface EventReplayDonePayload {
   lastSeq: number;
 }
 
+export interface NotificationUpdatedPayload {
+  userId: string;
+  /** 操作后该用户最新的未读数（已读/全部已读/删除均回传，驱动跨标签页红点同步）。 */
+  unreadCount: number;
+}
+
+export interface RepositoryUpdatedPayload {
+  userId: string;
+  repositoryId: string;
+}
+
+export interface RepositoryDeletedPayload {
+  userId: string;
+  repositoryId: string;
+}
+
 export interface RealtimeEventPayloadMap {
   [REALTIME_EVENTS.EVENT_CREATED]: EventCreatedPayload;
   [REALTIME_EVENTS.EVENT_REPLAY_DONE]: EventReplayDonePayload;
@@ -105,6 +124,9 @@ export interface RealtimeEventPayloadMap {
   [REALTIME_EVENTS.ANALYSIS_STARTED]: AnalysisStartedPayload;
   [REALTIME_EVENTS.ANALYSIS_FAILED]: AnalysisFailedPayload;
   [REALTIME_EVENTS.NOTIFICATION_NEW]: NotificationNewPayload;
+  [REALTIME_EVENTS.NOTIFICATION_UPDATED]: NotificationUpdatedPayload;
+  [REALTIME_EVENTS.REPOSITORY_UPDATED]: RepositoryUpdatedPayload;
+  [REALTIME_EVENTS.REPOSITORY_DELETED]: RepositoryDeletedPayload;
 }
 
 export type RealtimeEventPayload<E extends RealtimeEventName> =

@@ -20,10 +20,13 @@ import {
   EventCreatedPayload,
   EventReplayDonePayload,
   NotificationNewPayload,
+  NotificationUpdatedPayload,
   REALTIME_EVENTS,
+  RepositoryDeletedPayload,
   RepositorySyncFailedPayload,
   RepositorySyncProgressPayload,
   RepositorySyncedPayload,
+  RepositoryUpdatedPayload,
 } from '@repo-pulse/shared';
 import { Server, Socket } from 'socket.io';
 import { MetricsService } from '../observability/metrics.service';
@@ -395,6 +398,33 @@ export class EventGateway
     );
     this.logger.warn(
       `Broadcast ${REALTIME_EVENTS.REPOSITORY_SYNC_FAILED} to room ${roomName} jobId=${payload.jobId} reason=${payload.reason}`,
+    );
+  }
+
+  broadcastNotificationUpdated(userId: string, payload: NotificationUpdatedPayload) {
+    const roomName = `user:${userId}`;
+    this.server.to(roomName).emit(REALTIME_EVENTS.NOTIFICATION_UPDATED, payload);
+    this.metricsService.observeEmitLatency(REALTIME_EVENTS.NOTIFICATION_UPDATED, 0);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.NOTIFICATION_UPDATED} to room ${roomName} unread=${payload.unreadCount}`,
+    );
+  }
+
+  broadcastRepositoryUpdated(payload: RepositoryUpdatedPayload) {
+    const roomName = `user:${payload.userId}`;
+    this.server.to(roomName).emit(REALTIME_EVENTS.REPOSITORY_UPDATED, payload);
+    this.metricsService.observeEmitLatency(REALTIME_EVENTS.REPOSITORY_UPDATED, 0);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.REPOSITORY_UPDATED} to room ${roomName} repositoryId=${payload.repositoryId}`,
+    );
+  }
+
+  broadcastRepositoryDeleted(payload: RepositoryDeletedPayload) {
+    const roomName = `user:${payload.userId}`;
+    this.server.to(roomName).emit(REALTIME_EVENTS.REPOSITORY_DELETED, payload);
+    this.metricsService.observeEmitLatency(REALTIME_EVENTS.REPOSITORY_DELETED, 0);
+    this.logger.log(
+      `Broadcast ${REALTIME_EVENTS.REPOSITORY_DELETED} to room ${roomName} repositoryId=${payload.repositoryId}`,
     );
   }
 
