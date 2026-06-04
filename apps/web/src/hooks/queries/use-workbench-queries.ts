@@ -16,6 +16,7 @@ export const workbenchQueryKeys = {
       params?.cursor ?? null,
       params?.skip ?? null,
       params?.take ?? null,
+      JSON.stringify(params?.repositoryBranchScopes ?? {}),
     ] as const,
   watchFeed: (type: string, params?: Omit<WatchFeedParams, 'type'>) =>
     [

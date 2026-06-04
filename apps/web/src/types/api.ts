@@ -167,6 +167,10 @@ export interface WorkbenchConversationMessage {
   authorAvatar?: string;
   createdAt: string;
   externalUrl?: string;
+  branch?: string;
+  sourceBranch?: string;
+  targetBranch?: string;
+  branches?: string[];
   actions?: MessageAction[];
   /** 风险等级（由后端统一计算） */
   riskLevel?: RiskLevel;

@@ -7,6 +7,7 @@ import type {
   MarkConversationReadDto,
   WatchFeedResponse,
   WatchRepositoryItem,
+  RepositoryBranchScopeMap,
 } from '@/types/api';
 
 export interface WatchFeedParams {
@@ -19,6 +20,20 @@ export interface ConversationMessagesParams {
   cursor?: string;
   skip?: number;
   take?: number;
+  repositoryBranchScopes?: RepositoryBranchScopeMap;
+}
+
+function serializeRepositoryBranchScopes(repositoryBranchScopes?: RepositoryBranchScopeMap) {
+  const normalized = Object.fromEntries(
+    Object.entries(repositoryBranchScopes ?? {})
+      .map(([repositoryId, branches]) => [
+        repositoryId,
+        Array.from(new Set(branches)).filter(Boolean).sort(),
+      ])
+      .filter(([, branches]) => branches.length > 0),
+  );
+
+  return Object.keys(normalized).length > 0 ? JSON.stringify(normalized) : undefined;
 }
 
 export const workbenchService = {
@@ -35,9 +50,15 @@ export const workbenchService = {
     repositoryId: string,
     params?: ConversationMessagesParams,
   ): Promise<ConversationMessagesResponse> {
+    const { repositoryBranchScopes, ...queryParams } = params ?? {};
     const { data } = await apiClient.get<
       ApiResponse<ConversationMessagesResponse>
-    >(`/workbench/chat/repositories/${repositoryId}/messages`, { params });
+    >(`/workbench/chat/repositories/${repositoryId}/messages`, {
+      params: {
+        ...queryParams,
+        branchScopes: serializeRepositoryBranchScopes(repositoryBranchScopes),
+      },
+    });
     return data.data;
   },
 

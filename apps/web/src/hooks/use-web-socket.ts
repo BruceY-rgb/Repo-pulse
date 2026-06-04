@@ -103,11 +103,7 @@ export function invalidateRepositoryRealtimeQueries(
   queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
   queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
   queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.chatRepositories() });
-  queryClient.invalidateQueries({
-    queryKey: repositoryId
-      ? workbenchQueryKeys.conversationMessages(repositoryId)
-      : workbenchQueryKeys.conversationMessagesRoot(),
-  });
+  queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.conversationMessagesRoot() });
   queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
   queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
   queryClient.invalidateQueries({ queryKey: notificationQueryKeys.preferences() });

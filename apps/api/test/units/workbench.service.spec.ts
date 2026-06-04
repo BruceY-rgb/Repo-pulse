@@ -24,6 +24,11 @@ jest.mock('../../src/common/utils/repository-access', () => ({
 }));
 
 jest.mock('@repo-pulse/database', () => ({
+  Prisma: {
+    sql: (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),
+    empty: { strings: [''], values: [] },
+    join: (values: any[]) => values,
+  },
   ApprovalStatus: { PENDING: 'PENDING', APPROVED: 'APPROVED', REJECTED: 'REJECTED' },
   RiskLevel: { LOW: 'LOW', MEDIUM: 'MEDIUM', HIGH: 'HIGH', CRITICAL: 'CRITICAL' },
   EventType: {
@@ -338,11 +343,12 @@ describe('WorkbenchService.getWatchFeed', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     svc = new WorkbenchService({} as any, {} as any);
-    mockGetUserMonitoredRepositoryIds.mockResolvedValue([]);
+    mockGetUserMonitoredRepositoryIds.mockResolvedValue(['repo-other']);
     mockEventFindMany.mockResolvedValue([]);
   });
 
   it('editable 仓库不出现在 watchFeed 中', async () => {
+    mockGetUserMonitoredRepositoryIds.mockResolvedValue(['repo-other']);
     // Prisma 会通过 accessLevel: { notIn: editableAccessLevels } 过滤掉 editable 仓库
     // mock 模拟 Prisma 过滤后的结果
     mockUserRepoFindMany.mockResolvedValue([]);
@@ -380,6 +386,7 @@ describe('WorkbenchService.getWatchFeed', () => {
   });
 
   it('非 editable 且未监控的仓库出现在 watchFeed 中', async () => {
+    mockGetUserMonitoredRepositoryIds.mockResolvedValue(['repo-other']);
     mockUserRepoFindMany.mockResolvedValue([
       {
         repositoryId: 'repo-watch',

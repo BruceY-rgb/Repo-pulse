@@ -242,6 +242,10 @@ const messageFilters: Array<{ key: MessageFilterKey; label: string }> = [
 const CONVERSATION_MESSAGE_PAGE_SIZE = 50;
 const WATCH_FEED_PAGE_SIZE = 20;
 
+function isRepositoryMonitoredInScope(monitoredRepositoryIds: string[], repositoryId?: string) {
+  return Boolean(repositoryId) && (monitoredRepositoryIds.length === 0 || monitoredRepositoryIds.includes(repositoryId));
+}
+
 const markdownComponents: Components = {
   a({ children, href, title }) {
     return (
@@ -857,6 +861,7 @@ function workbenchMessageToConversationMessage(
     createdAtMs,
     risk,
     eventTypeLabel,
+    branch: msg.branch || msg.targetBranch || msg.sourceBranch,
     externalUrl: msg.externalUrl,
     authorAvatar: msg.authorAvatar,
     approvalId: msg.approvalId,
@@ -890,6 +895,44 @@ function getRepoMessages(repositoryId: string | undefined, messages: Conversatio
   }
 
   return messages.filter((item) => item.sourceRepositoryId === repositoryId);
+}
+
+function doesMessageMatchMonitoringScope(
+  message: ConversationMessage,
+  monitoredRepositoryIds: string[],
+  repositoryBranchScopes: Record<string, string[]>,
+) {
+  const repositoryId = message.sourceRepositoryId;
+  if (!repositoryId) {
+    return true;
+  }
+
+  if (monitoredRepositoryIds.length > 0 && !monitoredRepositoryIds.includes(repositoryId)) {
+    return false;
+  }
+
+  const scopedBranches = repositoryBranchScopes[repositoryId] ?? [];
+  if (scopedBranches.length === 0) {
+    return true;
+  }
+
+  const messageBranches = Array.from(
+    new Set(
+      [
+        message.branch,
+        message.sourceEvent?.branch,
+        message.sourceEvent?.sourceBranch,
+        message.sourceEvent?.targetBranch,
+        ...(message.sourceEvent?.branches ?? []),
+      ].filter((branch): branch is string => Boolean(branch)),
+    ),
+  );
+
+  if (messageBranches.length === 0) {
+    return message.eventTypeLabel === 'Issue';
+  }
+
+  return messageBranches.some((branch) => scopedBranches.includes(branch));
 }
 
 function getRepositorySortTime(repo: Repository, messages: ConversationMessage[]) {
@@ -2885,7 +2928,7 @@ function BranchMonitorSheet({
   onResetBranches: () => void;
 }) {
   const branchesQuery = useRepositoryBranchesQuery(repository?.id ?? '', Boolean(open && repository?.id));
-  const isRepositoryMonitored = repository ? monitoredRepositoryIds.includes(repository.id) : false;
+  const isRepositoryMonitored = isRepositoryMonitoredInScope(monitoredRepositoryIds, repository?.id);
   const repositorySearchKey = repository?.id ?? '';
   const [branchSearch, setBranchSearch] = useState({ repositoryId: '', query: '' });
   const searchQuery = open && branchSearch.repositoryId === repositorySearchKey ? branchSearch.query : '';
@@ -7296,6 +7339,10 @@ export function DesktopWorkbench() {
       await Promise.all([
         chatReposQuery.refetch(),
         watchFeedQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: ['workbench'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+        queryClient.invalidateQueries({ queryKey: notificationQueryKeys.all }),
+        queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() }),
       ]);
     } catch (error) {
       console.error(error);
@@ -7321,6 +7368,10 @@ export function DesktopWorkbench() {
         chatReposQuery.refetch(),
         watchFeedQuery.refetch(),
         watchRepositoriesQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: ['workbench'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+        queryClient.invalidateQueries({ queryKey: notificationQueryKeys.all }),
+        queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() }),
       ]);
     } catch (error) {
       console.error(error);
@@ -7396,18 +7447,28 @@ export function DesktopWorkbench() {
     persistMonitoringScope,
     updatePreferencesMutation,
   } = useMonitoringScopePreferences();
+  const monitoredRepositoryIds = monitoringScope.repositoryIds ?? [];
+  const effectiveMonitoredRepositoryIds = useMemo(
+    () => (monitoredRepositoryIds.length === 0 ? repositoryIds : monitoredRepositoryIds),
+    [monitoredRepositoryIds, repositoryIds],
+  );
+  const repositoryBranchScopes = monitoringScope.repositoryBranchScopes ?? {};
+  const repositoryBranchScopesKey = useMemo(
+    () => JSON.stringify(repositoryBranchScopes),
+    [repositoryBranchScopes],
+  );
 
-  useRepositoryRealtimeSubscription(repositoryIds);
+  useRepositoryRealtimeSubscription(effectiveMonitoredRepositoryIds);
 
   const eventsQuery = useApiQuery({
-    queryKey: ['workbench', 'events', repositoryIds.join(',')],
-    queryFn: () => eventService.getAll(repositoryIds, undefined, {
+    queryKey: ['workbench', 'events', effectiveMonitoredRepositoryIds.join(','), repositoryBranchScopesKey],
+    queryFn: () => eventService.getAll(effectiveMonitoredRepositoryIds, repositoryBranchScopes, {
       page: 1,
       pageSize: 80,
       sortBy: 'occurredAt',
       sortOrder: 'desc',
     }),
-    enabled: repositoryIds.length > 0,
+    enabled: effectiveMonitoredRepositoryIds.length > 0,
     staleTime: 30 * 1000,
   });
 
@@ -7421,6 +7482,7 @@ export function DesktopWorkbench() {
   // 当前选中仓库的 Workbench 统一会话消息（替代前端自行拼接 events + approvals + notifications）
   const conversationMessagesQuery = useConversationMessagesQuery(selectedRepository?.id, {
     take: CONVERSATION_MESSAGE_PAGE_SIZE,
+    repositoryBranchScopes,
   });
 
   useEffect(() => {
@@ -7441,8 +7503,17 @@ export function DesktopWorkbench() {
 
     return [...eventMessages, ...approvalMessages, ...notificationMessages]
       .filter((message) => !Number.isNaN(message.createdAtMs))
+      .filter((message) =>
+        doesMessageMatchMonitoringScope(message, monitoredRepositoryIds, repositoryBranchScopes),
+      )
       .sort((left, right) => right.createdAtMs - left.createdAtMs);
-  }, [approvalsQuery.data, eventsQuery.data, notificationsQuery.data]);
+  }, [
+    approvalsQuery.data,
+    eventsQuery.data,
+    monitoredRepositoryIds,
+    notificationsQuery.data,
+    repositoryBranchScopes,
+  ]);
 
   const activeView: WorkbenchView = params.repositoryId
     ? 'repository'
@@ -7671,9 +7742,8 @@ export function DesktopWorkbench() {
     const allChatRepos = [...editableRepos, ...monitoredRepos];
     return allChatRepos.reduce((sum, item) => sum + (item.pendingApprovalCount || 0), 0);
   }, [editableRepos, monitoredRepos]);
-  const monitoredRepositoryIds = monitoringScope.repositoryIds ?? [];
   const selectedRepositoryBranches = selectedRepository
-    ? monitoringScope.repositoryBranchScopes?.[selectedRepository.id] ?? []
+    ? repositoryBranchScopes[selectedRepository.id] ?? []
     : [];
 
   const openAgent = (prompt?: string, repository = selectedRepository) => {
@@ -7758,6 +7828,12 @@ export function DesktopWorkbench() {
       branchNames: [],
       repositoryBranchScopes: nextRepositoryBranchScopes,
     });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['workbench'] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+      queryClient.invalidateQueries({ queryKey: notificationQueryKeys.all }),
+      queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() }),
+    ]);
   };
 
   const handleToggleSelectedRepositoryMonitoring = async () => {
@@ -7765,9 +7841,12 @@ export function DesktopWorkbench() {
       return;
     }
 
-    const nextRepositoryIds = monitoredRepositoryIds.includes(selectedRepository.id)
-      ? monitoredRepositoryIds.filter((repositoryId) => repositoryId !== selectedRepository.id)
-      : [...monitoredRepositoryIds, selectedRepository.id];
+    const nextRepositoryIds =
+      monitoredRepositoryIds.length === 0
+        ? repositoryIds.filter((repositoryId) => repositoryId !== selectedRepository.id)
+        : monitoredRepositoryIds.includes(selectedRepository.id)
+          ? monitoredRepositoryIds.filter((repositoryId) => repositoryId !== selectedRepository.id)
+          : [...monitoredRepositoryIds, selectedRepository.id];
     const nextBranchScopes = { ...(monitoringScope.repositoryBranchScopes ?? {}) };
     if (!nextRepositoryIds.includes(selectedRepository.id)) {
       delete nextBranchScopes[selectedRepository.id];
@@ -7782,7 +7861,9 @@ export function DesktopWorkbench() {
       return;
     }
 
-    const currentRepositoryIds = monitoredRepositoryIds.includes(selectedRepository.id)
+    const currentRepositoryIds = monitoredRepositoryIds.length === 0
+      ? monitoredRepositoryIds
+      : monitoredRepositoryIds.includes(selectedRepository.id)
       ? monitoredRepositoryIds
       : [...monitoredRepositoryIds, selectedRepository.id];
     const currentBranches = monitoringScope.repositoryBranchScopes?.[selectedRepository.id] ?? [];
@@ -7804,7 +7885,9 @@ export function DesktopWorkbench() {
 
     const nextBranchScopes = { ...(monitoringScope.repositoryBranchScopes ?? {}) };
     delete nextBranchScopes[selectedRepository.id];
-    const currentRepositoryIds = monitoredRepositoryIds.includes(selectedRepository.id)
+    const currentRepositoryIds = monitoredRepositoryIds.length === 0
+      ? monitoredRepositoryIds
+      : monitoredRepositoryIds.includes(selectedRepository.id)
       ? monitoredRepositoryIds
       : [...monitoredRepositoryIds, selectedRepository.id];
 
@@ -7813,15 +7896,13 @@ export function DesktopWorkbench() {
   };
 
   const removeRepositoryFromMonitoring = async (repository: Repository) => {
-    const nextRepositoryIds = monitoredRepositoryIds.filter((repositoryId) => repositoryId !== repository.id);
+    const nextRepositoryIds = monitoredRepositoryIds.length === 0
+      ? repositoryIds.filter((repositoryId) => repositoryId !== repository.id)
+      : monitoredRepositoryIds.filter((repositoryId) => repositoryId !== repository.id);
     const nextBranchScopes = { ...(monitoringScope.repositoryBranchScopes ?? {}) };
     delete nextBranchScopes[repository.id];
 
-    await persistMonitoringScope({
-      repositoryIds: nextRepositoryIds,
-      branchNames: [],
-      repositoryBranchScopes: nextBranchScopes,
-    });
+    await persistSelectedRepositoryScope(nextRepositoryIds, nextBranchScopes);
     toast.success(`${repository.fullName} 已移出监控范围`);
   };
 
@@ -7925,7 +8006,7 @@ export function DesktopWorkbench() {
               onMarkAllRead={handleIgnoreAllVisibleFeedItems}
               onAddRepositoryClick={() => setIsAddRepositoryOpen(true)}
               onOpenContributors={() => setIsContributorsOpen(true)}
-              isMonitored={selectedRepository ? (monitoredRepositoryIds.length === 0 || monitoredRepositoryIds.includes(selectedRepository.id)) : false}
+              isMonitored={isRepositoryMonitoredInScope(monitoredRepositoryIds, selectedRepository?.id)}
               selectedRepositoryBranchesCount={selectedRepositoryBranches.length}
             />
           )}

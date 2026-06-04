@@ -7,6 +7,10 @@ export class ConversationMessagesQueryDto {
   cursor?: string;
 
   @IsOptional()
+  @IsString()
+  branchScopes?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)

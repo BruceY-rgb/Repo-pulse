@@ -17,6 +17,10 @@ import {
   getUserMonitoredRepositoryIds,
   isEditableRepositoryAccessLevel,
 } from '../../common/utils/repository-access';
+import {
+  normalizeRepositoryBranchScopes,
+  parseRepositoryBranchScopesParam,
+} from '../../common/utils/repository-branch-scope';
 import { CreateRepositoryDto } from '../repository/dto/repository.dto';
 import { RepositoryService } from '../repository/repository.service';
 import { ReadConversationDto } from './dto/read-conversation.dto';
@@ -101,10 +105,13 @@ export class WorkbenchService {
       getUserMonitoredRepositoryIds(userId),
     ]);
 
-    const monitoredSet = new Set(monitoredRepositoryIds);
     const chatRepositories = memberships
       .map(({ repository, ...membership }) => {
-        const repositoryView = this.toRepositoryView(repository, membership, monitoredSet.has(repository.id));
+        const repositoryView = this.toRepositoryView(
+          repository,
+          membership,
+          this.isRepositoryInMonitoringScope(monitoredRepositoryIds, repository.id),
+        );
         if (repositoryView.isEditable) {
           return { repository, repositoryView, kind: 'editable' as const };
         }
@@ -264,6 +271,11 @@ export class WorkbenchService {
     const take = this.normalizeConversationMessagesTake(query.take);
     const skip = query.skip ?? 0;
     const cursor = this.parseConversationMessagesCursor(query.cursor);
+    const repositoryBranchScopes = normalizeRepositoryBranchScopes(
+      [repositoryId],
+      parseRepositoryBranchScopesParam(query.branchScopes),
+    );
+    const scopedBranches = repositoryBranchScopes[repositoryId] ?? [];
 
     const [conversationState, messagePage] = await Promise.all([
       prisma.userRepositoryConversationState.findUnique({
@@ -274,7 +286,7 @@ export class WorkbenchService {
           },
         },
       }),
-      this.getConversationMessagePage(repositoryId, cursor, skip, take),
+      this.getConversationMessagePage(repositoryId, cursor, skip, take, scopedBranches),
     ]);
     const eventIds = messagePage.items
       .filter((item) => item.source === 'event')
@@ -355,6 +367,10 @@ export class WorkbenchService {
           authorAvatar: event.authorAvatar || undefined,
           createdAt: messageTime.toISOString(),
           externalUrl: event.externalUrl || undefined,
+          branch: event.branch || undefined,
+          sourceBranch: event.sourceBranch || undefined,
+          targetBranch: event.targetBranch || undefined,
+          branches: event.branches,
           actions: [...baseActions, ...approvalActions, ...agentAction],
           riskLevel: this.resolveEventRiskLevel(event.analyses),
           isUnread: this.isUnreadMessage(messageTime, lastReadAt),
@@ -391,6 +407,10 @@ export class WorkbenchService {
           authorAvatar: approval.reviewer?.avatar || approval.event.authorAvatar || undefined,
           createdAt: messageTime.toISOString(),
           externalUrl: approval.event.externalUrl || undefined,
+          branch: approval.event.branch || undefined,
+          sourceBranch: approval.event.sourceBranch || undefined,
+          targetBranch: approval.event.targetBranch || undefined,
+          branches: approval.event.branches,
           approvalId: approval.id,
           approvalStatus: approval.status,
           riskLevel: this.resolveApprovalRiskLevel(approval.event.analyses, approval.status),
@@ -545,7 +565,11 @@ export class WorkbenchService {
     limit = 20,
   ) {
     const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
-    const monitoredSet = new Set(monitoredRepositoryIds);
+    const defaultMonitorAllRepositories = monitoredRepositoryIds.length === 0;
+    if (defaultMonitorAllRepositories) {
+      return { items: [], nextCursor: null };
+    }
+
     const editableAccessLevels = [
       RepositoryAccessLevel.OWNER,
       RepositoryAccessLevel.ADMIN,
@@ -558,9 +582,7 @@ export class WorkbenchService {
         isStarred: true,
         accessLevel: { notIn: editableAccessLevels },
         repository: { platform: Platform.GITHUB },
-        ...(monitoredRepositoryIds.length > 0
-          ? { repositoryId: { notIn: monitoredRepositoryIds } }
-          : {}),
+        repositoryId: { notIn: monitoredRepositoryIds },
       },
       select: { repositoryId: true },
     });
@@ -574,9 +596,7 @@ export class WorkbenchService {
             isStarred: true,
             accessLevel: { notIn: editableAccessLevels },
             repository: { platform: Platform.GITHUB },
-            ...(monitoredRepositoryIds.length > 0
-              ? { repositoryId: { notIn: monitoredRepositoryIds } }
-              : {}),
+            repositoryId: { notIn: monitoredRepositoryIds },
           },
           select: { repositoryId: true },
         });
@@ -634,7 +654,7 @@ export class WorkbenchService {
       occurredAt: (event.occurredAt ?? event.createdAt).toISOString(),
       externalUrl: event.externalUrl || undefined,
       aiInsight: event.analyses[0]?.summary || undefined,
-      canAddToMonitoring: !monitoredSet.has(event.repositoryId),
+      canAddToMonitoring: !this.isRepositoryInMonitoringScope(monitoredRepositoryIds, event.repositoryId),
     }));
 
     const tail = events[limit];
@@ -649,7 +669,7 @@ export class WorkbenchService {
   async getWatchRepositories(userId: string) {
     console.log(`[getWatchRepositories] START - userId=${userId}`);
     const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
-    const monitoredSet = new Set(monitoredRepositoryIds);
+    const defaultMonitorAllRepositories = monitoredRepositoryIds.length === 0;
 
     let memberships = await prisma.userRepository.findMany({
       where: {
@@ -699,7 +719,10 @@ export class WorkbenchService {
     }
 
     const result = memberships.map(({ repository }) =>
-      this.toWatchRepositoryItem(repository, monitoredSet),
+      this.toWatchRepositoryItem(
+        repository,
+        new Set(defaultMonitorAllRepositories ? [repository.id] : monitoredRepositoryIds),
+      ),
     );
     console.log(`[getWatchRepositories] END - Returning ${result.length} repositories for user ${userId}`);
     return result;
@@ -707,7 +730,6 @@ export class WorkbenchService {
 
   async addWatchRepository(userId: string, dto: CreateRepositoryDto) {
     const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
-    const monitoredSet = new Set(monitoredRepositoryIds);
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { githubAccessToken: true },
@@ -720,7 +742,10 @@ export class WorkbenchService {
       userOAuthToken: user?.githubAccessToken || undefined,
     });
 
-    return this.toWatchRepositoryItem(repository, monitoredSet);
+    return this.toWatchRepositoryItem(
+      repository,
+      new Set(this.isRepositoryInMonitoringScope(monitoredRepositoryIds, repository.id) ? [repository.id] : monitoredRepositoryIds),
+    );
   }
 
   private async getConversationStateMap(
@@ -752,6 +777,10 @@ export class WorkbenchService {
         },
       ]),
     );
+  }
+
+  private isRepositoryInMonitoringScope(monitoredRepositoryIds: string[], repositoryId: string): boolean {
+    return monitoredRepositoryIds.length === 0 || monitoredRepositoryIds.includes(repositoryId);
   }
 
   private toWatchRepositoryItem(
@@ -1141,12 +1170,14 @@ export class WorkbenchService {
     cursor: ConversationMessageCursor | null,
     skip: number,
     take: number,
+    scopedBranches: string[],
   ): Promise<{
     items: ConversationMessagePageRef[];
     hasMore: boolean;
     nextCursor: string | null;
   }> {
     const sourcePrioritySql = Prisma.sql`CASE WHEN merged.source = 'event' THEN 1 ELSE 0 END`;
+    const branchScopeSql = this.buildConversationBranchScopeSql(scopedBranches);
     const cursorTime = cursor ? new Date(cursor.messageAt) : null;
     const cursorPriority = cursor?.source === 'event' ? 1 : 0;
     const cursorFilterSql =
@@ -1175,6 +1206,7 @@ export class WorkbenchService {
             COALESCE(e."occurredAt", e."createdAt") AS "messageAt"
           FROM "Event" e
           WHERE e."repositoryId" = ${repositoryId}
+          ${branchScopeSql}
 
           UNION ALL
 
@@ -1185,6 +1217,7 @@ export class WorkbenchService {
           FROM "Approval" a
           INNER JOIN "Event" e ON e.id = a."eventId"
           WHERE e."repositoryId" = ${repositoryId}
+          ${branchScopeSql}
         ) AS merged
         ${cursorFilterSql}
         ORDER BY merged."messageAt" DESC, ${sourcePrioritySql} DESC, merged.id DESC
@@ -1205,5 +1238,24 @@ export class WorkbenchService {
       hasMore: rows.length > take,
       nextCursor: rows.length > take && tail ? this.buildConversationMessagesCursor(tail) : null,
     };
+  }
+
+  private buildConversationBranchScopeSql(scopedBranches: string[]) {
+    if (scopedBranches.length === 0) {
+      return Prisma.empty;
+    }
+
+    return Prisma.sql`
+      AND (
+        e."branches" && ARRAY[${Prisma.join(scopedBranches)}]::text[]
+        OR e."branch" IN (${Prisma.join(scopedBranches)})
+        OR e."sourceBranch" IN (${Prisma.join(scopedBranches)})
+        OR e."targetBranch" IN (${Prisma.join(scopedBranches)})
+        OR (
+          cardinality(e."branches") = 0
+          AND e."type" IN ('ISSUE_OPENED'::"EventType", 'ISSUE_CLOSED'::"EventType", 'ISSUE_COMMENT'::"EventType")
+        )
+      )
+    `;
   }
 }
