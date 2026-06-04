@@ -11,6 +11,8 @@ const mockEventFindMany = jest.fn();
 const mockEventFindFirst = jest.fn();
 const mockApprovalFindMany = jest.fn();
 const mockApprovalFindFirst = jest.fn();
+const mockRepositoryFindUnique = jest.fn();
+const mockQueryRaw = jest.fn();
 const mockAssertUserCanAccessRepository = jest.fn();
 const mockGetUserMonitoredRepositoryIds = jest.fn();
 
@@ -41,8 +43,10 @@ jest.mock('@repo-pulse/database', () => ({
     WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE',
   },
   prisma: {
+    $queryRaw: (...a: any[]) => mockQueryRaw(...a),
     userRepository: { findMany: (...a: any[]) => mockUserRepoFindMany(...a) },
     user: { findUnique: (...a: any[]) => mockUserFindUnique(...a) },
+    repository: { findUnique: (...a: any[]) => mockRepositoryFindUnique(...a) },
     userRepositoryConversationState: {
       findMany: (...a: any[]) => mockConversationStateFindMany(...a),
       upsert: (...a: any[]) => mockConversationStateUpsert(...a),
@@ -410,6 +414,104 @@ describe('WorkbenchService.getWatchFeed', () => {
     const result = await svc.getWatchFeed('user-1');
     expect(result.items).toHaveLength(0);
     expect(result.nextCursor).toBeNull();
+  });
+});
+
+describe('WorkbenchService.getConversationMessages', () => {
+  let svc: WorkbenchService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    svc = new WorkbenchService({} as any, {} as any);
+    mockAssertUserCanAccessRepository.mockResolvedValue({ accessLevel: 'WRITE' });
+    mockRepositoryFindUnique.mockResolvedValue({ id: 'repo-1' });
+    mockConversationStateFindUnique.mockResolvedValue({ lastReadAt: new Date('2025-01-01T00:00:00.000Z') });
+    mockEventFindMany.mockResolvedValue([]);
+    mockApprovalFindMany.mockResolvedValue([]);
+    mockQueryRaw.mockResolvedValue([]);
+  });
+
+  it('returns paginated messages with nextCursor from merged message refs', async () => {
+    mockQueryRaw.mockResolvedValue([
+      { id: 'evt-2', source: 'event', messageAt: new Date('2025-06-03T10:00:00.000Z') },
+      { id: 'app-1', source: 'approval', messageAt: new Date('2025-06-03T09:00:00.000Z') },
+      { id: 'evt-1', source: 'event', messageAt: new Date('2025-06-03T08:00:00.000Z') },
+    ]);
+    mockEventFindMany.mockResolvedValue([
+      {
+        id: 'evt-2',
+        type: 'PUSH',
+        title: 'Latest push',
+        body: 'latest push body',
+        author: 'alice',
+        authorAvatar: null,
+        externalUrl: 'https://github.com/org/repo/pull/1',
+        occurredAt: new Date('2025-06-03T10:00:00.000Z'),
+        createdAt: new Date('2025-06-03T10:00:00.000Z'),
+        analyses: [],
+        approvals: [],
+      },
+      {
+        id: 'evt-1',
+        type: 'PUSH',
+        title: 'Older push',
+        body: 'older push body',
+        author: 'bob',
+        authorAvatar: null,
+        externalUrl: null,
+        occurredAt: new Date('2025-06-03T08:00:00.000Z'),
+        createdAt: new Date('2025-06-03T08:00:00.000Z'),
+        analyses: [],
+        approvals: [],
+      },
+    ]);
+    mockApprovalFindMany.mockResolvedValue([
+      {
+        id: 'app-1',
+        status: ApprovalStatus.PENDING,
+        editedContent: 'approval update',
+        originalContent: null,
+        comment: null,
+        reviewedAt: new Date('2025-06-03T09:00:00.000Z'),
+        createdAt: new Date('2025-06-03T09:00:00.000Z'),
+        reviewer: { name: 'reviewer', avatar: null },
+        event: {
+          title: 'Approval event',
+          author: 'carol',
+          authorAvatar: null,
+          externalUrl: 'https://github.com/org/repo/pull/2',
+          analyses: [],
+        },
+      },
+    ]);
+
+    const result = await svc.getConversationMessages('user-1', 'repo-1', { take: 2 });
+
+    expect(result.messages).toHaveLength(2);
+    expect(result.messages.map((message: { id: string }) => message.id)).toEqual([
+      'evt-2',
+      'approval-app-1',
+    ]);
+    expect(result.pagination.hasMore).toBe(true);
+    expect(result.pagination.nextCursor).toEqual(expect.any(String));
+    expect(mockQueryRaw).toHaveBeenCalled();
+  });
+
+  it('passes cursor and skip through to merged pagination query', async () => {
+    const cursor = Buffer.from(
+      JSON.stringify({
+        id: 'evt-2',
+        source: 'event',
+        messageAt: '2025-06-03T10:00:00.000Z',
+      }),
+      'utf8',
+    ).toString('base64url');
+
+    await svc.getConversationMessages('user-1', 'repo-1', { cursor, skip: 3, take: 20 });
+
+    expect(mockQueryRaw).toHaveBeenCalled();
+    expect(mockEventFindMany).not.toHaveBeenCalled();
+    expect(mockApprovalFindMany).not.toHaveBeenCalled();
   });
 });
 

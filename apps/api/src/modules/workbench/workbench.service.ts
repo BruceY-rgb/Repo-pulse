@@ -3,6 +3,7 @@ import {
   ApprovalStatus,
   EventType,
   Platform,
+  Prisma,
   Repository,
   RepositoryAccessLevel,
   RepositoryAccessMode,
@@ -20,6 +21,7 @@ import { CreateRepositoryDto } from '../repository/dto/repository.dto';
 import { RepositoryService } from '../repository/repository.service';
 import { ReadConversationDto } from './dto/read-conversation.dto';
 import { SyncService } from '../sync/sync.service';
+import { ConversationMessagesQueryDto } from './dto/conversation-messages-query.dto';
 
 type RepositoryAccessLevelApi =
   | 'owner'
@@ -67,6 +69,18 @@ interface ConversationSummary {
 interface ConversationStateSnapshot {
   lastReadAt: Date | null;
   lastViewedAt: Date | null;
+}
+
+interface ConversationMessageCursor {
+  id: string;
+  source: 'event' | 'approval';
+  messageAt: string;
+}
+
+interface ConversationMessagePageRef {
+  id: string;
+  source: 'event' | 'approval';
+  messageAt: Date;
 }
 
 @Injectable()
@@ -230,7 +244,11 @@ export class WorkbenchService {
     };
   }
 
-  async getConversationMessages(userId: string, repositoryId: string) {
+  async getConversationMessages(
+    userId: string,
+    repositoryId: string,
+    query: ConversationMessagesQueryDto = {},
+  ) {
     const membership = await assertUserCanAccessRepository(userId, repositoryId);
     const repository = await prisma.repository.findUnique({
       where: { id: repositoryId },
@@ -243,8 +261,11 @@ export class WorkbenchService {
 
     const repositoryCanOperate = isEditableRepositoryAccessLevel(membership.accessLevel);
     const repositoryAccessLevel = this.mapAccessLevelToApi(membership.accessLevel);
+    const take = this.normalizeConversationMessagesTake(query.take);
+    const skip = query.skip ?? 0;
+    const cursor = this.parseConversationMessagesCursor(query.cursor);
 
-    const [conversationState, events, approvals] = await Promise.all([
+    const [conversationState, messagePage] = await Promise.all([
       prisma.userRepositoryConversationState.findUnique({
         where: {
           userId_repositoryId: {
@@ -253,120 +274,141 @@ export class WorkbenchService {
           },
         },
       }),
-      prisma.event.findMany({
-        where: { repositoryId },
-        include: {
-          analyses: {
-            where: { status: 'COMPLETED' },
-            orderBy: { createdAt: 'desc' },
-            take: 1,
-          },
-          approvals: {
-            orderBy: { createdAt: 'desc' },
-            take: 1,
-          },
-        },
-        orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
-        take: 50,
-      }),
-      prisma.approval.findMany({
-        where: {
-          event: {
-            repositoryId,
-          },
-        },
-        include: {
-          event: {
+      this.getConversationMessagePage(repositoryId, cursor, skip, take),
+    ]);
+    const eventIds = messagePage.items
+      .filter((item) => item.source === 'event')
+      .map((item) => item.id);
+    const approvalIds = messagePage.items
+      .filter((item) => item.source === 'approval')
+      .map((item) => item.id);
+    const [events, approvals] = await Promise.all([
+      eventIds.length > 0
+        ? prisma.event.findMany({
+            where: {
+              repositoryId,
+              id: { in: eventIds },
+            },
             include: {
               analyses: {
                 where: { status: 'COMPLETED' },
                 orderBy: { createdAt: 'desc' },
                 take: 1,
               },
+              approvals: {
+                orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                take: 1,
+              },
             },
-          },
-          reviewer: {
-            select: {
-              name: true,
-              avatar: true,
+          })
+        : Promise.resolve([]),
+      approvalIds.length > 0
+        ? prisma.approval.findMany({
+            where: {
+              id: { in: approvalIds },
+              event: {
+                repositoryId,
+              },
             },
-          },
-        },
-        orderBy: [{ reviewedAt: 'desc' }, { createdAt: 'desc' }],
-        take: 50,
-      }),
+            include: {
+              event: {
+                include: {
+                  analyses: {
+                    where: { status: 'COMPLETED' },
+                    orderBy: { createdAt: 'desc' },
+                    take: 1,
+                  },
+                },
+              },
+              reviewer: {
+                select: {
+                  name: true,
+                  avatar: true,
+                },
+              },
+            },
+          })
+        : Promise.resolve([]),
     ]);
 
     const lastReadAt = conversationState?.lastReadAt ?? null;
 
-    const eventMessages = events.map((event) => {
-      const pendingApproval = event.approvals[0];
-      const baseActions = this.buildBaseActions(event.externalUrl || undefined);
-      const approvalActions =
-        repositoryCanOperate && pendingApproval?.status === ApprovalStatus.PENDING
-          ? this.buildApprovalActions(pendingApproval.id)
-          : [];
-      const agentAction = repositoryCanOperate ? [this.buildAgentAction()] : [];
-      const messageTime = this.resolveEventMessageTime(event);
-      return {
-        id: event.id,
-        repositoryId,
-        repositoryAccessLevel,
-        repositoryCanOperate,
-        type: this.mapEventTypeToConversationType(event.type),
-        title: event.title,
-        body: event.body || event.analyses[0]?.summary || '',
-        author: event.author,
-        authorAvatar: event.authorAvatar || undefined,
-        createdAt: messageTime.toISOString(),
-        externalUrl: event.externalUrl || undefined,
-        actions: [...baseActions, ...approvalActions, ...agentAction],
-        riskLevel: this.resolveEventRiskLevel(event.analyses),
-        isUnread: this.isUnreadMessage(messageTime, lastReadAt),
-        hasPendingApprovalAction:
-          repositoryCanOperate && pendingApproval?.status === ApprovalStatus.PENDING,
-        hasPendingAgentAction: false,
-      };
-    });
-
-    const approvalMessages = approvals.map((approval) => {
-      const baseActions = this.buildBaseActions(approval.event.externalUrl || undefined);
-      const approvalActions =
-        repositoryCanOperate && approval.status === ApprovalStatus.PENDING
-          ? this.buildApprovalActions(approval.id)
-          : [];
-      const agentAction = repositoryCanOperate ? [this.buildAgentAction()] : [];
-      const messageTime = this.resolveApprovalMessageTime(approval);
-      return {
-        id: `approval-${approval.id}`,
-        repositoryId,
-        repositoryAccessLevel,
-        repositoryCanOperate,
-        type: 'approval' as const,
-        title: approval.event.title,
-        body:
-          approval.editedContent ||
-          approval.originalContent ||
-          approval.comment ||
-          `审批状态：${approval.status}`,
-        author: approval.reviewer?.name || approval.event.author || 'system',
-        authorAvatar: approval.reviewer?.avatar || approval.event.authorAvatar || undefined,
-        createdAt: messageTime.toISOString(),
-        externalUrl: approval.event.externalUrl || undefined,
-        approvalId: approval.id,
-        approvalStatus: approval.status,
-        riskLevel: this.resolveApprovalRiskLevel(approval.event.analyses, approval.status),
-        isUnread: this.isUnreadMessage(messageTime, lastReadAt),
-        hasPendingApprovalAction:
-          repositoryCanOperate && approval.status === ApprovalStatus.PENDING,
-        hasPendingAgentAction: false,
-        actions: [...baseActions, ...approvalActions, ...agentAction],
-      };
-    });
-
-    const messages = [...eventMessages, ...approvalMessages].sort(
-      (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+    const eventMessages = new Map(
+      events.map((event) => {
+        const pendingApproval = event.approvals[0];
+        const baseActions = this.buildBaseActions(event.externalUrl || undefined);
+        const approvalActions =
+          repositoryCanOperate && pendingApproval?.status === ApprovalStatus.PENDING
+            ? this.buildApprovalActions(pendingApproval.id)
+            : [];
+        const agentAction = repositoryCanOperate ? [this.buildAgentAction()] : [];
+        const messageTime = this.resolveEventMessageTime(event);
+        const message = {
+          id: event.id,
+          repositoryId,
+          repositoryAccessLevel,
+          repositoryCanOperate,
+          type: this.mapEventTypeToConversationType(event.type),
+          title: event.title,
+          body: event.body || event.analyses[0]?.summary || '',
+          author: event.author,
+          authorAvatar: event.authorAvatar || undefined,
+          createdAt: messageTime.toISOString(),
+          externalUrl: event.externalUrl || undefined,
+          actions: [...baseActions, ...approvalActions, ...agentAction],
+          riskLevel: this.resolveEventRiskLevel(event.analyses),
+          isUnread: this.isUnreadMessage(messageTime, lastReadAt),
+          hasPendingApprovalAction:
+            repositoryCanOperate && pendingApproval?.status === ApprovalStatus.PENDING,
+          hasPendingAgentAction: false,
+        };
+        return [event.id, message] as const;
+      }),
     );
+
+    const approvalMessages = new Map(
+      approvals.map((approval) => {
+        const baseActions = this.buildBaseActions(approval.event.externalUrl || undefined);
+        const approvalActions =
+          repositoryCanOperate && approval.status === ApprovalStatus.PENDING
+            ? this.buildApprovalActions(approval.id)
+            : [];
+        const agentAction = repositoryCanOperate ? [this.buildAgentAction()] : [];
+        const messageTime = this.resolveApprovalMessageTime(approval);
+        const message = {
+          id: `approval-${approval.id}`,
+          repositoryId,
+          repositoryAccessLevel,
+          repositoryCanOperate,
+          type: 'approval' as const,
+          title: approval.event.title,
+          body:
+            approval.editedContent ||
+            approval.originalContent ||
+            approval.comment ||
+            `Approval status: ${approval.status}`,
+          author: approval.reviewer?.name || approval.event.author || 'system',
+          authorAvatar: approval.reviewer?.avatar || approval.event.authorAvatar || undefined,
+          createdAt: messageTime.toISOString(),
+          externalUrl: approval.event.externalUrl || undefined,
+          approvalId: approval.id,
+          approvalStatus: approval.status,
+          riskLevel: this.resolveApprovalRiskLevel(approval.event.analyses, approval.status),
+          isUnread: this.isUnreadMessage(messageTime, lastReadAt),
+          hasPendingApprovalAction:
+            repositoryCanOperate && approval.status === ApprovalStatus.PENDING,
+          hasPendingAgentAction: false,
+          actions: [...baseActions, ...approvalActions, ...agentAction],
+        };
+        return [approval.id, message] as const;
+      }),
+    );
+
+    const messages = messagePage.items
+      .map((item) =>
+        item.source === 'event' ? eventMessages.get(item.id) : approvalMessages.get(item.id),
+      )
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
     const unreadSummary = messages.reduce(
       (accumulator, message) => {
@@ -398,11 +440,11 @@ export class WorkbenchService {
         unreadCount: unreadSummary.unreadCount,
         unreadRiskLevel: unreadSummary.unreadRiskLevel,
         unreadRiskCounts: unreadSummary.unreadRiskCounts,
-        hasPendingApproval: approvalMessages.some(
+        hasPendingApproval: Array.from(approvalMessages.values()).some(
           (message: { approvalStatus?: ApprovalStatus }) =>
             message.approvalStatus === ApprovalStatus.PENDING,
         ),
-        pendingApprovalCount: approvalMessages.filter(
+        pendingApprovalCount: Array.from(approvalMessages.values()).filter(
           (message: { approvalStatus?: ApprovalStatus }) =>
             message.approvalStatus === ApprovalStatus.PENDING,
         ).length,
@@ -410,6 +452,13 @@ export class WorkbenchService {
         pendingAgentActionCount: 0,
       },
       messages,
+      pagination: {
+        cursor: query.cursor ?? null,
+        skip,
+        take,
+        hasMore: messagePage.hasMore,
+        nextCursor: messagePage.nextCursor,
+      },
     };
   }
 
@@ -939,7 +988,7 @@ export class WorkbenchService {
     if (externalUrl) {
       actions.push({
         key: 'open_github',
-        label: '打开 GitHub',
+        label: 'Open GitHub',
         method: 'GET',
         requiresConfirmation: false,
         requiresPermission: false,
@@ -947,7 +996,7 @@ export class WorkbenchService {
     }
     actions.push({
       key: 'ai_analyze',
-      label: 'AI 分析',
+      label: 'AI Analyze',
       method: 'POST',
       endpoint: `/ai/trigger/__EVENT_ID__`,
       requiresConfirmation: false,
@@ -960,7 +1009,7 @@ export class WorkbenchService {
     return [
       {
         key: 'approve',
-        label: '审批通过',
+        label: 'Approve',
         method: 'POST',
         endpoint: `/approvals/${approvalId}/approve`,
         requiresConfirmation: true,
@@ -968,7 +1017,7 @@ export class WorkbenchService {
       },
       {
         key: 'reject',
-        label: '拒绝审批',
+        label: 'Reject',
         method: 'POST',
         endpoint: `/approvals/${approvalId}/reject`,
         requiresConfirmation: true,
@@ -980,7 +1029,7 @@ export class WorkbenchService {
   private buildAgentAction(): MessageAction {
     return {
       key: 'agent_handle',
-      label: '使用 Agent 处理',
+      label: 'Handle with Agent',
       method: 'POST',
       requiresConfirmation: true,
       requiresPermission: true,
@@ -1036,5 +1085,125 @@ export class WorkbenchService {
       }),
       'utf8',
     ).toString('base64url');
+  }
+
+  private normalizeConversationMessagesTake(take?: number): number {
+    if (!take) {
+      return 50;
+    }
+
+    return Math.min(Math.max(take, 1), 100);
+  }
+
+  private parseConversationMessagesCursor(cursor?: string): ConversationMessageCursor | null {
+    if (!cursor) {
+      return null;
+    }
+
+    try {
+      const decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
+        id?: string;
+        source?: 'event' | 'approval';
+        messageAt?: string;
+      };
+
+      if (
+        !decoded.id ||
+        !decoded.messageAt ||
+        (decoded.source !== 'event' && decoded.source !== 'approval')
+      ) {
+        return null;
+      }
+
+      return {
+        id: decoded.id,
+        source: decoded.source,
+        messageAt: decoded.messageAt,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private buildConversationMessagesCursor(item: ConversationMessagePageRef): string {
+    return Buffer.from(
+      JSON.stringify({
+        id: item.id,
+        source: item.source,
+        messageAt: item.messageAt.toISOString(),
+      }),
+      'utf8',
+    ).toString('base64url');
+  }
+
+  private async getConversationMessagePage(
+    repositoryId: string,
+    cursor: ConversationMessageCursor | null,
+    skip: number,
+    take: number,
+  ): Promise<{
+    items: ConversationMessagePageRef[];
+    hasMore: boolean;
+    nextCursor: string | null;
+  }> {
+    const sourcePrioritySql = Prisma.sql`CASE WHEN merged.source = 'event' THEN 1 ELSE 0 END`;
+    const cursorTime = cursor ? new Date(cursor.messageAt) : null;
+    const cursorPriority = cursor?.source === 'event' ? 1 : 0;
+    const cursorFilterSql =
+      cursor && cursorTime && !Number.isNaN(cursorTime.getTime())
+        ? Prisma.sql`
+            WHERE (
+              merged."messageAt" < ${cursorTime}
+              OR (
+                merged."messageAt" = ${cursorTime}
+                AND (
+                  ${sourcePrioritySql} < ${cursorPriority}
+                  OR (${sourcePrioritySql} = ${cursorPriority} AND merged.id < ${cursor.id})
+                )
+              )
+            )
+          `
+        : Prisma.empty;
+
+    const rows = await prisma.$queryRaw<Array<{ id: string; source: 'event' | 'approval'; messageAt: Date }>>(
+      Prisma.sql`
+        SELECT merged.id, merged.source, merged."messageAt"
+        FROM (
+          SELECT
+            e.id,
+            'event' AS source,
+            COALESCE(e."occurredAt", e."createdAt") AS "messageAt"
+          FROM "Event" e
+          WHERE e."repositoryId" = ${repositoryId}
+
+          UNION ALL
+
+          SELECT
+            a.id,
+            'approval' AS source,
+            COALESCE(a."reviewedAt", a."createdAt") AS "messageAt"
+          FROM "Approval" a
+          INNER JOIN "Event" e ON e.id = a."eventId"
+          WHERE e."repositoryId" = ${repositoryId}
+        ) AS merged
+        ${cursorFilterSql}
+        ORDER BY merged."messageAt" DESC, ${sourcePrioritySql} DESC, merged.id DESC
+        OFFSET ${skip}
+        LIMIT ${take + 1}
+      `,
+    );
+
+    const items = rows.slice(0, take).map((row) => ({
+      id: row.id,
+      source: row.source,
+      messageAt: new Date(row.messageAt),
+    }));
+    const tail = items[items.length - 1] ?? null;
+
+    return {
+      items,
+      hasMore: rows.length > take,
+      nextCursor: rows.length > take && tail ? this.buildConversationMessagesCursor(tail) : null,
+    };
   }
 }

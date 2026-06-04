@@ -4,6 +4,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { WorkbenchService } from './workbench.service';
 import { ReadConversationDto } from './dto/read-conversation.dto';
 import { CreateRepositoryDto } from '../repository/dto/repository.dto';
+import { ConversationMessagesQueryDto } from './dto/conversation-messages-query.dto';
 
 @Controller('workbench')
 @UseGuards(AuthGuard('jwt'))
@@ -19,8 +20,18 @@ export class WorkbenchController {
   async getChatRepositoryMessages(
     @CurrentUser() user: { sub: string },
     @Param('id') repositoryId: string,
+    @Query() query: ConversationMessagesQueryDto,
   ): Promise<any> {
-    return this.workbenchService.getConversationMessages(user.sub, repositoryId);
+    return this.workbenchService.getConversationMessages(user.sub, repositoryId, query);
+  }
+
+  @Get('conversations/:id/messages')
+  async getConversationMessages(
+    @CurrentUser() user: { sub: string },
+    @Param('id') repositoryId: string,
+    @Query() query: ConversationMessagesQueryDto,
+  ): Promise<any> {
+    return this.workbenchService.getConversationMessages(user.sub, repositoryId, query);
   }
 
   @Post('chat/repositories/:id/read')
