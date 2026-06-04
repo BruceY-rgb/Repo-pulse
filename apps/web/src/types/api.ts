@@ -186,6 +186,13 @@ export interface WorkbenchConversationMessage {
 export interface ConversationMessagesResponse {
   conversation: WorkbenchConversationState;
   messages: WorkbenchConversationMessage[];
+  pagination?: {
+    cursor: string | null;
+    skip: number;
+    take: number;
+    hasMore: boolean;
+    nextCursor: string | null;
+  };
 }
 
 /** 标记已读请求体 */

@@ -237,6 +237,9 @@ const messageFilters: Array<{ key: MessageFilterKey; label: string }> = [
   { key: 'notification', label: '通知' },
 ];
 
+const CONVERSATION_MESSAGE_PAGE_SIZE = 50;
+const WATCH_FEED_PAGE_SIZE = 20;
+
 const markdownComponents: Components = {
   a({ children, href, title }) {
     return (
@@ -3291,6 +3294,9 @@ function RepositoryConversation({
   approvalActionId,
   onOpenDetail,
   onOpenSiriAnalysis,
+  hasOlderMessages,
+  loadingOlderMessages,
+  onLoadOlderMessages,
 }: {
   repository: Repository;
   messages: ConversationMessage[];
@@ -3302,6 +3308,9 @@ function RepositoryConversation({
   approvalActionId?: string;
   onOpenDetail: (message: ConversationMessage | null) => void;
   onOpenSiriAnalysis?: (eventId: string, eventTitle: string) => void;
+  hasOlderMessages?: boolean;
+  loadingOlderMessages?: boolean;
+  onLoadOlderMessages?: () => void;
 }) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [activeFilter, setActiveFilter] = useState<MessageFilterKey>('all');
@@ -3521,47 +3530,68 @@ function RepositoryConversation({
         <div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 py-6">
           <RepositoryWebhookSection repository={repository} />
           {filteredMessages.length > 0 ? (
-            filteredMessages.map((message) => {
-              const shouldRenderUnreadBoundary =
-                hasUnreadBoundary && unreadBoundary?.messageId === message.id;
+            <>
+              {filteredMessages.map((message) => {
+                const shouldRenderUnreadBoundary =
+                  hasUnreadBoundary && unreadBoundary?.messageId === message.id;
 
-              return (
-                <div key={message.id} className="contents">
-                  <ConversationBubble
-                    message={message}
-                    repository={repository}
-                    onOpenDetail={onOpenDetail}
-                    onOpenAgent={onOpenAgent}
-                    onApproveMessage={onApproveMessage}
-                    onRejectMessage={onRejectMessage}
-                    approvalActionId={approvalActionId}
-                    onOpenSiriAnalysis={onOpenSiriAnalysis}
-                    onContextMenu={(event, selectedMessage) => {
-                      event.preventDefault();
-                      const position = getSafeContextMenuPosition(
-                        event.clientX,
-                        event.clientY,
-                        MESSAGE_CONTEXT_MENU_WIDTH,
-                        MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT,
-                      );
-                      setContextMenu({ x: position.x, y: position.y, message: selectedMessage });
-                    }}
-                  />
-                  {shouldRenderUnreadBoundary ? (
-                    <div
-                      ref={unreadBoundaryRef}
-                      className="flex scroll-mb-6 items-center gap-3 py-1"
-                    >
-                      <div className="h-px flex-1 bg-primary/40" />
-                      <span className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary">
-                        未读消息
-                      </span>
-                      <div className="h-px flex-1 bg-primary/40" />
-                    </div>
-                  ) : null}
+                return (
+                  <div key={message.id} className="contents">
+                    <ConversationBubble
+                      message={message}
+                      repository={repository}
+                      onOpenDetail={onOpenDetail}
+                      onOpenAgent={onOpenAgent}
+                      onApproveMessage={onApproveMessage}
+                      onRejectMessage={onRejectMessage}
+                      approvalActionId={approvalActionId}
+                      onOpenSiriAnalysis={onOpenSiriAnalysis}
+                      onContextMenu={(event, selectedMessage) => {
+                        event.preventDefault();
+                        const position = getSafeContextMenuPosition(
+                          event.clientX,
+                          event.clientY,
+                          MESSAGE_CONTEXT_MENU_WIDTH,
+                          MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT,
+                        );
+                        setContextMenu({ x: position.x, y: position.y, message: selectedMessage });
+                      }}
+                    />
+                    {shouldRenderUnreadBoundary ? (
+                      <div
+                        ref={unreadBoundaryRef}
+                        className="flex scroll-mb-6 items-center gap-3 py-1"
+                      >
+                        <div className="h-px flex-1 bg-primary/40" />
+                        <span className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary">
+                          未读消息
+                        </span>
+                        <div className="h-px flex-1 bg-primary/40" />
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+              {hasOlderMessages ? (
+                <div className="flex justify-center">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 gap-2 rounded-full"
+                    disabled={loadingOlderMessages}
+                    onClick={onLoadOlderMessages}
+                  >
+                    {loadingOlderMessages ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" />
+                    )}
+                    加载更早消息
+                  </Button>
                 </div>
-              );
-            })
+              ) : null}
+            </>
           ) : (
             <div className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 px-6 text-center">
               <MessageSquare className="h-10 w-10 text-muted-foreground" />
@@ -4286,6 +4316,9 @@ function WatchFeed({
   favoriteEventIds,
   onToggleFavorite,
   isRefreshing,
+  hasMore,
+  loadingMore,
+  onLoadMore,
 }: {
   items: WatchFeedItem[];
   loading?: boolean;
@@ -4299,6 +4332,9 @@ function WatchFeed({
   favoriteEventIds: Set<string>;
   onToggleFavorite: (eventId: string) => void;
   isRefreshing?: boolean;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
   const [previewItem, setPreviewItem] = useState<WatchFeedItem | null>(null);
 
@@ -4383,6 +4419,25 @@ function WatchFeed({
                         onToggleFavorite={onToggleFavorite}
                       />
                     ))}
+                    {hasMore ? (
+                      <div className="flex justify-center pt-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-9 gap-2 rounded-full"
+                          disabled={loadingMore}
+                          onClick={onLoadMore}
+                        >
+                          {loadingMore ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4" />
+                          )}
+                          加载更多动态
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -6913,6 +6968,12 @@ export function DesktopWorkbench() {
   });
   const [watchFeedType, setWatchFeedType] = useState('');
   const [ignoredFeedIds, setIgnoredFeedIds] = useState<Set<string>>(() => new Set());
+  const [watchFeedPages, setWatchFeedPages] = useState<WatchFeedItem[][]>([]);
+  const [watchFeedNextCursor, setWatchFeedNextCursor] = useState<string | null>(null);
+  const [isLoadingMoreWatchFeed, setIsLoadingMoreWatchFeed] = useState(false);
+  const [olderConversationMessages, setOlderConversationMessages] = useState<WorkbenchConversationMessage[]>([]);
+  const [conversationNextCursor, setConversationNextCursor] = useState<string | null>(null);
+  const [isLoadingOlderConversationMessages, setIsLoadingOlderConversationMessages] = useState(false);
   const [feedSearchKeyword, setFeedSearchKeyword] = useState('');
   const [feedFilters, setFeedFilters] = useState({
     showOnlyDefaultBranch: false,
@@ -7047,10 +7108,30 @@ export function DesktopWorkbench() {
 
   // Watch Feed query
   const queryType = watchFeedType === 'favorite' ? '' : watchFeedType;
-  const watchFeedQuery = useWatchFeedQuery(queryType);
+  const watchFeedQuery = useWatchFeedQuery(queryType, { limit: WATCH_FEED_PAGE_SIZE });
+
+  useEffect(() => {
+    if (!watchFeedQuery.data) {
+      setWatchFeedPages([]);
+      setWatchFeedNextCursor(null);
+      return;
+    }
+
+    setWatchFeedPages([watchFeedQuery.data.items]);
+    setWatchFeedNextCursor(watchFeedQuery.data.nextCursor);
+  }, [watchFeedQuery.data]);
 
   const watchFeedItems = useMemo(() => {
-    let items = watchFeedQuery.data?.items ?? [];
+    const seenItemIds = new Set<string>();
+    let items = watchFeedPages
+      .flat()
+      .filter((item) => {
+        if (seenItemIds.has(item.id)) {
+          return false;
+        }
+        seenItemIds.add(item.id);
+        return true;
+      });
 
     // Filter ignored items
     items = items.filter((item) => !ignoredFeedIds.has(item.id));
@@ -7097,7 +7178,7 @@ export function DesktopWorkbench() {
     }
 
     return items;
-  }, [watchFeedQuery.data, watchFeedType, ignoredFeedIds, favoriteEventIds, feedFilters, feedSearchKeyword]);
+  }, [watchFeedPages, watchFeedType, ignoredFeedIds, favoriteEventIds, feedFilters, feedSearchKeyword]);
 
   const handleRefreshFeed = async () => {
     setIsRefreshing(true);
@@ -7109,6 +7190,28 @@ export function DesktopWorkbench() {
       toast.error('刷新失败');
     } finally {
       setTimeout(() => setIsRefreshing(false), 800);
+    }
+  };
+
+  const handleLoadMoreWatchFeed = async () => {
+    if (!watchFeedNextCursor || isLoadingMoreWatchFeed) {
+      return;
+    }
+
+    setIsLoadingMoreWatchFeed(true);
+    try {
+      const nextPage = await workbenchService.getWatchFeed({
+        type: queryType || undefined,
+        cursor: watchFeedNextCursor,
+        limit: WATCH_FEED_PAGE_SIZE,
+      });
+      setWatchFeedPages((current) => [...current, nextPage.items]);
+      setWatchFeedNextCursor(nextPage.nextCursor);
+    } catch (error) {
+      console.error(error);
+      toast.error('加载更多动态失败');
+    } finally {
+      setIsLoadingMoreWatchFeed(false);
     }
   };
 
@@ -7270,7 +7373,14 @@ export function DesktopWorkbench() {
   });
 
   // 当前选中仓库的 Workbench 统一会话消息（替代前端自行拼接 events + approvals + notifications）
-  const conversationMessagesQuery = useConversationMessagesQuery(selectedRepository?.id);
+  const conversationMessagesQuery = useConversationMessagesQuery(selectedRepository?.id, {
+    take: CONVERSATION_MESSAGE_PAGE_SIZE,
+  });
+
+  useEffect(() => {
+    setOlderConversationMessages([]);
+    setConversationNextCursor(conversationMessagesQuery.data?.pagination?.nextCursor ?? null);
+  }, [conversationMessagesQuery.data, selectedRepository?.id]);
 
   const conversationState = conversationMessagesQuery.data?.conversation ?? null;
 
@@ -7328,13 +7438,43 @@ export function DesktopWorkbench() {
     if (!selectedRepository) return [];
     // 优先使用 Workbench 统一会话接口
     if (conversationMessagesQuery.data) {
-      return conversationMessagesQuery.data.messages.map((msg) =>
+      const seenMessageIds = new Set<string>();
+      return [...conversationMessagesQuery.data.messages, ...olderConversationMessages]
+        .filter((msg) => {
+          if (seenMessageIds.has(msg.id)) {
+            return false;
+          }
+          seenMessageIds.add(msg.id);
+          return true;
+        })
+        .map((msg) =>
         workbenchMessageToConversationMessage(msg, conversationMessagesQuery.data.conversation),
       );
     }
     // 降级：使用前端拼接的消息
     return getRepoMessages(selectedRepository.id, allMessages);
-  }, [conversationMessagesQuery.data, selectedRepository, allMessages]);
+  }, [conversationMessagesQuery.data, olderConversationMessages, selectedRepository, allMessages]);
+
+  const handleLoadOlderConversationMessages = async () => {
+    if (!selectedRepository?.id || !conversationNextCursor || isLoadingOlderConversationMessages) {
+      return;
+    }
+
+    setIsLoadingOlderConversationMessages(true);
+    try {
+      const nextPage = await workbenchService.getConversationMessages(selectedRepository.id, {
+        cursor: conversationNextCursor,
+        take: CONVERSATION_MESSAGE_PAGE_SIZE,
+      });
+      setOlderConversationMessages((current) => [...current, ...nextPage.messages]);
+      setConversationNextCursor(nextPage.pagination?.nextCursor ?? null);
+    } catch (error) {
+      console.error(error);
+      toast.error('加载更早消息失败');
+    } finally {
+      setIsLoadingOlderConversationMessages(false);
+    }
+  };
 
   // 通过后端 API 接口查询该仓库的完整贡献者列表（集成后端缓存与鉴权支持）
   const contributorsQuery = useApiQuery({
@@ -7740,6 +7880,9 @@ export function DesktopWorkbench() {
                 approvalActionId={approvalActionId}
                 onOpenDetail={setSelectedMessage}
                 onOpenSiriAnalysis={(eventId, eventTitle) => setSiriAnalysis({ isOpen: true, eventId, eventTitle })}
+                hasOlderMessages={Boolean(conversationNextCursor)}
+                loadingOlderMessages={isLoadingOlderConversationMessages}
+                onLoadOlderMessages={handleLoadOlderConversationMessages}
               />
             ) : null}
 
@@ -7765,6 +7908,9 @@ export function DesktopWorkbench() {
                 favoriteEventIds={favoriteEventIds}
                 onToggleFavorite={handleToggleFavoriteEvent}
                 isRefreshing={isRefreshing}
+                hasMore={Boolean(watchFeedNextCursor)}
+                loadingMore={isLoadingMoreWatchFeed}
+                onLoadMore={handleLoadMoreWatchFeed}
               />
             ) : null}
 

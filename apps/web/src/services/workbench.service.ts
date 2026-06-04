@@ -15,6 +15,12 @@ export interface WatchFeedParams {
   limit?: number;
 }
 
+export interface ConversationMessagesParams {
+  cursor?: string;
+  skip?: number;
+  take?: number;
+}
+
 export const workbenchService = {
   /** 获取 Chat 仓库列表（已分组：可操作 / 只读监控） */
   async getChatRepositories(): Promise<ChatRepositoriesResponse> {
@@ -27,10 +33,11 @@ export const workbenchService = {
   /** 获取指定仓库的会话消息（含会话状态和消息列表） */
   async getConversationMessages(
     repositoryId: string,
+    params?: ConversationMessagesParams,
   ): Promise<ConversationMessagesResponse> {
     const { data } = await apiClient.get<
       ApiResponse<ConversationMessagesResponse>
-    >(`/workbench/chat/repositories/${repositoryId}/messages`);
+    >(`/workbench/chat/repositories/${repositoryId}/messages`, { params });
     return data.data;
   },
 
