@@ -73,6 +73,9 @@ export class AIProcessor extends WorkerHost {
       // 分析完成后重试因等待 riskLevel 而延迟的通知
       await this.eventService.retryNotificationsAfterAnalysis(eventId);
 
+      // 通知关注该仓库且有"分析完成"偏好的用户
+      await this.notifyAnalysisCompleted(eventId, analysis.summary);
+
       const approval = await this.approvalService.createFromAIAnalysis(eventId);
       if (approval) {
         this.logger.log(`approval_created eventId=${eventId} approvalId=${approval.id}`);
@@ -135,6 +138,53 @@ export class AIProcessor extends WorkerHost {
           riskLevel: 'HIGH_OR_CRITICAL',
         },
       });
+    }
+  }
+
+  /**
+   * 通知关注仓库且有"分析完成"偏好的用户
+   */
+  private async notifyAnalysisCompleted(eventId: string, summary: string): Promise<void> {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        repository: {
+          include: {
+            users: {
+              include: {
+                user: {
+                  select: { id: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!event) return;
+
+    for (const userRepo of event.repository.users) {
+      try {
+        const prefs = await this.notificationService.getPreferences(userRepo.userId);
+        if (!prefs.events.analysisComplete) continue;
+        if (!prefs.channels.includes(NotificationChannel.IN_APP)) continue;
+
+        await this.notificationService.send({
+          userId: userRepo.userId,
+          eventId,
+          channel: NotificationChannel.IN_APP,
+          title: `Analysis complete: ${event.title}`,
+          content: summary,
+          metadata: {
+            source: 'ai_analysis_complete',
+            eventType: event.type,
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown_error';
+        this.logger.warn(`notify_analysis_complete_failed eventId=${eventId} userId=${userRepo.userId} reason=${message}`);
+      }
     }
   }
 

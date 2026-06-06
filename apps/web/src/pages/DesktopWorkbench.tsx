@@ -2316,6 +2316,7 @@ function ConversationBubble({
   onApproveMessage,
   onRejectMessage,
   approvalActionId,
+  mergingActionId,
   onMergePR,
   onContextMenu,
   onOpenSiriAnalysis,
@@ -2327,6 +2328,7 @@ function ConversationBubble({
   onApproveMessage: (message: ConversationMessage) => void;
   onRejectMessage: (message: ConversationMessage) => void;
   approvalActionId?: string;
+  mergingActionId?: string;
   onMergePR?: (message: ConversationMessage, action: MessageAction) => void;
   onContextMenu: (event: MouseEvent<HTMLDivElement>, message: ConversationMessage) => void;
   onOpenSiriAnalysis?: (eventId: string, eventTitle: string) => void;
@@ -2452,6 +2454,7 @@ function ConversationBubble({
           size="sm"
           variant="outline"
           className="gap-2"
+          disabled={mergingActionId === message.id}
           onClick={(event) => {
             event.stopPropagation();
             onMergePR?.(message, action);
@@ -2536,6 +2539,7 @@ function MessageDetailSheet({
   onApproveMessage,
   onRejectMessage,
   approvalActionId,
+  mergingActionId,
   onMergePR,
   onOpenSiriAnalysis,
 }: {
@@ -2546,6 +2550,7 @@ function MessageDetailSheet({
   onApproveMessage: (message: ConversationMessage) => void;
   onRejectMessage: (message: ConversationMessage) => void;
   approvalActionId?: string;
+  mergingActionId?: string;
   onMergePR?: (message: ConversationMessage, action: MessageAction) => void;
   onOpenSiriAnalysis?: (eventId: string, eventTitle: string) => void;
 }) {
@@ -2724,6 +2729,7 @@ function MessageDetailSheet({
                           key={action.key}
                           variant="outline"
                           className="gap-2 rounded-xl border-border/80 hover:bg-secondary transition-all"
+                          disabled={mergingActionId === message.id}
                           onClick={() => onMergePR?.(message, action)}
                         >
                           <GitMerge className="h-4 w-4" />
@@ -3377,6 +3383,7 @@ function RepositoryConversation({
   onApproveMessage,
   onRejectMessage,
   approvalActionId,
+  mergingActionId,
   onMergePR,
   onOpenDetail,
   onOpenSiriAnalysis,
@@ -3392,6 +3399,7 @@ function RepositoryConversation({
   onApproveMessage: (message: ConversationMessage) => void;
   onRejectMessage: (message: ConversationMessage) => void;
   approvalActionId?: string;
+  mergingActionId?: string;
   onMergePR?: (message: ConversationMessage, action: MessageAction) => void;
   onOpenDetail: (message: ConversationMessage | null) => void;
   onOpenSiriAnalysis?: (eventId: string, eventTitle: string) => void;
@@ -3632,6 +3640,7 @@ function RepositoryConversation({
                       onApproveMessage={onApproveMessage}
                       onRejectMessage={onRejectMessage}
                       approvalActionId={approvalActionId}
+                      mergingActionId={mergingActionId}
                       onMergePR={onMergePR}
                       onOpenSiriAnalysis={onOpenSiriAnalysis}
                       onContextMenu={(event, selectedMessage) => {
@@ -8021,6 +8030,7 @@ export function DesktopWorkbench() {
                 onApproveMessage={handleApproveMessage}
                 onRejectMessage={handleRejectMessage}
                 approvalActionId={approvalActionId}
+                mergingActionId={mergingActionId}
                 onMergePR={handleMergePR}
                 onOpenDetail={setSelectedMessage}
                 onOpenSiriAnalysis={(eventId, eventTitle) => setSiriAnalysis({ isOpen: true, eventId, eventTitle })}
@@ -8128,6 +8138,7 @@ export function DesktopWorkbench() {
           onApproveMessage={handleApproveMessage}
           onRejectMessage={handleRejectMessage}
           approvalActionId={approvalActionId}
+          mergingActionId={mergingActionId}
           onMergePR={handleMergePR}
           onOpenSiriAnalysis={(eventId, eventTitle) => setSiriAnalysis({ isOpen: true, eventId, eventTitle })}
         />

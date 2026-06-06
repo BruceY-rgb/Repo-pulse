@@ -671,4 +671,33 @@ export class GithubService {
       return false;
     }
   }
+
+  /**
+   * 合并 Pull Request
+   * @param userToken 用户的 OAuth Token（必须有 write 权限）
+   */
+  async mergePullRequest(
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    userToken: string,
+  ): Promise<{ merged: boolean; message: string }> {
+    try {
+      const client = this.createUserClient(userToken);
+      const response = await client.put<{ merged: boolean; message: string }>(
+        `/repos/${owner}/${repo}/pulls/${pullNumber}/merge`,
+      );
+      this.logger.log(`PR #${pullNumber} merged for ${owner}/${repo}`);
+      return {
+        merged: response.data.merged,
+        message: response.data.message || 'PR merged successfully',
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to merge PR #${pullNumber} for ${owner}/${repo}`,
+        this.formatErrorForLog(error),
+      );
+      throw error;
+    }
+  }
 }

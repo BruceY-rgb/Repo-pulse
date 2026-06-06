@@ -199,12 +199,21 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit() {
+    if (!this.isImBridgeEnabled()) {
+      this.logger.log('RUN_IM_BRIDGES is not enabled, skipping all IM bridge restoration (multi-instance safety)');
+      return;
+    }
+    this.logger.log('RUN_IM_BRIDGES enabled, restoring IM bridges...');
     await Promise.all([
       this.restoreFeishuBridges(),
       this.restoreDingTalkBridges(),
       this.restoreWecomBridges(),
       this.restoreWechatBridges(),
     ]);
+  }
+
+  private isImBridgeEnabled(): boolean {
+    return process.env.RUN_IM_BRIDGES === 'true';
   }
 
   async onModuleDestroy() {
@@ -1747,6 +1756,15 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async startFeishuBridge(userId: string, appId: string, im: ImPreferences) {
+    if (!this.isImBridgeEnabled()) {
+      this.logger.log(`feishu_bridge_skipped userId=${userId} appId=${appId} reason=RUN_IM_BRIDGES_disabled`);
+      return {
+        userId,
+        appId: appId || '',
+        status: 'stopped' as FeishuBridgeRuntimeState,
+        lastError: 'IM bridges disabled (RUN_IM_BRIDGES !== true)',
+      };
+    }
     const bots = this.getFeishuBots(im);
     const bot = bots.find(b => b.appId === appId);
     const appSecret = bot?.appSecret?.trim();
@@ -1823,6 +1841,16 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async startDingTalkBridge(userId: string, clientId: string, im: ImPreferences): Promise<DingTalkBridgeRuntime> {
+    if (!this.isImBridgeEnabled()) {
+      this.logger.log(`dingtalk_bridge_skipped userId=${userId} clientId=${clientId} reason=RUN_IM_BRIDGES_disabled`);
+      return {
+        userId,
+        clientId: clientId || '',
+        status: 'stopped' as DingTalkBridgeRuntimeState,
+        lastError: 'IM bridges disabled (RUN_IM_BRIDGES !== true)',
+        webhookCache: new Map(),
+      };
+    }
     const bots = this.getDingTalkBots(im);
     const bot = bots.find(b => b.clientId === clientId);
     const clientSecret = bot?.clientSecret?.trim();
@@ -1923,6 +1951,15 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async startWecomBridge(userId: string, botId: string, im: ImPreferences): Promise<WecomBridgeRuntime> {
+    if (!this.isImBridgeEnabled()) {
+      this.logger.log(`wecom_bridge_skipped userId=${userId} botId=${botId} reason=RUN_IM_BRIDGES_disabled`);
+      return {
+        userId,
+        botId: botId || '',
+        status: 'stopped' as WecomBridgeRuntimeState,
+        lastError: 'IM bridges disabled (RUN_IM_BRIDGES !== true)',
+      };
+    }
     const bots = this.getWecomBots(im);
     const bot = bots.find(b => b.botId === botId);
     const secret = bot?.secret?.trim();
@@ -2064,6 +2101,14 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async startWechatBridge(userId: string, ilinkBotId: string, im: ImPreferences): Promise<WechatBridgeRuntime> {
+    if (!this.isImBridgeEnabled()) {
+      this.logger.log(`wechat_bridge_skipped userId=${userId} ilinkBotId=${ilinkBotId} reason=RUN_IM_BRIDGES_disabled`);
+      return {
+        userId,
+        status: 'stopped' as WechatBridgeRuntimeState,
+        lastError: 'IM bridges disabled (RUN_IM_BRIDGES !== true)',
+      };
+    }
     const bots = this.getWechatBots(im);
     const bot = bots.find(b => b.ilinkBotId === ilinkBotId);
     const botToken = bot?.botToken?.trim();
