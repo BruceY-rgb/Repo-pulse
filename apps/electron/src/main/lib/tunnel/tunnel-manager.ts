@@ -283,7 +283,7 @@ export class TunnelManager {
     for (let attempt = 1; attempt <= PROBE_MAX_ATTEMPTS; attempt += 1) {
       // 1) 系统解析器直连。
       const status = await this.probeOnce(url, null);
-      if (status !== null) {
+      if (isReadyStatus(status)) {
         console.log(`[tunnel-manager] edge ready after ${attempt} probe(s) (status=${status})`);
         return true;
       }
@@ -297,7 +297,7 @@ export class TunnelManager {
       }
       if (fallbackIp) {
         const fbStatus = await this.probeOnce(url, fallbackIp);
-        if (fbStatus !== null) {
+        if (isReadyStatus(fbStatus)) {
           console.log(
             `[tunnel-manager] edge ready (via public-dns) after ${attempt} probe(s) (status=${fbStatus})`,
           );
@@ -396,4 +396,8 @@ function delay(ms: number): Promise<void> {
     const timer = setTimeout(resolve, ms);
     timer.unref();
   });
+}
+
+function isReadyStatus(status: number | null): boolean {
+  return status !== null && status < 500;
 }
