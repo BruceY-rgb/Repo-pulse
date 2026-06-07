@@ -154,6 +154,27 @@ export interface WorkbenchConversationState {
   pendingAgentActionCount: number;
 }
 
+export interface BranchSyncStatus {
+  id: string;
+  kind: 'branch_ahead' | 'upstream_behind';
+  title: string;
+  body: string;
+  branch?: string;
+  defaultBranch?: string;
+  upstreamRepository?: string;
+  upstreamBranch?: string;
+  aheadBy?: number;
+  behindBy?: number;
+  lastCommitSha?: string;
+  occurredAt: string;
+  commits: Array<{
+    sha?: string;
+    message?: string;
+    author?: string;
+    date?: string;
+  }>;
+}
+
 /** 会话消息（来自 Workbench API） */
 export interface WorkbenchConversationMessage {
   id: string;
@@ -184,6 +205,8 @@ export interface WorkbenchConversationMessage {
   approvalId?: string;
   /** 审批状态 */
   approvalStatus?: string;
+  /** 同分支的同步状态，不作为独立消息渲染 */
+  branchSyncStatuses?: BranchSyncStatus[];
 }
 
 /** 会话消息响应 */

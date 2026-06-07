@@ -36,8 +36,15 @@ jest.mock('@repo-pulse/database', () => ({
     PR_OPENED: 'PR_OPENED',
     PR_MERGED: 'PR_MERGED',
     PR_CLOSED: 'PR_CLOSED',
+    PR_REVIEW: 'PR_REVIEW',
     ISSUE_OPENED: 'ISSUE_OPENED',
     ISSUE_CLOSED: 'ISSUE_CLOSED',
+    ISSUE_COMMENT: 'ISSUE_COMMENT',
+    RELEASE: 'RELEASE',
+    BRANCH_CREATED: 'BRANCH_CREATED',
+    BRANCH_DELETED: 'BRANCH_DELETED',
+    BRANCH_SYNC_ALERT: 'BRANCH_SYNC_ALERT',
+    UPSTREAM_SYNC_ALERT: 'UPSTREAM_SYNC_ALERT',
   },
   RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
   Role: { ADMIN: 'ADMIN', MANAGER: 'MANAGER', MEMBER: 'MEMBER', VIEWER: 'VIEWER' },
@@ -603,6 +610,93 @@ describe('WorkbenchService.getConversationMessages', () => {
     expect(result.pagination.hasMore).toBe(true);
     expect(result.pagination.nextCursor).toEqual(expect.any(String));
     expect(mockQueryRaw).toHaveBeenCalled();
+  });
+
+  it('attaches branch sync alerts to same-branch event messages instead of returning standalone cards', async () => {
+    const pushAt = new Date('2025-06-03T10:00:00.000Z');
+    const alertAt = new Date('2025-06-03T10:05:00.000Z');
+    const pushEvent = {
+      id: 'evt-push',
+      repositoryId: 'repo-1',
+      type: 'PUSH',
+      title: 'Push to feat/paging',
+      body: 'update pagination',
+      author: 'yingjio11',
+      authorAvatar: 'https://avatars.githubusercontent.com/u/1?v=4',
+      externalUrl: null,
+      branch: 'feat/paging',
+      sourceBranch: null,
+      targetBranch: null,
+      branches: ['feat/paging'],
+      metadata: {},
+      occurredAt: pushAt,
+      createdAt: pushAt,
+      analyses: [],
+      approvals: [],
+    };
+    const branchAlert = {
+      id: 'evt-alert',
+      repositoryId: 'repo-1',
+      type: 'BRANCH_SYNC_ALERT',
+      title: '分支 feat/paging 领先于 main 且未创建 PR',
+      body: '分支 feat/paging 领先默认分支 main 16 个提交，且当前没有活跃的合并请求。',
+      author: 'yingjio',
+      authorAvatar: null,
+      externalUrl: null,
+      branch: 'feat/paging',
+      sourceBranch: null,
+      targetBranch: null,
+      branches: [],
+      metadata: {
+        aheadBy: 16,
+        behindBy: 0,
+        defaultBranch: 'main',
+        lastCommitSha: 'abc123456789',
+        aheadCommits: [
+          {
+            sha: 'abc123456789',
+            message: 'implement cursor paging',
+            author: 'yingjio',
+            date: '2025-06-03T10:04:00.000Z',
+          },
+        ],
+      },
+      occurredAt: alertAt,
+      createdAt: alertAt,
+      analyses: [],
+      approvals: [],
+    };
+
+    mockQueryRaw.mockResolvedValue([
+      { id: 'evt-push', source: 'event', messageAt: pushAt },
+      { id: 'evt-alert', source: 'event', messageAt: alertAt },
+    ]);
+    mockEventFindMany
+      .mockResolvedValueOnce([pushEvent, branchAlert])
+      .mockResolvedValueOnce([branchAlert]);
+
+    const result = await svc.getConversationMessages('user-1', 'repo-1', { take: 50 });
+
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]).toEqual(
+      expect.objectContaining({
+        id: 'evt-push',
+        author: 'yingjio11',
+        authorAvatar: 'https://avatars.githubusercontent.com/u/1?v=4',
+        branchSyncStatuses: [
+          expect.objectContaining({
+            id: 'evt-alert',
+            kind: 'branch_ahead',
+            branch: 'feat/paging',
+            defaultBranch: 'main',
+            aheadBy: 16,
+            behindBy: 0,
+            lastCommitSha: 'abc123456789',
+          }),
+        ],
+      }),
+    );
+    expect(result.messages.map((message: { id: string }) => message.id)).not.toContain('evt-alert');
   });
 
   it('passes cursor and skip through to merged pagination query', async () => {

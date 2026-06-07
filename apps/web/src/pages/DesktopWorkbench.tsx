@@ -42,6 +42,7 @@ import {
   Loader2,
   LogOut,
   MessageSquare,
+  MoreHorizontal,
   PauseCircle,
   Pencil,
   Pin,
@@ -158,6 +159,7 @@ import type {
   Repository,
   SearchResult,
   ChatRepositoryItem,
+  BranchSyncStatus,
   WorkbenchConversationMessage,
   WorkbenchConversationState,
   MessageAction,
@@ -197,6 +199,8 @@ interface ConversationMessage {
   hasPendingApprovalAction?: boolean;
   /** 是否有待 Agent 动作（来自后端） */
   hasPendingAgentAction?: boolean;
+  /** 同分支同步状态（后端从合成 alert 聚合而来） */
+  branchSyncStatuses?: BranchSyncStatus[];
 }
 
 interface ContextMenuState {
@@ -719,6 +723,140 @@ function getMessageKindBadgeClass(message: ConversationMessage) {
   }
 }
 
+function getBranchSyncStatusLabel(status: BranchSyncStatus) {
+  if (status.kind === 'upstream_behind') {
+    return '落后上游';
+  }
+  return '分支领先';
+}
+
+function getBranchSyncStatusDescription(status: BranchSyncStatus) {
+  if (status.kind === 'upstream_behind') {
+    const upstream = status.upstreamRepository
+      ? `${status.upstreamRepository}${status.upstreamBranch ? `:${status.upstreamBranch}` : ''}`
+      : '上游仓库';
+    return `${status.branch || '当前分支'} 需要同步 ${upstream}`;
+  }
+
+  return `${status.branch || '当前分支'} 领先 ${status.defaultBranch || '默认分支'}，当前未检测到活跃 PR`;
+}
+
+function formatBranchSyncSha(sha?: string) {
+  return sha ? sha.slice(0, 7) : undefined;
+}
+
+function BranchSyncStatusList({
+  statuses,
+  compact = false,
+}: {
+  statuses: BranchSyncStatus[];
+  compact?: boolean;
+}) {
+  return (
+    <div className={cn('space-y-3', compact ? 'text-xs' : 'text-sm')}>
+      {statuses.map((status) => (
+        <div key={status.id} className="rounded-lg border border-border/70 bg-secondary/15 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="flex items-center gap-1.5 font-semibold text-foreground">
+                <GitBranch className="h-3.5 w-3.5 text-primary" />
+                {getBranchSyncStatusLabel(status)}
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {status.body || getBranchSyncStatusDescription(status)}
+              </p>
+            </div>
+            {status.branch ? (
+              <Badge variant="secondary" className="shrink-0 rounded-full text-[11px]">
+                {status.branch}
+              </Badge>
+            ) : null}
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            {typeof status.aheadBy === 'number' ? (
+              <div className="rounded-md bg-background/70 px-2 py-1.5">
+                <span className="text-muted-foreground">领先</span>
+                <span className="ml-2 font-semibold text-foreground">{status.aheadBy}</span>
+              </div>
+            ) : null}
+            {typeof status.behindBy === 'number' ? (
+              <div className="rounded-md bg-background/70 px-2 py-1.5">
+                <span className="text-muted-foreground">落后</span>
+                <span className="ml-2 font-semibold text-foreground">{status.behindBy}</span>
+              </div>
+            ) : null}
+            {status.lastCommitSha ? (
+              <div className="rounded-md bg-background/70 px-2 py-1.5">
+                <span className="text-muted-foreground">最新</span>
+                <span className="ml-2 font-mono font-semibold text-foreground">
+                  {formatBranchSyncSha(status.lastCommitSha)}
+                </span>
+              </div>
+            ) : null}
+            <div className="rounded-md bg-background/70 px-2 py-1.5">
+              <span className="text-muted-foreground">检查</span>
+              <span className="ml-2 font-semibold text-foreground">{formatRelativeTime(status.occurredAt)}</span>
+            </div>
+          </div>
+
+          {status.commits.length > 0 ? (
+            <div className="mt-3 space-y-1.5">
+              {status.commits.slice(0, compact ? 2 : 3).map((commit, index) => (
+                <div key={`${status.id}-${commit.sha ?? index}`} className="min-w-0 rounded-md bg-background/60 px-2 py-1.5">
+                  <p className="truncate text-xs font-medium text-foreground">
+                    {commit.message || 'Commit message unavailable'}
+                  </p>
+                  <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                    {[formatBranchSyncSha(commit.sha), commit.author].filter(Boolean).join(' · ')}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BranchSyncStatusPopover({ statuses }: { statuses?: BranchSyncStatus[] }) {
+  if (!statuses || statuses.length === 0) {
+    return null;
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="ml-auto h-8 w-8 shrink-0 rounded-full border border-border/80 bg-secondary/40 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          aria-label="查看分支同步状态"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        side="top"
+        className="w-80 max-w-[calc(100vw-32px)] border-border bg-popover p-3 shadow-xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-foreground">分支同步状态</p>
+          <Badge variant="outline" className="rounded-full text-[11px]">
+            {statuses.length}
+          </Badge>
+        </div>
+        <BranchSyncStatusList statuses={statuses} compact />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function toConversationMessage(event: Event): ConversationMessage {
   const risk = getEventRisk(event);
   const title = event.title || `${event.type} ${event.action}`;
@@ -874,6 +1012,7 @@ function workbenchMessageToConversationMessage(
     isUnread: msg.isUnread,
     hasPendingApprovalAction: msg.hasPendingApprovalAction,
     hasPendingAgentAction: msg.hasPendingAgentAction,
+    branchSyncStatuses: msg.branchSyncStatuses,
   };
 }
 
@@ -2526,6 +2665,7 @@ function ConversationBubble({
               {message.approvalStatus}
             </Badge>
           ) : null}
+          <BranchSyncStatusPopover statuses={message.branchSyncStatuses} />
         </div>
       </div>
     </div>
@@ -2647,6 +2787,21 @@ function MessageDetailSheet({
                         {message.branch}
                       </p>
                     </div>
+                  </div>
+                ) : null}
+
+                {message.branchSyncStatuses && message.branchSyncStatuses.length > 0 ? (
+                  <div className="rounded-xl border border-border/60 bg-secondary/10 p-4 shadow-sm">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">
+                        <GitBranch className="h-3.5 w-3.5 text-primary/70" />
+                        分支同步状态
+                      </p>
+                      <Badge variant="outline" className="rounded-full text-[11px]">
+                        {message.branchSyncStatuses.length}
+                      </Badge>
+                    </div>
+                    <BranchSyncStatusList statuses={message.branchSyncStatuses} />
                   </div>
                 ) : null}
 

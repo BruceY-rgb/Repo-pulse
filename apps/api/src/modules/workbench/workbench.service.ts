@@ -52,6 +52,43 @@ type ConversationMessageType =
   | 'agent'
   | 'notification';
 
+type BranchSyncStatusKind = 'branch_ahead' | 'upstream_behind';
+
+interface BranchSyncStatus {
+  id: string;
+  kind: BranchSyncStatusKind;
+  title: string;
+  body: string;
+  branch?: string;
+  defaultBranch?: string;
+  upstreamRepository?: string;
+  upstreamBranch?: string;
+  aheadBy?: number;
+  behindBy?: number;
+  lastCommitSha?: string;
+  occurredAt: string;
+  commits: Array<{
+    sha?: string;
+    message?: string;
+    author?: string;
+    date?: string;
+  }>;
+}
+
+interface BranchSyncEventLike {
+  id: string;
+  type: EventType;
+  title: string;
+  body: string | null;
+  branch: string | null;
+  sourceBranch: string | null;
+  targetBranch: string | null;
+  branches: string[];
+  metadata: Prisma.JsonValue;
+  occurredAt: Date | null;
+  createdAt: Date;
+}
+
 type RiskCounts = Record<RiskLevel, number>;
 
 interface MessageAction {
@@ -137,7 +174,10 @@ export class WorkbenchService {
       this.getConversationStateMap(userId, repositoryIds),
       repositoryIds.length > 0
         ? prisma.event.findMany({
-            where: { repositoryId: { in: repositoryIds } },
+            where: {
+              repositoryId: { in: repositoryIds },
+              type: { notIn: this.getBranchSyncAlertTypes() },
+            },
             include: {
               analyses: {
                 where: { status: 'COMPLETED' },
@@ -304,7 +344,7 @@ export class WorkbenchService {
     const approvalIds = messagePage.items
       .filter((item) => item.source === 'approval')
       .map((item) => item.id);
-    const [events, approvals] = await Promise.all([
+    const [rawEvents, approvals, branchSyncAlerts] = await Promise.all([
       eventIds.length > 0
         ? prisma.event.findMany({
             where: {
@@ -351,7 +391,22 @@ export class WorkbenchService {
             },
           })
         : Promise.resolve([]),
+      eventIds.length > 0
+        ? prisma.event.findMany({
+            where: {
+              repositoryId,
+              type: { in: this.getBranchSyncAlertTypes() },
+            },
+            orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+          })
+        : Promise.resolve([]),
     ]);
+    const events = rawEvents.filter((event) => !this.isBranchSyncAlertType(event.type));
+    const branchSyncStatusesByEventId = this.buildBranchSyncStatusesByEventId(
+      messagePage.items,
+      events,
+      branchSyncAlerts,
+    );
 
     const lastReadAt = conversationState?.lastReadAt ?? null;
 
@@ -386,6 +441,7 @@ export class WorkbenchService {
                 },
               ]
             : [];
+        const branchSyncStatuses = branchSyncStatusesByEventId.get(event.id) ?? [];
         const messageTime = this.resolveEventMessageTime(event);
         const message = {
           id: event.id,
@@ -409,6 +465,7 @@ export class WorkbenchService {
           hasPendingApprovalAction:
             repositoryCanOperate && pendingApproval?.status === ApprovalStatus.PENDING,
           hasPendingAgentAction: false,
+          ...(branchSyncStatuses.length > 0 ? { branchSyncStatuses } : {}),
         };
         return [event.id, message] as const;
       }),
@@ -531,7 +588,10 @@ export class WorkbenchService {
         },
       }),
       prisma.event.findFirst({
-        where: { repositoryId },
+        where: {
+          repositoryId,
+          type: { notIn: this.getBranchSyncAlertTypes() },
+        },
         orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
         select: {
           occurredAt: true,
@@ -900,6 +960,160 @@ export class WorkbenchService {
 
   private isRepositoryInMonitoringScope(monitoredRepositoryIds: string[], repositoryId: string): boolean {
     return monitoredRepositoryIds.length === 0 || monitoredRepositoryIds.includes(repositoryId);
+  }
+
+  private getBranchSyncAlertTypes(): EventType[] {
+    return [EventType.BRANCH_SYNC_ALERT, EventType.UPSTREAM_SYNC_ALERT];
+  }
+
+  private isBranchSyncAlertType(type: EventType): boolean {
+    return this.getBranchSyncAlertTypes().includes(type);
+  }
+
+  private isBranchSyncAnchorType(type: EventType): boolean {
+    const anchorTypes: EventType[] = [
+      EventType.PUSH,
+      EventType.PR_OPENED,
+      EventType.PR_MERGED,
+      EventType.PR_CLOSED,
+      EventType.PR_REVIEW,
+      EventType.BRANCH_CREATED,
+      EventType.BRANCH_DELETED,
+    ];
+
+    return anchorTypes.includes(type);
+  }
+
+  private buildBranchSyncStatusesByEventId(
+    pageItems: ConversationMessagePageRef[],
+    events: BranchSyncEventLike[],
+    branchSyncAlerts: BranchSyncEventLike[],
+  ): Map<string, BranchSyncStatus[]> {
+    const alerts = branchSyncAlerts.filter((event) => this.isBranchSyncAlertType(event.type));
+    if (events.length === 0 || alerts.length === 0) {
+      return new Map();
+    }
+
+    const pageIndex = new Map(
+      pageItems.map((item, index) => [`${item.source}:${item.id}`, index]),
+    );
+    const anchors = events
+      .filter((event) => this.isBranchSyncAnchorType(event.type))
+      .sort((left, right) => {
+        const leftIndex = pageIndex.get(`event:${left.id}`) ?? Number.MAX_SAFE_INTEGER;
+        const rightIndex = pageIndex.get(`event:${right.id}`) ?? Number.MAX_SAFE_INTEGER;
+        return leftIndex - rightIndex;
+      });
+
+    const statusesByEventId = new Map<string, BranchSyncStatus[]>();
+    const seenStatusKeys = new Set<string>();
+    for (const alert of alerts) {
+      const branch = this.resolveBranchSyncAlertBranch(alert);
+      const statusKey = `${alert.type}:${branch || alert.id}`;
+      if (seenStatusKeys.has(statusKey)) {
+        continue;
+      }
+      const anchor = anchors.find((event) =>
+        this.isEventRelatedToBranchSyncAlert(event, branch),
+      );
+      if (!anchor) {
+        continue;
+      }
+
+      seenStatusKeys.add(statusKey);
+      const statuses = statusesByEventId.get(anchor.id) ?? [];
+      statuses.push(this.toBranchSyncStatus(alert));
+      statusesByEventId.set(anchor.id, statuses);
+    }
+
+    return statusesByEventId;
+  }
+
+  private isEventRelatedToBranchSyncAlert(
+    event: BranchSyncEventLike,
+    alertBranch: string | null,
+  ): boolean {
+    if (!alertBranch) {
+      return false;
+    }
+
+    const branches = new Set(
+      [
+        event.branch,
+        event.sourceBranch,
+        event.targetBranch,
+        ...(event.branches ?? []),
+      ].filter((branch): branch is string => Boolean(branch)),
+    );
+
+    return branches.has(alertBranch);
+  }
+
+  private resolveBranchSyncAlertBranch(alert: BranchSyncEventLike): string | null {
+    const metadata = this.asRecord(alert.metadata);
+    return (
+      alert.branch ||
+      this.toOptionalString(metadata.branch) ||
+      this.toOptionalString(metadata.defaultBranch) ||
+      this.toOptionalString(metadata.upstreamBranch) ||
+      null
+    );
+  }
+
+  private toBranchSyncStatus(alert: BranchSyncEventLike): BranchSyncStatus {
+    const metadata = this.asRecord(alert.metadata);
+    const isUpstream = alert.type === EventType.UPSTREAM_SYNC_ALERT;
+    const commitList = isUpstream ? metadata.upstreamCommits : metadata.aheadCommits;
+
+    return {
+      id: alert.id,
+      kind: isUpstream ? 'upstream_behind' : 'branch_ahead',
+      title: alert.title,
+      body: alert.body || '',
+      branch: alert.branch || undefined,
+      defaultBranch: this.toOptionalString(metadata.defaultBranch),
+      upstreamRepository: this.toOptionalString(metadata.upstreamRepository),
+      upstreamBranch: this.toOptionalString(metadata.upstreamBranch),
+      aheadBy: this.toOptionalNumber(metadata.aheadBy),
+      behindBy: this.toOptionalNumber(metadata.behindBy),
+      lastCommitSha:
+        this.toOptionalString(metadata.lastCommitSha) ||
+        this.toOptionalString(metadata.upstreamLastCommitSha),
+      occurredAt: this.resolveEventMessageTime(alert).toISOString(),
+      commits: this.normalizeBranchSyncCommits(commitList),
+    };
+  }
+
+  private normalizeBranchSyncCommits(value: unknown): BranchSyncStatus['commits'] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value.slice(0, 5).map((item) => {
+      const commit = this.asRecord(item);
+      return {
+        sha: this.toOptionalString(commit.sha),
+        message: this.toOptionalString(commit.message),
+        author: this.toOptionalString(commit.author),
+        date: this.toOptionalString(commit.date),
+      };
+    });
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+
+    return value as Record<string, unknown>;
+  }
+
+  private toOptionalString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+  }
+
+  private toOptionalNumber(value: unknown): number | undefined {
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
   }
 
   private toWatchRepositoryItem(
@@ -1325,6 +1539,7 @@ export class WorkbenchService {
             COALESCE(e."occurredAt", e."createdAt") AS "messageAt"
           FROM "Event" e
           WHERE e."repositoryId" = ${repositoryId}
+          AND e."type" NOT IN ('BRANCH_SYNC_ALERT'::"EventType", 'UPSTREAM_SYNC_ALERT'::"EventType")
           ${branchScopeSql}
 
           UNION ALL
