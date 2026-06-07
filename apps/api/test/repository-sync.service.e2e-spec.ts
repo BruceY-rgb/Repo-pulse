@@ -6,12 +6,15 @@ import { GithubService } from '../src/modules/repository/services/github.service
 import { GitlabService } from '../src/modules/repository/services/gitlab.service';
 
 describe('RepositoryService.sync', () => {
+  const recentPullRequestAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+  const recentIssueAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
   let service: RepositoryService;
   let githubServiceMock: {
     getBranches: jest.Mock;
     getCommits: jest.Mock;
     getPullRequests: jest.Mock;
     getIssues: jest.Mock;
+    getReleases: jest.Mock;
   };
   let prismaMock: {
     repository: {
@@ -33,6 +36,7 @@ describe('RepositoryService.sync', () => {
       getCommits: jest.fn(),
       getPullRequests: jest.fn(),
       getIssues: jest.fn(),
+      getReleases: jest.fn().mockResolvedValue([]),
     };
 
     eventServiceMock = {
@@ -130,8 +134,8 @@ describe('RepositoryService.sync', () => {
               body: 'Adds login flow',
               html_url: 'https://github.com/acme/platform-web/pull/101',
               state: 'open',
-              updated_at: '2026-04-23T12:00:00.000Z',
-              created_at: '2026-04-23T12:00:00.000Z',
+              updated_at: recentPullRequestAt,
+              created_at: recentPullRequestAt,
               head: { ref: 'feature/login' },
               base: { ref: 'main' },
               user: { login: 'octocat', avatar_url: 'https://avatar/octocat.png' },
@@ -147,8 +151,8 @@ describe('RepositoryService.sync', () => {
         body: 'Investigate auth',
         html_url: 'https://github.com/acme/platform-web/issues/202',
         state: 'open',
-        updated_at: '2026-04-24T13:00:00.000Z',
-        created_at: '2026-04-24T13:00:00.000Z',
+        updated_at: recentIssueAt,
+        created_at: recentIssueAt,
         user: { login: 'issue-bot', avatar_url: 'https://avatar/issue.png' },
         number: 202,
       },
@@ -187,7 +191,7 @@ describe('RepositoryService.sync', () => {
         sourceBranch: 'feature/login',
         targetBranch: 'main',
         branches: ['feature/login', 'main'],
-        occurredAt: new Date('2026-04-23T12:00:00.000Z'),
+        occurredAt: new Date(recentPullRequestAt),
       }),
     );
   });

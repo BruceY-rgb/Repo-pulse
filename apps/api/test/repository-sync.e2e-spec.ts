@@ -30,6 +30,7 @@ describe('Repository sync (e2e)', () => {
     getCommits: jest.fn(),
     getPullRequests: jest.fn(),
     getIssues: jest.fn(),
+    getReleases: jest.fn(),
     getBranches: jest.fn().mockResolvedValue([{ name: 'main' }]),
     searchRepositories: jest.fn(),
     getUserRepositories: jest.fn(),
@@ -105,6 +106,7 @@ describe('Repository sync (e2e)', () => {
         number: 202,
       },
     ]);
+    githubServiceMock.getReleases.mockResolvedValue([]);
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],

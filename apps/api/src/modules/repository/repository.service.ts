@@ -27,11 +27,17 @@ import {
 import { EventService } from '../event/event.service';
 import { EventGateway } from '../event/event.gateway';
 import { CreateRepositoryDto, UpdateRepositoryDto } from './dto/repository.dto';
-import { GithubBranchInfo, GithubRepoResponse, GithubService } from './services/github.service';
-import { GitlabBranchInfo, GitlabService } from './services/gitlab.service';
+import {
+  GithubBranchInfo,
+  GithubReleaseResponse,
+  GithubRepoResponse,
+  GithubService,
+} from './services/github.service';
+import { GitlabBranchInfo, GitlabReleaseResponse, GitlabService } from './services/gitlab.service';
 import { AppConfigService } from '../app-config/app-config.service';
 
 const API_URL_FALLBACK = 'http://localhost:3001';
+const RELEASE_SYNC_LOOKBACK_DAYS = 365;
 
 type EventPostCreateOptions = {
   broadcast?: boolean;
@@ -1167,7 +1173,7 @@ export class RepositoryService {
     id: string,
     options?: {
       daysBack?: number;
-      onStageStart?: (stage: 'commits' | 'prs' | 'issues') => Promise<void> | void;
+      onStageStart?: (stage: 'commits' | 'prs' | 'releases' | 'issues') => Promise<void> | void;
       eventPostCreate?: EventPostCreateOptions;
     },
   ): Promise<SyncSummary> {
@@ -1195,6 +1201,10 @@ export class RepositoryService {
     const sinceDate =
       repository.lastSyncAt ?? new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
     const since = sinceDate.toISOString();
+    const releaseSinceDate = new Date(
+      Date.now() - Math.max(daysBack, RELEASE_SYNC_LOOKBACK_DAYS) * 24 * 60 * 60 * 1000,
+    );
+    const releaseSince = releaseSinceDate.toISOString();
     const failedSources: string[] = [];
     let createdCount = 0;
     let skippedCount = 0;
@@ -1272,6 +1282,28 @@ export class RepositoryService {
           ),
         );
 
+        await options?.onStageStart?.('releases');
+        accumulate(
+          await this.syncSources(
+            repository.id,
+            [
+              {
+                name: 'github_releases',
+                fetch: () =>
+                  this.githubService.getReleases(
+                    owner,
+                    repo,
+                    { since: releaseSince },
+                    tokenOwner.user.githubAccessToken || undefined,
+                  ),
+                normalize: (item: unknown) => this.normalizeGithubRelease(item, releaseSinceDate),
+              },
+            ],
+            failedSources,
+            options?.eventPostCreate,
+          ),
+        );
+
         await options?.onStageStart?.('issues');
         accumulate(
           await this.syncSources(
@@ -1330,6 +1362,22 @@ export class RepositoryService {
               name: 'gitlab_merge_requests',
               fetch: () => this.gitlabService.getMergeRequests(owner, repo, 'all'),
               normalize: (item: unknown) => this.normalizeGitlabMergeRequest(item, sinceDate),
+            },
+          ],
+          failedSources,
+          options?.eventPostCreate,
+        ),
+      );
+
+      await options?.onStageStart?.('releases');
+      accumulate(
+        await this.syncSources(
+          repository.id,
+          [
+            {
+              name: 'gitlab_releases',
+              fetch: () => this.gitlabService.getReleases(owner, repo, { since: releaseSince }),
+              normalize: (item: unknown) => this.normalizeGitlabRelease(item, releaseSinceDate),
             },
           ],
           failedSources,
@@ -1919,6 +1967,40 @@ export class RepositoryService {
     };
   }
 
+  private normalizeGithubRelease(item: unknown, sinceDate: Date): NormalizedSyncEvent | null {
+    const release = item as GithubReleaseResponse;
+    const occurredAtValue = release.published_at ?? release.created_at;
+    const tagName = release.tag_name?.trim();
+
+    if (
+      release.draft ||
+      (!release.id && !tagName) ||
+      !this.isRecentEnough(occurredAtValue ?? undefined, sinceDate)
+    ) {
+      return null;
+    }
+
+    return {
+      type: EventType.RELEASE,
+      action: release.prerelease ? 'prereleased' : 'published',
+      title: release.name?.trim() || (tagName ? `Release ${tagName}` : 'Release sync'),
+      body: release.body || undefined,
+      author: release.author?.login || 'unknown',
+      authorAvatar: release.author?.avatar_url,
+      externalId: release.id ? `gh-release-${release.id}` : `gh-release-tag-${tagName}`,
+      externalUrl: release.html_url,
+      branches: [],
+      occurredAt: new Date(occurredAtValue || new Date().toISOString()),
+      metadata: {
+        source: 'repository_sync',
+        provider: 'github',
+        tagName,
+        targetCommitish: release.target_commitish,
+        prerelease: Boolean(release.prerelease),
+      },
+    };
+  }
+
   private normalizeGitlabCommit(item: unknown, branch: string): NormalizedSyncEvent | null {
     const commit = item as {
       id?: string;
@@ -2047,6 +2129,34 @@ export class RepositoryService {
         source: 'repository_sync',
         provider: 'gitlab',
         issueIid: issue.iid,
+      },
+    };
+  }
+
+  private normalizeGitlabRelease(item: unknown, sinceDate: Date): NormalizedSyncEvent | null {
+    const release = item as GitlabReleaseResponse;
+    const occurredAtValue = release.released_at ?? release.created_at;
+    const tagName = release.tag_name?.trim();
+
+    if (!tagName || !this.isRecentEnough(occurredAtValue ?? undefined, sinceDate)) {
+      return null;
+    }
+
+    return {
+      type: EventType.RELEASE,
+      action: 'published',
+      title: release.name?.trim() || `Release ${tagName}`,
+      body: release.description || undefined,
+      author: release.author?.username || 'unknown',
+      authorAvatar: release.author?.avatar_url,
+      externalId: `gl-release-${tagName}`,
+      externalUrl: release._links?.self ?? release.tag_path,
+      branches: [],
+      occurredAt: new Date(occurredAtValue || new Date().toISOString()),
+      metadata: {
+        source: 'repository_sync',
+        provider: 'gitlab',
+        tagName,
       },
     };
   }

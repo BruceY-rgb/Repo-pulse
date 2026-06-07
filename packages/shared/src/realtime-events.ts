@@ -35,7 +35,7 @@ export interface ApprovalUpdatedPayload {
   updatedAt: string;
 }
 
-export type RepositorySyncStage = 'commits' | 'prs' | 'issues' | 'done';
+export type RepositorySyncStage = 'commits' | 'prs' | 'releases' | 'issues' | 'done';
 
 export interface RepositorySyncProgressPayload {
   repositoryId: string;

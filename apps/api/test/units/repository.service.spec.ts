@@ -34,6 +34,7 @@ jest.mock('@repo-pulse/database', () => ({
     PR_CLOSED: 'PR_CLOSED',
     ISSUE_OPENED: 'ISSUE_OPENED',
     ISSUE_CLOSED: 'ISSUE_CLOSED',
+    RELEASE: 'RELEASE',
   },
   RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
   RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
@@ -110,6 +111,7 @@ describe('RepositoryService', () => {
       getCommits: jest.fn().mockResolvedValue([]),
       getPullRequests: jest.fn().mockResolvedValue([]),
       getIssues: jest.fn().mockResolvedValue([]),
+      getReleases: jest.fn().mockResolvedValue([]),
       searchRepositories: jest.fn().mockResolvedValue([]),
       getUserRepositories: jest.fn().mockResolvedValue([]),
       getStarredRepos: jest.fn().mockResolvedValue([]),
@@ -122,6 +124,7 @@ describe('RepositoryService', () => {
       getCommits: jest.fn().mockResolvedValue([]),
       getMergeRequests: jest.fn().mockResolvedValue([]),
       getIssues: jest.fn().mockResolvedValue([]),
+      getReleases: jest.fn().mockResolvedValue([]),
     };
     mockEventService = {
       findByExternalId: jest.fn().mockResolvedValue(null),

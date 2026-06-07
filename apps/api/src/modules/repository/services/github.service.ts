@@ -93,6 +93,23 @@ export interface GithubIssueResponse {
   pull_request?: unknown;
 }
 
+export interface GithubReleaseResponse {
+  id: number;
+  tag_name?: string;
+  target_commitish?: string;
+  name?: string | null;
+  body?: string | null;
+  html_url?: string;
+  draft?: boolean;
+  prerelease?: boolean;
+  published_at?: string | null;
+  created_at?: string;
+  author?: {
+    login?: string;
+    avatar_url?: string;
+  } | null;
+}
+
 export interface GithubBranchInfo {
   name: string;
   isProtected?: boolean;
@@ -469,6 +486,52 @@ export class GithubService {
     } catch (error) {
       this.logger.error(`Failed to fetch issue #${issueNumber} for ${owner}/${repo}`, this.formatErrorForLog(error));
       return null;
+    }
+  }
+
+  async getReleases(
+    owner: string,
+    repo: string,
+    options?: { since?: string },
+    userToken?: string,
+  ): Promise<GithubReleaseResponse[]> {
+    try {
+      const client = this.createUserClient(userToken);
+      const releases: GithubReleaseResponse[] = [];
+      const sinceMs = options?.since ? Date.parse(options.since) : Number.NaN;
+      let page = 1;
+
+      while (page <= 5) {
+        const response = await client.get<GithubReleaseResponse[]>(
+          `/repos/${owner}/${repo}/releases`,
+          { params: { per_page: 100, page } },
+        );
+        const pageItems = Array.isArray(response.data) ? response.data : [];
+        releases.push(...pageItems);
+
+        const reachedOlderPage =
+          Number.isFinite(sinceMs) &&
+          pageItems.some((release) => {
+            const releaseMs = Date.parse(
+              release.published_at ?? release.created_at ?? '',
+            );
+            return Number.isFinite(releaseMs) && releaseMs < sinceMs;
+          });
+
+        if (pageItems.length < 100 || reachedOlderPage) {
+          break;
+        }
+        page += 1;
+      }
+
+      return releases;
+    } catch (error) {
+      if (this.isEmptyRepositoryError(error)) {
+        this.logger.debug(`Empty repository, skipping releases: ${owner}/${repo}`);
+      } else {
+        this.logger.error(`Failed to fetch releases for ${owner}/${repo}`, this.formatErrorForLog(error));
+      }
+      return [];
     }
   }
 

@@ -43,6 +43,7 @@ jest.mock('@repo-pulse/database', () => ({
     PR_CLOSED: 'PR_CLOSED',
     ISSUE_OPENED: 'ISSUE_OPENED',
     ISSUE_CLOSED: 'ISSUE_CLOSED',
+    RELEASE: 'RELEASE',
   },
   RepositoryAccessLevel: {
     OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN',
@@ -80,6 +81,7 @@ const mockGithubService = {
   getCommits: jest.fn().mockResolvedValue([]),
   getPullRequests: jest.fn().mockResolvedValue([]),
   getIssues: jest.fn().mockResolvedValue([]),
+  getReleases: jest.fn().mockResolvedValue([]),
   getUserRepositories: jest.fn().mockResolvedValue([]),
   getStarredRepositories: jest.fn().mockResolvedValue([]),
   searchRepositories: jest.fn().mockResolvedValue([]),
@@ -93,6 +95,7 @@ const mockGitlabService = {
   getCommits: jest.fn().mockResolvedValue([]),
   getMergeRequests: jest.fn().mockResolvedValue([]),
   getIssues: jest.fn().mockResolvedValue([]),
+  getReleases: jest.fn().mockResolvedValue([]),
   createWebhook: jest.fn().mockResolvedValue(undefined),
   deleteWebhook: jest.fn().mockResolvedValue(undefined),
 };
@@ -549,6 +552,8 @@ describe('RepositoryService.sync — GitHub PR and Issue events', () => {
     svc = getSvc();
     mockEventService.findByExternalId.mockResolvedValue(null);
     mockRepoUpdate.mockResolvedValue({});
+    mockGithubService.getReleases.mockResolvedValue([]);
+    mockGitlabService.getReleases.mockResolvedValue([]);
   });
 
   it('creates PR_OPENED event when GitHub PR is open', async () => {
@@ -601,6 +606,44 @@ describe('RepositoryService.sync — GitHub PR and Issue events', () => {
     expect(result.createdCount).toBe(1);
     expect(mockEventService.create).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'ISSUE_CLOSED', externalId: 'gh-issue-601' }),
+    );
+  });
+
+  it('backfills RELEASE event when GitHub release already exists', async () => {
+    mockRepoFindUnique.mockResolvedValue(makeRepo({
+      platform: 'GITHUB',
+      lastSyncAt: new Date(),
+      users: [{ user: { githubAccessToken: 'token' } }],
+    }));
+    mockGithubService.getBranches.mockResolvedValue([]);
+    mockGithubService.getCommits.mockResolvedValue([]);
+    mockGithubService.getPullRequests.mockResolvedValue([]);
+    mockGithubService.getIssues.mockResolvedValue([]);
+    mockGithubService.getReleases.mockResolvedValue([{
+      id: 901,
+      tag_name: 'v1.2.3',
+      name: 'Release v1.2.3',
+      body: 'release notes',
+      html_url: 'https://github.com/org/repo/releases/tag/v1.2.3',
+      published_at: RECENT,
+      created_at: RECENT,
+      author: { login: 'release-bot', avatar_url: null },
+    }]);
+
+    const result = await svc.sync('r1');
+    expect(result.createdCount).toBe(1);
+    expect(mockEventService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'RELEASE',
+        externalId: 'gh-release-901',
+        title: 'Release v1.2.3',
+        branches: [],
+        metadata: expect.objectContaining({
+          source: 'repository_sync',
+          provider: 'github',
+          tagName: 'v1.2.3',
+        }),
+      }),
     );
   });
 

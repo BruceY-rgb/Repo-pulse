@@ -14,7 +14,8 @@ export interface RepositorySyncJob {
 const STAGE_PROGRESS: Record<Exclude<RepositorySyncStage, 'done'>, number> = {
   commits: 5,
   prs: 40,
-  issues: 70,
+  releases: 65,
+  issues: 80,
 };
 
 @Processor(QUEUE_NAMES.REPOSITORY_SYNC)

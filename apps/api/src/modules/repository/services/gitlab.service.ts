@@ -82,6 +82,22 @@ export interface GitlabIssueResponse {
   };
 }
 
+export interface GitlabReleaseResponse {
+  name?: string;
+  tag_name?: string;
+  description?: string | null;
+  released_at?: string | null;
+  created_at?: string;
+  author?: {
+    username?: string;
+    avatar_url?: string;
+  };
+  tag_path?: string;
+  _links?: {
+    self?: string;
+  };
+}
+
 @Injectable()
 export class GitlabService {
   private readonly logger = new Logger(GitlabService.name);
@@ -274,6 +290,54 @@ export class GitlabService {
     } catch (error) {
       this.logger.error(`Failed to fetch issue #${issueIid} for ${owner}/${repo}`, error);
       return null;
+    }
+  }
+
+  async getReleases(
+    owner: string,
+    repo: string,
+    options?: { since?: string },
+  ): Promise<GitlabReleaseResponse[]> {
+    try {
+      const encodedPath = encodeURIComponent(`${owner}/${repo}`);
+      const releases: GitlabReleaseResponse[] = [];
+      const sinceMs = options?.since ? Date.parse(options.since) : Number.NaN;
+      let page = 1;
+
+      while (page <= 5) {
+        const response = await this.client.get<GitlabReleaseResponse[]>(
+          `/projects/${encodedPath}/releases`,
+          {
+            params: {
+              per_page: 100,
+              page,
+              order_by: 'released_at',
+              sort: 'desc',
+            },
+          },
+        );
+        const pageItems = Array.isArray(response.data) ? response.data : [];
+        releases.push(...pageItems);
+
+        const reachedOlderPage =
+          Number.isFinite(sinceMs) &&
+          pageItems.some((release) => {
+            const releaseMs = Date.parse(
+              release.released_at ?? release.created_at ?? '',
+            );
+            return Number.isFinite(releaseMs) && releaseMs < sinceMs;
+          });
+
+        if (pageItems.length < 100 || reachedOlderPage) {
+          break;
+        }
+        page += 1;
+      }
+
+      return releases;
+    } catch (error) {
+      this.logger.error(`Failed to fetch releases for ${owner}/${repo}`, error);
+      return [];
     }
   }
 

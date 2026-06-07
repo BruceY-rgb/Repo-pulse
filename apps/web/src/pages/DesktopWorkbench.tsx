@@ -248,7 +248,10 @@ const CONVERSATION_MESSAGE_PAGE_SIZE = 50;
 const WATCH_FEED_PAGE_SIZE = 20;
 
 function isRepositoryMonitoredInScope(monitoredRepositoryIds: string[], repositoryId?: string) {
-  return Boolean(repositoryId) && (monitoredRepositoryIds.length === 0 || monitoredRepositoryIds.includes(repositoryId));
+  if (!repositoryId) {
+    return false;
+  }
+  return monitoredRepositoryIds.length === 0 || monitoredRepositoryIds.includes(repositoryId);
 }
 
 const markdownComponents: Components = {
@@ -1069,7 +1072,7 @@ function doesMessageMatchMonitoringScope(
   );
 
   if (messageBranches.length === 0) {
-    return message.eventTypeLabel === 'Issue';
+    return message.eventTypeLabel === 'Issue' || message.eventTypeLabel === 'Release';
   }
 
   return messageBranches.some((branch) => scopedBranches.includes(branch));
@@ -1680,7 +1683,7 @@ function RepositorySidebar({
     const latestMessage = item.latestMessagePreview || '等待新的仓库事件';
     const isSyncing = syncingRepoIds.has(repo.id);
     const syncProgress = syncProgressByRepoId[repo.id]?.progress;
-    const hasWebhookWarning = !repo.webhookId;
+    const hasWebhookWarning = item.kind === 'editable' && !repo.webhookId;
     const hasPendingApproval = item.hasPendingApproval || item.pendingApprovalCount > 0;
     const hasPendingAgentAction = item.hasPendingAgentAction || item.pendingAgentActionCount > 0;
     const hasUnreadRiskAttention =
@@ -1825,7 +1828,7 @@ function RepositorySidebar({
               const avatarUrl = getRepositoryAvatarUrl(repo);
               const isSyncing = syncingRepoIds.has(repo.id);
               const syncProgress = syncProgressByRepoId[repo.id]?.progress;
-              const hasWebhookWarning = !repo.webhookId;
+              const hasWebhookWarning = item.kind === 'editable' && !repo.webhookId;
               const repoKindLabel = item.kind === 'editable' ? '可操作仓库' : '只读监控';
 
               const compactLink = (
@@ -3312,11 +3315,19 @@ function getWebhookStatusMeta(status: WebhookStatus) {
   }
 }
 
-function RepositoryWebhookSection({ repository }: { repository: Repository }) {
+function RepositoryWebhookSection({
+  repository,
+  canManageWebhook,
+}: {
+  repository: Repository;
+  canManageWebhook?: boolean;
+}) {
   const [secretVisible, setSecretVisible] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const autoRetryTriggeredRef = useRef(false);
-  const statusQuery = useWebhookStatusQuery(repository.id);
+  const canUseWebhookControls =
+    canManageWebhook ?? repository.canOperate ?? repository.isEditable ?? true;
+  const statusQuery = useWebhookStatusQuery(repository.id, canUseWebhookControls);
   const retryMutation = useRetryWebhookMutation();
   const testMutation = useTestWebhookMutation();
   const data = statusQuery.data;
@@ -3345,6 +3356,9 @@ function RepositoryWebhookSection({ repository }: { repository: Repository }) {
 
   // OAuth 重新授权回来后自动 retry（URL 带 ?webhook_recheck=1）
   useEffect(() => {
+    if (!canUseWebhookControls) {
+      return;
+    }
     if (autoRetryTriggeredRef.current) {
       return;
     }
@@ -3361,7 +3375,7 @@ function RepositoryWebhookSection({ repository }: { repository: Repository }) {
     toast.info('授权完成，正在自动重新创建 webhook…');
     void handleRetry();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [canUseWebhookControls, searchParams]);
 
   const handleTest = async () => {
     try {
@@ -3371,6 +3385,28 @@ function RepositoryWebhookSection({ repository }: { repository: Repository }) {
       toast.error(error instanceof Error ? error.message : '测试失败');
     }
   };
+
+  if (!canUseWebhookControls) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Webhook className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-semibold text-foreground">Webhook 配置</span>
+          </div>
+          <Badge
+            variant="outline"
+            className="rounded-full border-muted-foreground/30 bg-secondary text-[11px] text-muted-foreground"
+          >
+            只读监控
+          </Badge>
+        </div>
+        <p className="mt-3 text-xs leading-5 text-muted-foreground">
+          当前仓库没有可操作权限，不需要配置 webhook；事件会通过同步在允许范围内延迟更新。
+        </p>
+      </div>
+    );
+  }
 
   if (statusQuery.isLoading) {
     return (
@@ -3778,7 +3814,10 @@ function RepositoryConversation({
       </div>
       <ScrollArea className="min-h-0 flex-1 min-w-0">
         <div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 py-6">
-          <RepositoryWebhookSection repository={repository} />
+          <RepositoryWebhookSection
+            repository={repository}
+            canManageWebhook={repositoryCanOperate}
+          />
           {filteredMessages.length > 0 ? (
             <>
               {filteredMessages.map((message) => {
