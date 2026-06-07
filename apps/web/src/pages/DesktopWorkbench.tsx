@@ -28,7 +28,6 @@ import {
   Command,
   CornerDownLeft,
   Copy,
-  BookOpen,
   ExternalLink,
   Eye,
   EyeOff,
@@ -139,7 +138,7 @@ import { apiClient } from '@/services/api-client';
 import { repositoryService } from '@/services/repository.service';
 import { workbenchService } from '@/services/workbench.service';
 import { settingsService, PROVIDER_LABELS, type AIProvider } from '@/services/settings.service';
-import { getApiBaseUrl, isDesktopRuntime, toApiUrl } from '@/lib/desktop';
+import { getApiBaseUrl, isDesktopRuntime } from '@/lib/desktop';
 import { getProviderLogo } from '@/lib/provider-logo';
 import { GitTreePanel } from '@/components/shared/GitTreePanel';
 import {
@@ -2060,9 +2059,6 @@ function WorkbenchHeader({
   const reportsHref = (activeView === 'repository' && repository) || ((activeView === 'dashboard' || activeView === 'reports') && repositoryIdParam && repository)
     ? `/workbench/reports?repositoryId=${encodeURIComponent(repository.id)}`
     : '/workbench/reports';
-  const apiListHref = '/api-list';
-  const swaggerHref = toApiUrl('/docs');
-
   const isReadOnly = hasRepositoryContext && repositoryCanOperate === false;
 
   return (
