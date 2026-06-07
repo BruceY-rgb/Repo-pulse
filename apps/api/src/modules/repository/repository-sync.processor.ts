@@ -8,6 +8,7 @@ import { EventGateway } from '../event/event.gateway';
 export interface RepositorySyncJob {
   repositoryId: string;
   userId: string;
+  silent?: boolean;
 }
 
 const STAGE_PROGRESS: Record<Exclude<RepositorySyncStage, 'done'>, number> = {
@@ -28,7 +29,7 @@ export class RepositorySyncProcessor extends WorkerHost {
   }
 
   async process(job: Job<RepositorySyncJob>): Promise<void> {
-    const { repositoryId, userId } = job.data;
+    const { repositoryId, userId, silent } = job.data;
     const jobId = String(job.id ?? '');
     const startedAt = Date.now();
 
@@ -46,6 +47,7 @@ export class RepositorySyncProcessor extends WorkerHost {
             stage,
           });
         },
+        ...(silent ? { eventPostCreate: { notify: false, analyze: false } } : {}),
       });
 
       const durationMs = Date.now() - startedAt;

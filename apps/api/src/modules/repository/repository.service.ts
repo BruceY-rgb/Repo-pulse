@@ -33,6 +33,12 @@ import { AppConfigService } from '../app-config/app-config.service';
 
 const API_URL_FALLBACK = 'http://localhost:3001';
 
+type EventPostCreateOptions = {
+  broadcast?: boolean;
+  notify?: boolean;
+  analyze?: boolean;
+};
+
 export interface WebhookProvisionResult {
   webhookStatus: WebhookStatus;
   webhookError?: string;
@@ -1162,6 +1168,7 @@ export class RepositoryService {
     options?: {
       daysBack?: number;
       onStageStart?: (stage: 'commits' | 'prs' | 'issues') => Promise<void> | void;
+      eventPostCreate?: EventPostCreateOptions;
     },
   ): Promise<SyncSummary> {
     const repository = await this.prisma.repository.findUnique({
@@ -1234,7 +1241,14 @@ export class RepositoryService {
             normalize: (item: unknown) => this.normalizeGithubCommit(item, branchName),
           }),
         );
-        accumulate(await this.syncSources(repository.id, commitSources, failedSources));
+        accumulate(
+          await this.syncSources(
+            repository.id,
+            commitSources,
+            failedSources,
+            options?.eventPostCreate,
+          ),
+        );
 
         await options?.onStageStart?.('prs');
         accumulate(
@@ -1254,6 +1268,7 @@ export class RepositoryService {
               },
             ],
             failedSources,
+            options?.eventPostCreate,
           ),
         );
 
@@ -1275,6 +1290,7 @@ export class RepositoryService {
               },
             ],
             failedSources,
+            options?.eventPostCreate,
           ),
         );
       }
@@ -1296,7 +1312,14 @@ export class RepositoryService {
           normalize: (item: unknown) => this.normalizeGitlabCommit(item, branchName),
         }),
       );
-      accumulate(await this.syncSources(repository.id, commitSources, failedSources));
+      accumulate(
+        await this.syncSources(
+          repository.id,
+          commitSources,
+          failedSources,
+          options?.eventPostCreate,
+        ),
+      );
 
       await options?.onStageStart?.('prs');
       accumulate(
@@ -1310,6 +1333,7 @@ export class RepositoryService {
             },
           ],
           failedSources,
+          options?.eventPostCreate,
         ),
       );
 
@@ -1325,6 +1349,7 @@ export class RepositoryService {
             },
           ],
           failedSources,
+          options?.eventPostCreate,
         ),
       );
     }
@@ -1561,6 +1586,7 @@ export class RepositoryService {
       normalize: (item: unknown) => NormalizedSyncEvent | null;
     }>,
     failedSources: string[],
+    eventPostCreate?: EventPostCreateOptions,
   ): Promise<{
     createdCount: number;
     skippedCount: number;
@@ -1613,7 +1639,7 @@ export class RepositoryService {
             normalized.targetBranch,
           ]);
 
-          await this.eventService.create({
+          const eventData = {
             repositoryId,
             type: normalized.type,
             action: normalized.action,
@@ -1629,7 +1655,12 @@ export class RepositoryService {
             branches,
             occurredAt: normalized.occurredAt,
             metadata: normalized.metadata,
-          });
+          };
+          if (eventPostCreate) {
+            await this.eventService.create(eventData, eventPostCreate);
+          } else {
+            await this.eventService.create(eventData);
+          }
           createdCount += 1;
         }
       } catch (error) {

@@ -1,4 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Queue } from 'bullmq';
 import {
   ApprovalStatus,
   EventType,
@@ -11,6 +13,7 @@ import {
   Role,
   prisma,
 } from '@repo-pulse/database';
+import { QUEUE_NAMES } from '@repo-pulse/shared';
 import {
   RepositoryAccessMembership,
   assertUserCanAccessRepository,
@@ -26,6 +29,9 @@ import { RepositoryService } from '../repository/repository.service';
 import { ReadConversationDto } from './dto/read-conversation.dto';
 import { SyncService } from '../sync/sync.service';
 import { ConversationMessagesQueryDto } from './dto/conversation-messages-query.dto';
+
+const WATCH_FALLBACK_SYNC_STALE_MS = 5 * 60 * 1000;
+const WATCH_FALLBACK_SYNC_MAX_ENQUEUE = 6;
 
 type RepositoryAccessLevelApi =
   | 'owner'
@@ -89,9 +95,13 @@ interface ConversationMessagePageRef {
 
 @Injectable()
 export class WorkbenchService {
+  private readonly logger = new Logger(WorkbenchService.name);
+
   constructor(
     private readonly repositoryService: RepositoryService,
     private readonly syncService: SyncService,
+    @InjectQueue(QUEUE_NAMES.REPOSITORY_SYNC)
+    private readonly syncQueue?: Queue<{ repositoryId: string; userId: string; silent?: boolean }>,
   ) {}
 
   async getChatRepositories(userId: string) {
@@ -740,6 +750,8 @@ export class WorkbenchService {
       }
     }
 
+    await this.enqueueFallbackSyncForWatchRepositories(userId, memberships);
+
     const result = memberships.map(({ repository }) =>
       this.toWatchRepositoryItem(
         repository,
@@ -748,6 +760,91 @@ export class WorkbenchService {
     );
     console.log(`[getWatchRepositories] END - Returning ${result.length} repositories for user ${userId}`);
     return result;
+  }
+
+  private async enqueueFallbackSyncForWatchRepositories(
+    userId: string,
+    memberships: Array<{
+      repositoryId: string;
+      repository: {
+        id: string;
+        fullName: string;
+        webhookId: string | null;
+        webhookStatus: string | null;
+        lastSyncAt: Date | null;
+      };
+    }>,
+  ): Promise<void> {
+    const now = Date.now();
+    const stale = memberships
+      .map((membership) => membership.repository)
+      .filter((repository) => {
+        const webhookActive = Boolean(repository.webhookId) && repository.webhookStatus === 'ACTIVE';
+        if (webhookActive) {
+          return false;
+        }
+
+        const lastSyncAt = repository.lastSyncAt?.getTime() ?? 0;
+        return now - lastSyncAt >= WATCH_FALLBACK_SYNC_STALE_MS;
+      })
+      .slice(0, WATCH_FALLBACK_SYNC_MAX_ENQUEUE);
+
+    if (stale.length === 0) {
+      return;
+    }
+    if (!this.syncQueue) {
+      this.logger.warn(`watch_fallback_sync_skipped userId=${userId} reason=sync_queue_unavailable`);
+      return;
+    }
+    const syncQueue = this.syncQueue;
+
+    const syncBucket = Math.floor(now / WATCH_FALLBACK_SYNC_STALE_MS);
+    const outcomes = await Promise.all(
+      stale.map(async (repository) => {
+        const jobId = `watch-fallback-${userId}-${repository.id}-${syncBucket}`;
+        try {
+          const existingJob = await syncQueue.getJob(jobId);
+          if (existingJob) {
+            return { status: 'deduped' as const, repository };
+          }
+
+          await syncQueue.add(
+            'sync',
+            { repositoryId: repository.id, userId, silent: true },
+            {
+              jobId,
+              removeOnComplete: true,
+              removeOnFail: 20,
+            },
+          );
+          return { status: 'queued' as const, repository };
+        } catch (error) {
+          return {
+            status: 'failed' as const,
+            repository,
+            reason: error instanceof Error ? error.message : String(error),
+          };
+        }
+      }),
+    );
+
+    const queuedCount = outcomes.filter((result) => result.status === 'queued').length;
+    const dedupedCount = outcomes.filter((result) => result.status === 'deduped').length;
+    const failed = outcomes.filter((result) => result.status === 'failed');
+    if (failed.length > 0) {
+      this.logger.warn(
+        `watch_fallback_sync_failed userId=${userId} failed=${failed.length}/${stale.length} reasons=${failed
+          .slice(0, 3)
+          .map((result) => `${result.repository.fullName}:${result.reason}`)
+          .join(';')}`,
+      );
+    }
+
+    this.logger.log(
+      `watch_fallback_sync_scheduled userId=${userId} queued=${queuedCount} deduped=${dedupedCount} failed=${failed.length} candidates=${stale.length} repositories=${stale
+        .map((repository) => repository.fullName)
+        .join(',')}`,
+    );
   }
 
   async addWatchRepository(userId: string, dto: CreateRepositoryDto) {

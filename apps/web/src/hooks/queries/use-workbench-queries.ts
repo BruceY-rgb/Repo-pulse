@@ -8,6 +8,8 @@ import {
 export const workbenchQueryKeys = {
   all: ['workbench'] as const,
   chatRepositories: () => [...workbenchQueryKeys.all, 'chat-repositories'] as const,
+  watchRepositories: () => [...workbenchQueryKeys.all, 'watch-repositories'] as const,
+  watchFeedRoot: () => [...workbenchQueryKeys.all, 'watch-feed'] as const,
   conversationMessagesRoot: () => [...workbenchQueryKeys.all, 'conversation-messages'] as const,
   conversationMessages: (repositoryId: string, params?: ConversationMessagesParams) =>
     [
@@ -20,8 +22,7 @@ export const workbenchQueryKeys = {
     ] as const,
   watchFeed: (type: string, params?: Omit<WatchFeedParams, 'type'>) =>
     [
-      ...workbenchQueryKeys.all,
-      'watch-feed',
+      ...workbenchQueryKeys.watchFeedRoot(),
       type || 'all',
       params?.cursor ?? null,
       params?.limit ?? null,

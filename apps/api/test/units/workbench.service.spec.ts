@@ -96,6 +96,7 @@ describe('WorkbenchService — 私有辅助方法', () => {
   let svc: WorkbenchService;
   let mockRepositoryService: any;
   let mockSyncService: any;
+  let mockSyncQueue: any;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -106,7 +107,15 @@ describe('WorkbenchService — 私有辅助方法', () => {
     mockSyncService = {
       syncUserRepositories: jest.fn(),
     };
-    svc = new WorkbenchService(mockRepositoryService, mockSyncService);
+    mockSyncQueue = {
+      getJob: jest.fn().mockResolvedValue(null),
+      add: jest.fn().mockResolvedValue({ id: 'job-1' }),
+    };
+    svc = new WorkbenchService(mockRepositoryService, mockSyncService, mockSyncQueue);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   // ── isUnreadMessage ───────────────────────────────────────────────────────
@@ -308,7 +317,99 @@ describe('WorkbenchService — 私有辅助方法', () => {
       ]);
     });
 
+    it('queues fallback sync for stale watch sources without active webhook', async () => {
+      jest.spyOn(Date, 'now').mockReturnValue(1_000_000_000_000);
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue([]);
+      mockUserRepoFindMany.mockResolvedValue([
+        {
+          repositoryId: 'r1',
+          repository: {
+            ...makeRepo('r1', {
+              lastSyncAt: new Date(1_000_000_000_000 - 10 * 60 * 1000),
+              webhookId: null,
+              webhookStatus: null,
+            }),
+            _count: { events: 4 },
+          },
+        },
+      ]);
+
+      await svc.getWatchRepositories('u1');
+
+      expect(mockSyncQueue.getJob).toHaveBeenCalledWith(
+        expect.stringMatching(/^watch-fallback-u1-r1-/),
+      );
+      expect(mockSyncQueue.add).toHaveBeenCalledWith(
+        'sync',
+        { repositoryId: 'r1', userId: 'u1', silent: true },
+        expect.objectContaining({
+          jobId: expect.stringMatching(/^watch-fallback-u1-r1-/),
+          removeOnComplete: true,
+        }),
+      );
+    });
+
+    it('does not queue fallback sync for active webhook or fresh watch sources', async () => {
+      jest.spyOn(Date, 'now').mockReturnValue(1_000_000_000_000);
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue([]);
+      mockUserRepoFindMany.mockResolvedValue([
+        {
+          repositoryId: 'r1',
+          repository: {
+            ...makeRepo('r1', {
+              webhookId: 'hook-1',
+              webhookStatus: 'ACTIVE',
+              lastSyncAt: null,
+            }),
+            _count: { events: 4 },
+          },
+        },
+        {
+          repositoryId: 'r2',
+          repository: {
+            ...makeRepo('r2', {
+              webhookId: null,
+              webhookStatus: null,
+              lastSyncAt: new Date(1_000_000_000_000 - 60 * 1000),
+            }),
+            _count: { events: 9 },
+          },
+        },
+      ]);
+
+      await svc.getWatchRepositories('u1');
+
+      expect(mockSyncQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('does not enqueue a duplicate fallback sync job in the same freshness bucket', async () => {
+      jest.spyOn(Date, 'now').mockReturnValue(1_000_000_000_000);
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue([]);
+      mockSyncQueue.getJob.mockResolvedValue({ id: 'existing-job' });
+      mockUserRepoFindMany.mockResolvedValue([
+        {
+          repositoryId: 'r1',
+          repository: {
+            ...makeRepo('r1', {
+              webhookId: null,
+              webhookStatus: null,
+              lastSyncAt: new Date(1_000_000_000_000 - 10 * 60 * 1000),
+            }),
+            _count: { events: 4 },
+          },
+        },
+      ]);
+
+      await svc.getWatchRepositories('u1');
+
+      expect(mockSyncQueue.getJob).toHaveBeenCalledWith(
+        expect.stringMatching(/^watch-fallback-u1-r1-/),
+      );
+      expect(mockSyncQueue.add).not.toHaveBeenCalled();
+    });
+
     it('adds a searched repository as a read-only watch source', async () => {
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r2']);
       mockRepositoryService.create.mockResolvedValue({
         ...makeRepo('r3'),
         _count: { events: 0 },

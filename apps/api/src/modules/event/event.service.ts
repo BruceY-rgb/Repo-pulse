@@ -69,24 +69,31 @@ export class EventService {
     return requestedRepositoryIds.filter((value) => accessibleRepositoryIdSet.has(value));
   }
 
-  async create(data: {
-    repositoryId: string;
-    type: EventType;
-    action: string;
-    title: string;
-    body?: string;
-    author: string;
-    authorAvatar?: string;
-    externalId: string;
-    externalUrl?: string;
-    branch?: string;
-    sourceBranch?: string;
-    targetBranch?: string;
-    branches?: string[];
-    metadata?: Record<string, unknown>;
-    rawPayload?: Record<string, unknown>;
-    occurredAt?: Date;
-  }): Promise<Event> {
+  async create(
+    data: {
+      repositoryId: string;
+      type: EventType;
+      action: string;
+      title: string;
+      body?: string;
+      author: string;
+      authorAvatar?: string;
+      externalId: string;
+      externalUrl?: string;
+      branch?: string;
+      sourceBranch?: string;
+      targetBranch?: string;
+      branches?: string[];
+      metadata?: Record<string, unknown>;
+      rawPayload?: Record<string, unknown>;
+      occurredAt?: Date;
+    },
+    options?: {
+      broadcast?: boolean;
+      notify?: boolean;
+      analyze?: boolean;
+    },
+  ): Promise<Event> {
     const branches = this.resolveBranches(data.branches, [
       data.branch,
       data.sourceBranch,
@@ -118,7 +125,7 @@ export class EventService {
       `event_created eventId=${event.id} repositoryId=${data.repositoryId} type=${data.type}`,
     );
 
-    this.runPostCreateTasks(event).catch((error) => {
+    this.runPostCreateTasks(event, options).catch((error) => {
       const message = error instanceof Error ? error.message : 'unknown_error';
       this.logger.error(
         `event_post_create_failed eventId=${event.id} repositoryId=${data.repositoryId} reason=${message}`,
@@ -143,10 +150,23 @@ export class EventService {
     );
   }
 
-  private async runPostCreateTasks(event: Event): Promise<void> {
-    this.broadcastEvent(event.repositoryId, event);
-    await this.notifyRepositoryUsers(event); // 首次通知，有 riskLevel 规则的用户延迟
-    await this.enqueueAnalysis(event.id);
+  private async runPostCreateTasks(
+    event: Event,
+    options?: {
+      broadcast?: boolean;
+      notify?: boolean;
+      analyze?: boolean;
+    },
+  ): Promise<void> {
+    if (options?.broadcast !== false) {
+      this.broadcastEvent(event.repositoryId, event);
+    }
+    if (options?.notify !== false) {
+      await this.notifyRepositoryUsers(event); // 首次通知，有 riskLevel 规则的用户延迟
+    }
+    if (options?.analyze !== false) {
+      await this.enqueueAnalysis(event.id);
+    }
   }
 
   /**

@@ -111,6 +111,7 @@ import {
   useSearchRepositoryCandidatesQuery,
 } from '@/hooks/queries/use-repository-queries';
 import {
+  workbenchQueryKeys,
   useChatRepositoriesQuery,
   useConversationMessagesQuery,
   useWatchFeedQuery,
@@ -7327,7 +7328,7 @@ export function DesktopWorkbench() {
   };
 
   const watchRepositoriesQuery = useApiQuery({
-    queryKey: ['workbench', 'watch-repositories'],
+    queryKey: workbenchQueryKeys.watchRepositories(),
     queryFn: () => workbenchService.getWatchRepositories(),
     staleTime: 30 * 1000,
   });
@@ -7461,13 +7462,23 @@ export function DesktopWorkbench() {
     () => (monitoredRepositoryIds.length === 0 ? repositoryIds : monitoredRepositoryIds),
     [monitoredRepositoryIds, repositoryIds],
   );
+  const realtimeRepositoryIds = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...effectiveMonitoredRepositoryIds,
+          ...watchRepositories.map((repository) => repository.id),
+        ]),
+      ),
+    [effectiveMonitoredRepositoryIds, watchRepositories],
+  );
   const repositoryBranchScopes = monitoringScope.repositoryBranchScopes ?? {};
   const repositoryBranchScopesKey = useMemo(
     () => JSON.stringify(repositoryBranchScopes),
     [repositoryBranchScopes],
   );
 
-  useRepositoryRealtimeSubscription(effectiveMonitoredRepositoryIds);
+  useRepositoryRealtimeSubscription(realtimeRepositoryIds);
 
   const eventsQuery = useApiQuery({
     queryKey: ['workbench', 'events', effectiveMonitoredRepositoryIds.join(','), repositoryBranchScopesKey],

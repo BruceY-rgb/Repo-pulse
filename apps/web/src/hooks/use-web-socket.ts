@@ -105,6 +105,7 @@ export function invalidateRepositoryRealtimeQueries(
   queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
   queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
   queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.chatRepositories() });
+  queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.watchFeedRoot() });
   queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.conversationMessagesRoot() });
   queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
   queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
@@ -216,6 +217,8 @@ export function createRealtimeHandlers(
       queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.detail(repositoryId) });
       queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
       queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.chatRepositories() });
+      queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.watchRepositories() });
+      queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.watchFeedRoot() });
       toast.success(`同步完成（${(durationMs / 1000).toFixed(1)}s）`);
     },
     [REALTIME_EVENTS.REPOSITORY_SYNC_FAILED]: ({ repositoryId, reason }) => {
@@ -232,12 +235,15 @@ export function createRealtimeHandlers(
       queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
       queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.detail(repositoryId) });
       queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
+      queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.watchRepositories() });
     },
     [REALTIME_EVENTS.REPOSITORY_DELETED]: ({ repositoryId }) => {
       // 仓库删除：刷新仓库列表/详情与概览。
       queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
       queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.detail(repositoryId) });
       queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.all });
+      queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.watchRepositories() });
+      queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.watchFeedRoot() });
     },
   };
 }
@@ -359,17 +365,6 @@ function useSocketIoRealtimeSubscription(
 
   useEffect(() => {
     syncRoomSubscriptions();
-
-    return () => {
-      if (!socketRef.current?.connected) {
-        return;
-      }
-
-      for (const id of subscribedRoomsRef.current) {
-        socketRef.current.emit('leave:repository', { repositoryId: id });
-      }
-      subscribedRoomsRef.current = new Set();
-    };
   }, [syncRoomSubscriptions]);
 }
 
@@ -395,6 +390,14 @@ function useIpcRealtimeSubscription(
 
     return repositoryIds ? [repositoryIds] : [];
   }, [repositoryIds]);
+
+  const leaveAllRooms = useCallback(() => {
+    const bridge = window.repoPulseDesktop?.realtime;
+    for (const id of subscribedRoomsRef.current) {
+      void bridge?.leave({ repositoryId: id });
+    }
+    subscribedRoomsRef.current = new Set();
+  }, []);
 
   useEffect(() => {
     if (!enabled || !currentUser || isAuthLoading) {
@@ -432,6 +435,13 @@ function useIpcRealtimeSubscription(
   }, [enabled, currentUser, isAuthLoading, queryClient]);
 
   useEffect(() => {
+    if (enabled && currentUser && !isAuthLoading) {
+      return;
+    }
+    leaveAllRooms();
+  }, [currentUser, enabled, isAuthLoading, leaveAllRooms]);
+
+  useEffect(() => {
     if (!enabled || !currentUser || isAuthLoading) {
       return;
     }
@@ -462,15 +472,9 @@ function useIpcRealtimeSubscription(
     }
 
     subscribedRoomsRef.current = nextRooms;
-
-    return () => {
-      const current = window.repoPulseDesktop?.realtime;
-      for (const id of subscribedRoomsRef.current) {
-        void current?.leave({ repositoryId: id });
-      }
-      subscribedRoomsRef.current = new Set();
-    };
   }, [enabled, currentUser, isAuthLoading, getTargetRepositoryIds]);
+
+  useEffect(() => leaveAllRooms, [leaveAllRooms]);
 }
 
 /**
