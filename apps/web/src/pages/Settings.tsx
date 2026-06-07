@@ -278,6 +278,9 @@ export function Settings() {
       try {
         const prefs = await notificationService.getPreferences();
         setNotifPrefs(prefs);
+        if (prefs.focusLevel) {
+          setNotificationLevel(prefs.focusLevel);
+        }
       } catch (error) {
         console.error('Failed to load notification preferences:', error);
       } finally {
@@ -437,7 +440,10 @@ export function Settings() {
   const handleSaveNotifications = async () => {
     setNotifSaving(true);
     try {
-      await notificationService.updatePreferences(notifPrefs);
+      await notificationService.updatePreferences({
+        ...notifPrefs,
+        focusLevel: notificationLevel,
+      });
       setNotifSaved(true);
       setTimeout(() => setNotifSaved(false), 3000);
     } catch (error) {

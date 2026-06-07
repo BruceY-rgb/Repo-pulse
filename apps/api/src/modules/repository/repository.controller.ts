@@ -202,4 +202,15 @@ export class RepositoryController {
     const userId = (req.user as { sub: string }).sub;
     return this.repositoryService.testWebhook(userId, id);
   }
+
+  @Post(':id/pulls/:number/merge')
+  @ApiOperation({ summary: 'Merge a pull request on GitHub' })
+  async mergePullRequest(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('number') number: string,
+  ) {
+    const userId = (req.user as { sub: string }).sub;
+    return this.repositoryService.mergePullRequest(userId, id, Number(number));
+  }
 }

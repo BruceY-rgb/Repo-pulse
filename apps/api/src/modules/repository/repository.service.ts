@@ -981,6 +981,54 @@ export class RepositoryService {
   }
 
   /**
+   * 合并 Pull Request
+   * 需要 write 权限（accessMode=EDITABLE）
+   */
+  async mergePullRequest(userId: string, repositoryId: string, pullNumber: number) {
+    const repository = await this.prisma.repository.findUnique({
+      where: { id: repositoryId },
+      include: {
+        users: {
+          include: {
+            user: {
+              select: { id: true, githubAccessToken: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!repository) {
+      throw new NotFoundException('Repository not found');
+    }
+
+    const membership = repository.users.find((entry) => entry.userId === userId);
+    if (!membership) {
+      throw new ForbiddenException('You do not have access to this repository');
+    }
+
+    if (membership.accessMode !== RepositoryAccessMode.EDITABLE) {
+      throw new ForbiddenException('Editable access required to merge pull requests');
+    }
+
+    if (repository.platform !== Platform.GITHUB) {
+      throw new ForbiddenException('PR merge only supported for GitHub repositories');
+    }
+
+    const [owner, repo] = this.parseRepositoryPath(repository.fullName);
+    const callerToken = membership.user.githubAccessToken;
+    const fallbackToken = repository.users.find((entry) => entry.user.githubAccessToken)?.user
+      .githubAccessToken;
+    const accessToken = callerToken ?? fallbackToken;
+
+    if (!accessToken) {
+      throw new ForbiddenException('GitHub account not connected');
+    }
+
+    return this.githubService.mergePullRequest(owner, repo, pullNumber, accessToken);
+  }
+
+  /**
    * 批量重建用户可编辑（accessMode=EDITABLE）的所有 active 仓库 webhook
    * 用于 API_URL 变更后批量同步到 GitHub（复用 retryWebhook 内部的自愈机制）
    */

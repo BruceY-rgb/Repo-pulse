@@ -354,6 +354,28 @@ export class WorkbenchService {
             ? this.buildApprovalActions(pendingApproval.id)
             : [];
         const agentAction = repositoryCanOperate ? [this.buildAgentAction()] : [];
+        const prNumber =
+          (event.type === EventType.PR_OPENED || event.type === EventType.PR_CLOSED) &&
+          event.metadata &&
+          typeof event.metadata === 'object' &&
+          'prNumber' in event.metadata
+            ? (event.metadata as Record<string, unknown>).prNumber
+            : undefined;
+        const mergeAction =
+          (event.type === EventType.PR_OPENED || event.type === EventType.PR_CLOSED) &&
+          repositoryCanOperate &&
+          typeof prNumber === 'number'
+            ? [
+                {
+                  key: 'merge_pr' as const,
+                  label: 'Merge PR',
+                  method: 'POST' as const,
+                  endpoint: `/repositories/${repositoryId}/pulls/${prNumber}/merge`,
+                  requiresConfirmation: true,
+                  requiresPermission: true,
+                },
+              ]
+            : [];
         const messageTime = this.resolveEventMessageTime(event);
         const message = {
           id: event.id,
@@ -371,7 +393,7 @@ export class WorkbenchService {
           sourceBranch: event.sourceBranch || undefined,
           targetBranch: event.targetBranch || undefined,
           branches: event.branches,
-          actions: [...baseActions, ...approvalActions, ...agentAction],
+          actions: [...baseActions, ...approvalActions, ...agentAction, ...mergeAction],
           riskLevel: this.resolveEventRiskLevel(event.analyses),
           isUnread: this.isUnreadMessage(messageTime, lastReadAt),
           hasPendingApprovalAction:

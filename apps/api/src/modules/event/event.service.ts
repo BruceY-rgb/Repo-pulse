@@ -7,6 +7,7 @@ import {
   NotificationChannel,
   FilterAction,
   RepositoryAccessMode,
+  RiskLevel,
 } from '@repo-pulse/database';
 import { PaginationQueryDto } from './dto/event.dto';
 import { EventGateway } from './event.gateway';
@@ -236,6 +237,20 @@ export class EventService {
         }
 
         const preferences = await this.notificationService.getPreferences(userId);
+
+        // 通知焦点级别过滤
+        if (preferences.focusLevel === 'focused' && !this.isHighSignalEvent(event, existingAnalysis)) {
+          this.logger.log(`notification_skipped_focus_level eventId=${event.id} userId=${userId} focusLevel=focused`);
+          continue;
+        }
+        if (
+          preferences.focusLevel === 'important' &&
+          !this.isImportantSignalEvent(event, existingAnalysis)
+        ) {
+          this.logger.log(`notification_skipped_focus_level eventId=${event.id} userId=${userId} focusLevel=important`);
+          continue;
+        }
+
         const channels = this.resolveChannelsForEvent(event, preferences);
 
         await this.sendImRepositoryEventNotification(userId, event, repository?.fullName);
@@ -323,6 +338,34 @@ export class EventService {
     // 由 AIProcessor.notifyApprovalCreated() 单独处理
 
     return preferences.channels;
+  }
+
+  /**
+   * 「仅高信号」模式：只保留高风险事件和 PR 操作
+   */
+  private isHighSignalEvent(
+    event: { type: EventType },
+    analysis?: { riskLevel: string } | null,
+  ): boolean {
+    if (this.isPullRequestEvent(event.type)) return true;
+    const risk = analysis?.riskLevel as string | undefined;
+    return risk === RiskLevel.HIGH || risk === RiskLevel.CRITICAL;
+  }
+
+  /**
+   * 「重要更新」模式：过滤掉低风险/日常 push
+   */
+  private isImportantSignalEvent(
+    event: { type: EventType },
+    analysis?: { riskLevel: string } | null,
+  ): boolean {
+    if (this.isPullRequestEvent(event.type)) return true;
+    const risk = analysis?.riskLevel as string | undefined;
+    if (risk === RiskLevel.HIGH || risk === RiskLevel.CRITICAL) return true;
+    if (risk === RiskLevel.MEDIUM) return true;
+    // 无分析结果时不拦截（分析可能尚未完成）
+    if (!risk) return true;
+    return false;
   }
 
   private async enqueueAnalysis(eventId: string): Promise<void> {

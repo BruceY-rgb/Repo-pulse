@@ -11,6 +11,7 @@ export interface NotificationPreferences {
     analysisComplete: boolean;
     weeklyReport: boolean;
   };
+  focusLevel?: 'all' | 'important' | 'focused';
   webhookUrl?: string | null;
   wecomWebhookUrl?: string | null;
   wechatWebhookUrl?: string | null;

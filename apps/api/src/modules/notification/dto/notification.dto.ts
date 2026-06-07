@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsNotEmpty,
   IsObject,
   IsOptional,
@@ -64,6 +65,11 @@ export class UpdateNotificationPreferencesDto {
     require_protocol: true,
   })
   wechatWebhookUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['all', 'important', 'focused'])
+  focusLevel?: 'all' | 'important' | 'focused';
 
   @IsOptional()
   @IsString()

@@ -23,6 +23,7 @@ export interface NotificationPreferences {
     analysisComplete: boolean;
     weeklyReport: boolean;
   };
+  focusLevel: 'all' | 'important' | 'focused';
   webhookUrl: string | null;
   wecomWebhookUrl: string | null;
   wechatWebhookUrl: string | null;
@@ -37,6 +38,7 @@ const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
     analysisComplete: true,
     weeklyReport: false,
   },
+  focusLevel: 'important',
   webhookUrl: null,
   wecomWebhookUrl: null,
   wechatWebhookUrl: null,
@@ -166,6 +168,10 @@ export class NotificationService {
         typeof prefs.notificationWechatWebhookUrl === 'string'
           ? (prefs.notificationWechatWebhookUrl as string)
           : null,
+      focusLevel:
+        typeof prefs.notificationFocusLevel === 'string'
+          ? (prefs.notificationFocusLevel as NotificationPreferences['focusLevel'])
+          : DEFAULT_NOTIFICATION_PREFERENCES.focusLevel,
       email:
         typeof prefs.notificationEmail === 'string'
           ? (prefs.notificationEmail as string)
@@ -208,6 +214,10 @@ export class NotificationService {
 
     if (prefs.email !== undefined) {
       updatedPrefs.notificationEmail = prefs.email;
+    }
+
+    if (prefs.focusLevel !== undefined) {
+      updatedPrefs.notificationFocusLevel = prefs.focusLevel;
     }
 
     await prisma.user.update({
