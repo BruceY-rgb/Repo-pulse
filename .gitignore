@@ -12,6 +12,10 @@ release/
 .next/
 out/
 .turbo/
+!apps/electron/build/
+!apps/electron/build/icon.icns
+!apps/electron/build/icon.ico
+!apps/electron/build/icon.png
 
 # Environment
 .env

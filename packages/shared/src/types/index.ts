@@ -363,6 +363,7 @@ export interface UpdateFilterRulePayload {
 
 export interface TestFilterPayload {
   conditions: FilterCondition[];
+  action?: FilterActionValue;
   event: {
     type: string;
     repository: string;

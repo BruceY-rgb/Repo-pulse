@@ -79,12 +79,13 @@ describe('FilterService — 补充分支覆盖', () => {
       expect(result.action).toBeNull();
     });
 
-    it('无效正则不抛错，返回 matched=false', () => {
-      const result = service.testRule({
-        conditions: [{ field: 'customRegex', operator: 'regex', value: '[invalid' }],
-        event: baseEvent,
-      });
-      expect(result.matched).toBe(false);
+    it('无效正则返回 BadRequestException', () => {
+      expect(() =>
+        service.testRule({
+          conditions: [{ field: 'customRegex', operator: 'regex', value: '[invalid' }],
+          event: baseEvent,
+        }),
+      ).toThrow('conditions[0].value must be a valid regex');
     });
 
     it('正则匹配大小写不敏感（flag i）', () => {
@@ -117,23 +118,25 @@ describe('FilterService — 补充分支覆盖', () => {
 
   // ── testRule — 未知算子 ────────────────────────────────────────────────────
   describe('testRule – 未知算子', () => {
-    it('未知 operator 返回 matched=false（安全降级）', () => {
-      const result = service.testRule({
-        conditions: [{ field: 'author', operator: 'startsWith' as any, value: 'al' }],
-        event: baseEvent,
-      });
-      expect(result.matched).toBe(false);
+    it('未知 operator 返回 BadRequestException', () => {
+      expect(() =>
+        service.testRule({
+          conditions: [{ field: 'author', operator: 'startsWith' as any, value: 'al' }],
+          event: baseEvent,
+        }),
+      ).toThrow('conditions[0].operator must be one of');
     });
   });
 
   // ── testRule — 字段不存在 ──────────────────────────────────────────────────
   describe('testRule – 事件字段不存在', () => {
-    it('字段不存在于事件时返回 matched=false', () => {
-      const result = service.testRule({
-        conditions: [{ field: 'nonExistentField' as any, operator: 'eq', value: 'anything' }],
-        event: baseEvent,
-      });
-      expect(result.matched).toBe(false);
+    it('未知字段返回 BadRequestException', () => {
+      expect(() =>
+        service.testRule({
+          conditions: [{ field: 'nonExistentField' as any, operator: 'eq', value: 'anything' }],
+          event: baseEvent,
+        }),
+      ).toThrow('conditions[0].field must be one of');
     });
   });
 

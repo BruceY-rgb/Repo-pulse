@@ -1287,7 +1287,7 @@ function PrimaryRail({
               )}
               aria-label="Repo-Pulse"
             >
-              <img src="/avator.png" alt="Repo-Pulse" className="h-10 w-10 shrink-0 rounded-xl" />
+              <img src="/desktop-logo.png" alt="Repo-Pulse" className="h-10 w-10 shrink-0 rounded-full" />
               {!collapsed ? (
                 <div className="min-w-0 space-y-0.5">
                   <p className="truncate text-[15px] font-semibold tracking-tight text-foreground">Repo-Pulse</p>

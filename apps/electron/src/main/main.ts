@@ -39,6 +39,15 @@ function getPackagedWebEntry() {
   return path.join(process.resourcesPath, 'web/dist/index.html');
 }
 
+function getAppIconPath(): string | null {
+  const iconFile = process.platform === 'win32' && isDev ? 'icon.ico' : 'icon.png';
+  const iconPath = isDev
+    ? path.join(app.getAppPath(), 'build', iconFile)
+    : path.join(process.resourcesPath, 'icon.png');
+
+  return fs.existsSync(iconPath) ? iconPath : null;
+}
+
 /**
  * 在系统常见位置 + PATH 上查找 cloudflared（兜底用）。
  * 注意：GUI 启动的 Electron PATH 通常很「瘦」（不含 /opt/homebrew/bin、/usr/local/bin），
@@ -285,6 +294,8 @@ function isTrustedAppUrl(url: string) {
 }
 
 function createMainWindow() {
+  const appIconPath = getAppIconPath();
+
   mainWindow = new BrowserWindow({
     title: 'Repo Pulse',
     width: 1440,
@@ -295,6 +306,7 @@ function createMainWindow() {
     backgroundColor: '#0d1117',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 18, y: 16 } } : {}),
+    ...(appIconPath ? { icon: appIconPath } : {}),
     webPreferences: {
       preload: getPreloadPath(),
       contextIsolation: true,
@@ -482,6 +494,11 @@ function registerIpcHandlers() {
 }
 
 app.whenReady().then(() => {
+  const appIconPath = getAppIconPath();
+  if (process.platform === 'darwin' && appIconPath) {
+    app.dock?.setIcon(appIconPath);
+  }
+
   registerIpcHandlers();
   createMainWindow();
 

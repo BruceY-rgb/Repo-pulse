@@ -55,6 +55,31 @@ describe('FilterService', () => {
     service = new FilterService();
   });
 
+  describe('testRule – payload validation and action preview', () => {
+    it('returns the provided action when the rule matches', () => {
+      const result = service.testRule({
+        conditions: [{ field: 'author', operator: 'eq', value: 'alice' }],
+        action: FilterAction.EXCLUDE,
+        event: baseEvent,
+      });
+
+      expect(result).toEqual({ matched: true, action: FilterAction.EXCLUDE });
+    });
+
+    it('throws BadRequestException for an empty payload instead of TypeError', () => {
+      expect(() => service.testRule({} as any)).toThrow('conditions must be an array');
+    });
+
+    it('throws BadRequestException when operator=in uses a non-array value', () => {
+      expect(() =>
+        service.testRule({
+          conditions: [{ field: 'author', operator: 'in', value: 'alice' as any }],
+          event: baseEvent,
+        }),
+      ).toThrow('conditions[0].value must be a string array for operator "in"');
+    });
+  });
+
   // ── testRule — eq ──────────────────────────────────────────────────────────
   describe('testRule – eq operator', () => {
     it('matches when field equals value', () => {
@@ -113,12 +138,13 @@ describe('FilterService', () => {
       expect(result.matched).toBe(false);
     });
 
-    it('returns false for invalid regex instead of throwing', () => {
-      const result = service.testRule({
-        conditions: [{ field: 'author', operator: 'regex', value: '[invalid(' }],
-        event: baseEvent,
-      });
-      expect(result.matched).toBe(false);
+    it('throws BadRequestException for invalid regex', () => {
+      expect(() =>
+        service.testRule({
+          conditions: [{ field: 'author', operator: 'regex', value: '[invalid(' }],
+          event: baseEvent,
+        }),
+      ).toThrow('conditions[0].value must be a valid regex');
     });
   });
 
@@ -167,12 +193,13 @@ describe('FilterService', () => {
       expect(r.matched).toBe(true);
     });
 
-    it('returns false for unknown field', () => {
-      const r = service.testRule({
-        conditions: [{ field: 'unknown' as any, operator: 'eq', value: 'x' }],
-        event: baseEvent,
-      });
-      expect(r.matched).toBe(false);
+    it('throws BadRequestException for unknown field', () => {
+      expect(() =>
+        service.testRule({
+          conditions: [{ field: 'unknown' as any, operator: 'eq', value: 'x' }],
+          event: baseEvent,
+        }),
+      ).toThrow('conditions[0].field must be one of');
     });
   });
 
@@ -233,6 +260,24 @@ describe('FilterService', () => {
       mockFindMany.mockResolvedValue([rule]);
       const result = await service.applyRules('u1', baseEvent);
       expect(result.action).toBe(FilterAction.INCLUDE);
+    });
+
+    it('skips malformed stored rules and continues matching later rules', async () => {
+      const malformedRule = makeRule({
+        id: 'bad',
+        conditions: [{ field: 'author', operator: 'regex', value: '[invalid(' }],
+      });
+      const validRule = makeRule({
+        id: 'valid',
+        action: FilterAction.EXCLUDE,
+        conditions: [{ field: 'author', operator: 'eq', value: 'alice' }],
+      });
+      mockFindMany.mockResolvedValue([malformedRule, validRule]);
+
+      const result = await service.applyRules('u1', baseEvent);
+
+      expect(result.action).toBe(FilterAction.EXCLUDE);
+      expect(result.matchedRule?.id).toBe('valid');
     });
 
     it('applies highest-priority rule first (first in sorted list wins)', async () => {

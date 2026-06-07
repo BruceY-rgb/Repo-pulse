@@ -33,7 +33,7 @@ export function Header({ onMenuClick, onSearchClick }: HeaderProps) {
           
           {/* Logo */}
           <a href="/" className="flex items-center gap-2">
-            <img src="/avator.png" alt="Repo-Pulse" className="h-8" />
+            <img src="/desktop-logo.png" alt="Repo-Pulse" className="h-8 w-8 rounded-full" />
             <span className="font-semibold text-lg text-white">Repo-Pulse</span>
           </a>
         </div>

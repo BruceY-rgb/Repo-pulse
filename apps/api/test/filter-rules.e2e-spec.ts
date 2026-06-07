@@ -163,11 +163,13 @@ describe('FilterModule (e2e)', () => {
         .set('Cookie', authCookie)
         .send({
           conditions: [{ field: 'author', operator: 'eq', value: 'alice' }],
+          action: 'EXCLUDE',
           event: { type: 'PUSH', author: 'alice', riskLevel: 'LOW', body: 'fix typo', repository: 'org/repo' },
         })
         .expect(201);
 
       expect(res.body.data.matched).toBe(true);
+      expect(res.body.data.action).toBe('EXCLUDE');
     });
 
     it('条件不匹配时应返回 matched=false', async () => {
@@ -182,6 +184,25 @@ describe('FilterModule (e2e)', () => {
 
       expect(res.body.data.matched).toBe(false);
       expect(res.body.data.action).toBeNull();
+    });
+
+    it('空请求体应返回 400，而不是 500', () => {
+      return request(app.getHttpServer())
+        .post('/filters/test')
+        .set('Cookie', authCookie)
+        .send({})
+        .expect(400);
+    });
+
+    it('operator=in 但 value 不是数组时应返回 400', () => {
+      return request(app.getHttpServer())
+        .post('/filters/test')
+        .set('Cookie', authCookie)
+        .send({
+          conditions: [{ field: 'author', operator: 'in', value: 'alice' }],
+          event: { type: 'PUSH', author: 'alice', repository: 'org/repo' },
+        })
+        .expect(400);
     });
   });
 

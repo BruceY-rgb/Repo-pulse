@@ -166,7 +166,7 @@ export function Landing() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-[var(--github-bg)]/80 backdrop-blur-md border-b border-[var(--github-border)]">
         <div className="w-full px-6 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-3">
-            <img src="/avator.png" alt="Repo-Pulse" className="h-9" />
+            <img src="/desktop-logo.png" alt="Repo-Pulse" className="h-9 w-9 rounded-full" />
             <span className="font-bold text-xl text-white">Repo-Pulse</span>
           </Link>
           <div className="flex items-center gap-6">

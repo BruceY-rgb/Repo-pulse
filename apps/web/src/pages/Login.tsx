@@ -161,7 +161,7 @@ export function Login() {
       <Card className="w-full max-w-md rounded-xl border-border bg-card">
         <CardHeader className="space-y-4 text-center">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
-            <img src="/avator.png" alt={t('auth.login.logoAlt')} className="h-9 w-9 rounded-full" />
+            <img src="/desktop-logo.png" alt={t('auth.login.logoAlt')} className="h-9 w-9 rounded-full" />
           </div>
           <div className="space-y-2">
             <CardTitle className="text-2xl font-bold tracking-tight text-foreground">
