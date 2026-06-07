@@ -2199,7 +2199,6 @@ function WorkbenchHeader({
   const reportsHref = (activeView === 'repository' && repository) || ((activeView === 'dashboard' || activeView === 'reports') && repositoryIdParam && repository)
     ? `/workbench/reports?repositoryId=${encodeURIComponent(repository.id)}`
     : '/workbench/reports';
-
   const isReadOnly = hasRepositoryContext && repositoryCanOperate === false;
 
   return (

@@ -14,7 +14,7 @@ function LegacyWorkbenchRedirect({ to }: { to: string }) {
 
 function App() {
   const isDesktop = isDesktopRuntime();
-  const Router = isDesktop && window.location.protocol === 'file:' ? HashRouter : BrowserRouter;
+  const Router = isDesktop ? HashRouter : BrowserRouter;
   const defaultRoute = isDesktop ? '/workbench' : '/landing';
 
   return (
