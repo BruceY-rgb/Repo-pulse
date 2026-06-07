@@ -21,10 +21,19 @@ out/
 # Logs
 logs/
 *.log
+*.err.log
+*.out.log
 npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Local dev caches
+.vite/
+**/.vite/
+**/.turbo/
+*.tmp
+*.bak
 
 # IDE
 .vscode/

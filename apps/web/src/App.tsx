@@ -4,6 +4,7 @@ import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { Landing } from '@/pages/Landing';
 import { Login } from '@/pages/Login';
 import { AuthCallback } from '@/pages/AuthCallback';
+import { ApiList } from '@/pages/ApiList';
 import { DesktopWorkbench } from '@/pages/DesktopWorkbench';
 import { isDesktopRuntime } from '@/lib/desktop';
 
@@ -14,7 +15,7 @@ function LegacyWorkbenchRedirect({ to }: { to: string }) {
 
 function App() {
   const isDesktop = isDesktopRuntime();
-  const Router = isDesktop && window.location.protocol === 'file:' ? HashRouter : BrowserRouter;
+  const Router = isDesktop ? HashRouter : BrowserRouter;
   const defaultRoute = isDesktop ? '/workbench' : '/landing';
 
   return (
@@ -26,6 +27,9 @@ function App() {
           <Route path="/landing" element={isDesktop ? <Navigate to="/workbench" replace /> : <Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route element={<ProtectedRoute />}>
+            <Route path="/api-list" element={<ApiList />} />
+          </Route>
 
           <Route element={<ProtectedRoute />}>
             <Route path="/workbench" element={<DesktopWorkbench />} />
