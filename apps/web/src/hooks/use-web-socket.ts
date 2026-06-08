@@ -106,7 +106,24 @@ export function invalidateRepositoryRealtimeQueries(
   queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
   queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.chatRepositories() });
   queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.watchFeedRoot() });
-  queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.conversationMessagesRoot() });
+
+  // 不再整体失效会话消息缓存（避免每次 Socket 事件触发 full load 50 条整包下载），
+  // 改为按仓库定向刷新：仅刷新当前活跃会话的查询，实现增量更新。
+  if (repositoryId) {
+    queryClient.refetchQueries({
+      predicate: (query) => {
+        const key = query.queryKey;
+        return (
+          Array.isArray(key) &&
+          key[0] === 'workbench' &&
+          key[1] === 'conversation-messages' &&
+          key[2] === repositoryId
+        );
+      },
+      type: 'active',
+    });
+  }
+
   queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
   queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
   queryClient.invalidateQueries({ queryKey: notificationQueryKeys.preferences() });

@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -245,6 +246,8 @@ const messageFilters: Array<{ key: MessageFilterKey; label: string }> = [
 ];
 
 const CONVERSATION_MESSAGE_PAGE_SIZE = 50;
+/** 前端会话消息最大内存容量：超出后清除最旧消息，向上滚动时触发冷加载 */
+const MAX_CONVERSATION_MESSAGES = 100;
 const WATCH_FEED_PAGE_SIZE = 20;
 
 function isRepositoryMonitoredInScope(monitoredRepositoryIds: string[], repositoryId?: string) {
@@ -3605,6 +3608,10 @@ function RepositoryConversation({
     return localStorage.getItem('repo-pulse:repo-git-tree-open') === 'true';
   });
   const unreadBoundaryRef = useRef<HTMLDivElement | null>(null);
+  /** 冷加载哨兵元素：置于消息列表底部（旧消息区域），可见时自动触发加载更早消息 */
+  const coldLoadSentinelRef = useRef<HTMLDivElement | null>(null);
+  /** 防重复触发冷加载：上一次触发后等 loading 结束才允许再次触发 */
+  const coldLoadGuardRef = useRef(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const focusMessageId = searchParams.get('messageId');
@@ -3740,6 +3747,36 @@ function RepositoryConversation({
     return () => window.cancelAnimationFrame(frame);
   }, [hasUnreadBoundary, isUnreadBoundaryVisible, pendingUnreadJump]);
 
+  // 冷加载哨兵：当用户滚动到消息列表底部（旧消息区域）时，自动触发加载更早消息
+  useEffect(() => {
+    const sentinel = coldLoadSentinelRef.current;
+    if (!sentinel || !hasOlderMessages || !onLoadOlderMessages) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry?.isIntersecting && !loadingOlderMessages && !coldLoadGuardRef.current) {
+          coldLoadGuardRef.current = true;
+          onLoadOlderMessages();
+        }
+      },
+      { rootMargin: '200px' },
+    );
+
+    observer.observe(sentinel);
+
+    return () => observer.disconnect();
+  }, [hasOlderMessages, loadingOlderMessages, onLoadOlderMessages]);
+
+  // 冷加载结束后重置 guard
+  useEffect(() => {
+    if (!loadingOlderMessages) {
+      coldLoadGuardRef.current = false;
+    }
+  }, [loadingOlderMessages]);
+
   useEffect(() => {
     if (!contextMenu) {
       return;
@@ -3820,7 +3857,7 @@ function RepositoryConversation({
           />
           {filteredMessages.length > 0 ? (
             <>
-              {filteredMessages.map((message) => {
+              {filteredMessages.slice(0, MAX_CONVERSATION_MESSAGES).map((message) => {
                 const shouldRenderUnreadBoundary =
                   hasUnreadBoundary && unreadBoundary?.messageId === message.id;
 
@@ -3863,25 +3900,39 @@ function RepositoryConversation({
                   </div>
                 );
               })}
+              {/* 冷加载哨兵：置于消息列表底部，滚动可见时自动触发加载更早消息 */}
               {hasOlderMessages ? (
-                <div className="flex justify-center">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-8 gap-2 rounded-full"
-                    disabled={loadingOlderMessages}
-                    onClick={onLoadOlderMessages}
-                  >
-                    {loadingOlderMessages ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <ChevronDown className="h-4 w-4" />
-                    )}
-                    加载更早消息
-                  </Button>
-                </div>
+                <>
+                  <div
+                    ref={coldLoadSentinelRef}
+                    className="h-px w-full"
+                    aria-hidden
+                  />
+                  <div className="flex justify-center">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 gap-2 rounded-full"
+                      disabled={loadingOlderMessages}
+                      onClick={onLoadOlderMessages}
+                    >
+                      {loadingOlderMessages ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4" />
+                      )}
+                      加载更早消息
+                    </Button>
+                  </div>
+                </>
               ) : null}
+              {/* 消息容量提示：当前消息数超出最大容量时显示 */}
+              {filteredMessages.length > MAX_CONVERSATION_MESSAGES && (
+                <p className="text-center text-[11px] text-muted-foreground">
+                  已显示最近 {MAX_CONVERSATION_MESSAGES} 条消息，向上滚动加载更多
+                </p>
+              )}
             </>
           ) : (
             <div className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 px-6 text-center">
@@ -5612,6 +5663,92 @@ function AgentPermissionRequestCard({
   );
 }
 
+/**
+ * 独立的 Agent 输入框子组件。
+ *
+ * 将 chatInput 状态内聚在此组件中，避免每次 keystroke 触发父组件 AgentRunView
+ *（包含命令行、日志、文件树、Git 可视化等大量 DOM）的全量 re-render，
+ * 从根本上消除打字延迟。
+ */
+function AgentChatInputField({
+  onSend,
+  onStop,
+  isRunning,
+  hasApiKey,
+  hasSessionPrompt,
+}: {
+  onSend: (prompt: string) => void;
+  onStop: () => void;
+  isRunning: boolean;
+  hasApiKey: boolean;
+  hasSessionPrompt: boolean;
+}) {
+  const [input, setInput] = useState('');
+
+  const handleSend = useCallback(() => {
+    const trimmed = input.trim();
+    if (!trimmed && !hasSessionPrompt) return;
+    if (!hasApiKey) return;
+    setInput('');
+    onSend(trimmed);
+  }, [input, hasSessionPrompt, hasApiKey, onSend]);
+
+  return (
+    <div className="border-t border-border bg-background px-6 py-4">
+      <div className="mx-auto flex max-w-4xl flex-col gap-2">
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-2 shadow-sm focus-within:ring-1 focus-within:ring-primary focus-within:border-primary">
+          <Input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            className="border-0 bg-transparent focus-visible:ring-0 text-sm flex-1"
+            placeholder={
+              !hasApiKey
+                ? '未检测到 API 密钥，请先前往"设置"配置 AI 渠道'
+                : '向 Agent 补充说明或要求，回车发送...'
+            }
+            disabled={!hasApiKey}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+          />
+          <div className="flex items-center gap-2 shrink-0">
+            {isRunning ? (
+              <Button
+                onClick={onStop}
+                variant="destructive"
+                size="sm"
+                className="h-8 gap-1.5 font-semibold text-xs rounded-lg"
+              >
+                <X className="h-3.5 w-3.5" />
+                停止
+              </Button>
+            ) : (
+              <Button
+                onClick={handleSend}
+                disabled={(!input.trim() && !hasSessionPrompt) || !hasApiKey}
+                size="sm"
+                className="h-8 gap-1.5 font-semibold text-xs rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground"
+              >
+                <Play className="h-3.5 w-3.5" />
+                {hasSessionPrompt && !input.trim() ? '重试' : '运行'}
+              </Button>
+            )}
+          </div>
+        </div>
+        {!hasApiKey && (
+          <p className="text-[11px] text-amber-500 flex items-center gap-1.5 px-1 animate-pulse">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            未在系统设置中配置有效的 Anthropic AI 渠道，Agent 无法使用。请在页面顶部的"设置"中进行配置。
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AgentRunView({
   repository: initialRepository,
   prompt: initialPrompt,
@@ -5656,7 +5793,6 @@ function AgentRunView({
   const [sidebarRenameTitle, setSidebarRenameTitle] = useState('');
 
   const [isAddProjectOpen, setIsAddProjectOpen] = useState(false);
-  const [chatInput, setChatInput] = useState('');
   const [isGitTreeOpen, setIsGitTreeOpen] = useState(() => {
     return localStorage.getItem('repo-pulse:agent-git-tree-open') !== 'false';
   });
@@ -6522,14 +6658,12 @@ function AgentRunView({
       console.warn('[AgentRunView] handleSendChat: activeSession or activeRepoId is missing.');
       return;
     }
-    const userPrompt = (overridePrompt ?? chatInput).trim();
+    const userPrompt = overridePrompt?.trim() ?? '';
     const nextPrompt = userPrompt || activeSession.prompt;
     if (!nextPrompt) {
       console.warn('[AgentRunView] handleSendChat: prompt is empty.');
       return;
     }
-
-    setChatInput('');
     
     console.log('[AgentRunView] handleSendChat: updating session details (prompt and title).');
     let freshActiveSession = { ...activeSession };
@@ -7092,60 +7226,16 @@ function AgentRunView({
 
         {/* Chat Input Area */}
         {activeSession && activeRepository && (
-          <div className="border-t border-border bg-background px-6 py-4">
-            <div className="mx-auto flex max-w-4xl flex-col gap-2">
-              <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-2 shadow-sm focus-within:ring-1 focus-within:ring-primary focus-within:border-primary">
-                <Input
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  className="border-0 bg-transparent focus-visible:ring-0 text-sm flex-1"
-                  placeholder={
-                    !activeApiKey 
-                      ? "未检测到 API 密钥，请先前往“设置”配置 AI 渠道" 
-                      : "向 Agent 补充说明或要求，回车发送..."
-                  }
-                  disabled={!activeApiKey}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      if (chatInput.trim() && activeApiKey) {
-                        handleSendChat();
-                      }
-                    }
-                  }}
-                />
-                <div className="flex items-center gap-2 shrink-0">
-                  {activeSession.status === 'running' || activeSession.status === 'waiting_permission' ? (
-                    <Button
-                      onClick={() => stopSessionOnSession(activeSession)}
-                      variant="destructive"
-                      size="sm"
-                      className="h-8 gap-1.5 font-semibold text-xs rounded-lg"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                      停止
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={() => handleSendChat()}
-                      disabled={(!chatInput.trim() && !activeSession.prompt) || !activeApiKey}
-                      size="sm"
-                      className="h-8 gap-1.5 font-semibold text-xs rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground"
-                    >
-                      <Play className="h-3.5 w-3.5" />
-                      {activeSession.prompt && !chatInput.trim() ? '重试' : '运行'}
-                    </Button>
-                  )}
-                </div>
-              </div>
-              {!activeApiKey && (
-                <p className="text-[11px] text-amber-500 flex items-center gap-1.5 px-1 animate-pulse">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  未在系统设置中配置有效的 Anthropic AI 渠道，Agent 无法使用。请在页面顶部的“设置”中进行配置。
-                </p>
-              )}
-            </div>
-          </div>
+          <AgentChatInputField
+            onSend={(prompt) => handleSendChat(prompt)}
+            onStop={() => stopSessionOnSession(activeSession)}
+            isRunning={
+              activeSession.status === 'running' ||
+              activeSession.status === 'waiting_permission'
+            }
+            hasApiKey={Boolean(activeApiKey)}
+            hasSessionPrompt={Boolean(activeSession.prompt)}
+          />
         )}
       </div>
 
@@ -7174,7 +7264,7 @@ function AgentRunView({
             localCwd={getAgentWorkspaceMemory(activeRepository.id)?.cwd}
             refreshTrigger={gitRefreshTrigger}
             onAskAgent={(prompt) => {
-              setChatInput(prompt);
+              handleSendChat(prompt);
             }}
           />
         </div>
@@ -7777,12 +7867,13 @@ export function DesktopWorkbench() {
           seenMessageIds.add(msg.id);
           return true;
         })
+        .slice(0, MAX_CONVERSATION_MESSAGES)
         .map((msg) =>
         workbenchMessageToConversationMessage(msg, conversationMessagesQuery.data.conversation),
       );
     }
     // 降级：使用前端拼接的消息
-    return getRepoMessages(selectedRepository.id, allMessages);
+    return getRepoMessages(selectedRepository.id, allMessages).slice(0, MAX_CONVERSATION_MESSAGES);
   }, [conversationMessagesQuery.data, olderConversationMessages, selectedRepository, allMessages]);
 
   const handleLoadOlderConversationMessages = async () => {
@@ -7796,7 +7887,13 @@ export function DesktopWorkbench() {
         cursor: conversationNextCursor,
         take: CONVERSATION_MESSAGE_PAGE_SIZE,
       });
-      setOlderConversationMessages((current) => [...current, ...nextPage.messages]);
+      setOlderConversationMessages((current) => {
+        const merged = [...current, ...nextPage.messages];
+        // 防止旧消息无限增长：超出最大容量时移除最旧的部分
+        return merged.length > MAX_CONVERSATION_MESSAGES
+          ? merged.slice(merged.length - MAX_CONVERSATION_MESSAGES)
+          : merged;
+      });
       setConversationNextCursor(nextPage.pagination?.nextCursor ?? null);
     } catch (error) {
       console.error(error);
