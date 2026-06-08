@@ -5,9 +5,10 @@
 
 ---
 
-## [Unreleased] — dev-electron
+## [0.0.0] — 2026-06-08 — Desktop Workbench Release
 
 ### Added
+- Electron 桌面端第一版 release：Workbench 会话、Watch Feed、Agent 会话、实时 IPC、本地 Git watcher、自动隧道和 webhook 自动重建
 - 系统测试补充：性能测试（api-benchmark）、稳定性测试（fault-tolerance、concurrency）
 - 新增 E2E 测试：`dashboard.e2e-spec.ts`、`filter-rules.e2e-spec.ts`
 - 新增单元测试：`repository-access.spec.ts`、`filter.service.extra.spec.ts`
