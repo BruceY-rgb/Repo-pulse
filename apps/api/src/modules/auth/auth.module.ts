@@ -9,6 +9,7 @@ import { GithubStrategy } from './strategies/github.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { GithubAuthGuard } from './guards/github-auth.guard';
+import { EmailVerificationService } from './email-verification.service';
 import { UserModule } from '../user/user.module';
 import { SyncModule } from '../sync/sync.module';
 
@@ -31,12 +32,13 @@ import { SyncModule } from '../sync/sync.module';
   controllers: [AuthController],
   providers: [
     AuthService,
+    EmailVerificationService,
     JwtStrategy,
     GithubStrategy,
     GithubAuthGuard,
     JwtAuthGuard,
     RolesGuard,
   ],
-  exports: [AuthService, JwtAuthGuard, RolesGuard],
+  exports: [AuthService, EmailVerificationService, JwtAuthGuard, RolesGuard],
 })
 export class AuthModule {}

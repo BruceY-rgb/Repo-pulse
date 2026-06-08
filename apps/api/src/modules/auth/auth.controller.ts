@@ -15,12 +15,13 @@ import { ApiTags, ApiOperation, ApiBearerAuth, ApiCookieAuth } from '@nestjs/swa
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
+import { BootstrapDto } from './dto/bootstrap.dto';
+import { SendVerificationCodeDto } from './dto/verification-code.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GithubAuthGuard } from './guards/github-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { UserService } from '../user/user.service';
-import { GithubStrategy } from './strategies/github.strategy';
 import { ConfigService } from '@nestjs/config';
 
 // Cookie 配置常量
@@ -42,9 +43,34 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly userService: UserService,
-    private readonly githubStrategy: GithubStrategy,
     private readonly configService: ConfigService,
   ) { }
+
+  @Get('bootstrap-status')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '获取首个管理员初始化状态' })
+  async bootstrapStatus() {
+    return this.authService.getBootstrapStatus();
+  }
+
+  @Post('verification-codes')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '发送邮箱验证码' })
+  async sendVerificationCode(@Body() dto: SendVerificationCodeDto) {
+    return this.authService.sendVerificationCode(dto.email, dto.purpose);
+  }
+
+  @Post('bootstrap')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '创建首个管理员账号' })
+  async bootstrap(@Body() dto: BootstrapDto, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.bootstrapFirstAdmin(dto);
+    this.setTokenCookies(res, result.accessToken, result.refreshToken);
+    return { userId: result.userId, email: result.email, name: result.name };
+  }
 
   /**
    * 邮箱密码登录 — Token 写入 HttpOnly Cookie
@@ -54,7 +80,11 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '邮箱密码登录' })
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
-    const user = await this.authService.validateUser(dto.email, dto.password);
+    const user = await this.authService.validateUserWithVerification(
+      dto.email,
+      dto.password,
+      dto.verificationCode,
+    );
     const tokens = await this.authService.generateTokens({
       sub: user.id,
       email: user.email,
@@ -65,16 +95,6 @@ export class AuthController {
 
     // 返回用户基本信息（不含 Token，Token 已在 Cookie 中）
     return { userId: user.id, email: user.email, name: user.name };
-  }
-
-  @Post('desktop/github')
-  @Public()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '桌面端使用环境变量 GITHUB_TOKEN 登录' })
-  async desktopGithubLogin(@Res({ passthrough: true }) res: Response) {
-    const tokens = await this.authService.handleGithubEnvTokenAuth();
-    this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
-    return { message: 'Desktop GitHub login successful' };
   }
 
   /**
@@ -120,41 +140,6 @@ export class AuthController {
     // Passport 会自动重定向到 GitHub，无需实现
   }
 
-  /**
-   * 获取当前运行时 OAuth 配置（仅暴露安全的公共信息）
-   */
-  @Get('github/config')
-  @Public()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '获取 GitHub OAuth 运行时配置' })
-  getGithubOAuthRuntimeConfig() {
-    return {
-      callbackUrl: this.configService.get<string>('GITHUB_CALLBACK_URL') || '',
-    };
-  }
-
-  /**
-   * 运行时配置 GitHub OAuth 客户端参数（仅内存生效，重启后失效）
-   */
-  @Post('github/config')
-  @Public()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '配置 GitHub OAuth 客户端参数（运行时）' })
-  configureGithubOAuth(
-    @Body() body: { clientId?: string; clientSecret?: string },
-  ) {
-    const clientId = body.clientId?.trim();
-    const clientSecret = body.clientSecret?.trim();
-
-    if (!clientId || !clientSecret) {
-      throw new UnauthorizedException('GitHub Client ID / Client Secret 不能为空');
-    }
-
-    this.githubStrategy.updateCredentials(clientId, clientSecret);
-    this.logger.log(`github_oauth_config_updated clientIdSuffix=${clientId.slice(-6)}`);
-
-    return { message: 'GitHub OAuth 配置已更新（重启后需重新配置）' };
-  }
 
   /**
    * GitHub OAuth 回调 — 将 Token 写入 Cookie 后重定向到前端

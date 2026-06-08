@@ -3517,14 +3517,8 @@ function RepositoryWebhookSection({
             variant="default"
             className="gap-1.5"
             onClick={() => {
-              const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-              const authUrl = authService.getGithubAuthUrl(returnPath);
-              if (isDesktopRuntime()) {
-                void window.repoPulseDesktop?.openExternal(authUrl);
-                toast.info('已在浏览器打开 GitHub 授权页，授权完成后请回应用点 "重新创建"');
-              } else {
-                window.location.href = authUrl;
-              }
+              window.location.href = isDesktopRuntime() ? '#/workbench/settings' : '/workbench/settings';
+              toast.info('请在设置的集成页更新 GitHub token 后再重新创建 webhook');
             }}
           >
             <ShieldAlert className="h-3.5 w-3.5" />
@@ -6437,11 +6431,7 @@ function AgentRunView({
       });
     });
 
-    const token = currentUser?.githubAccessToken;
     let gitUrl = repo.url;
-    if (token && gitUrl.startsWith('https://')) {
-      gitUrl = gitUrl.replace('https://', `https://${token}@`);
-    }
 
     try {
       console.log('[AgentRunView] startSessionOnSession: invoking agent.startSession via desktop IPC.');

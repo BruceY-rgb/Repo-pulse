@@ -7,9 +7,7 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
 
-  login: (email: string, password: string) => Promise<void>;
-  loginWithGithub: () => void;
-  handleOAuthCallback: () => Promise<void>;
+  login: (email: string, password: string, verificationCode: string) => Promise<void>;
   fetchUser: () => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -20,35 +18,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   isLoading: false,
 
-  login: async (email: string, password: string) => {
+  login: async (email: string, password: string, verificationCode: string) => {
     set({ isLoading: true });
     try {
       // 登录后 Token 已写入 HttpOnly Cookie，只需获取用户信息
-      await authService.login(email, password);
+      await authService.login(email, password, verificationCode);
       const user = await authService.getMe();
       set({ user, isAuthenticated: true, isLoading: false });
     } catch (error) {
       set({ isLoading: false });
       throw error;
-    }
-  },
-
-  loginWithGithub: () => {
-    window.location.href = authService.getGithubAuthUrl();
-  },
-
-  /**
-   * OAuth 回调处理
-   * 后端已将 Token 写入 Cookie 并重定向到 /auth/callback
-   * 前端只需调用 getMe 获取用户信息即可
-   */
-  handleOAuthCallback: async () => {
-    set({ isLoading: true });
-    try {
-      const user = await authService.getMe();
-      set({ user, isAuthenticated: true, isLoading: false });
-    } catch {
-      set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },
 

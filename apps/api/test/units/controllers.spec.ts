@@ -367,7 +367,10 @@ describe('SettingsController', () => {
       testConnection: jest.fn().mockResolvedValue({ success: true }),
       fetchModels: jest.fn().mockResolvedValue({ models: ['gpt-4'] }),
     };
-    controller = new SettingsController(service as any);
+    controller = new SettingsController(
+      service as any,
+      { syncUserRepositories: jest.fn().mockResolvedValue(undefined) } as any,
+    );
   });
 
   it('getAIConfig delegates to service', async () => {

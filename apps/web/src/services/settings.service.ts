@@ -37,6 +37,19 @@ export interface BatchRetryWebhooksResult {
   }>;
 }
 
+export interface GithubIntegrationStatus {
+  connected: boolean;
+  githubLogin?: string;
+  githubId?: string;
+  tokenMasked?: string;
+}
+
+export interface GithubIntegrationTestResult {
+  ok: boolean;
+  login?: string;
+  message: string;
+}
+
 /**
  * 设置服务 - AI 配置
  */
@@ -122,6 +135,35 @@ export const settingsService = {
   async batchRetryWebhooks(): Promise<BatchRetryWebhooksResult> {
     const { data } = await apiClient.post<ApiResponse<BatchRetryWebhooksResult>>(
       '/repositories/batch-retry-webhooks',
+    );
+    return data.data;
+  },
+
+  async getGithubIntegration(): Promise<GithubIntegrationStatus> {
+    const { data } = await apiClient.get<ApiResponse<GithubIntegrationStatus>>(
+      '/settings/integrations/github',
+    );
+    return data.data;
+  },
+
+  async updateGithubToken(token: string): Promise<GithubIntegrationStatus> {
+    const { data } = await apiClient.put<ApiResponse<GithubIntegrationStatus>>(
+      '/settings/integrations/github-token',
+      { token },
+    );
+    return data.data;
+  },
+
+  async testGithubIntegration(): Promise<GithubIntegrationTestResult> {
+    const { data } = await apiClient.post<ApiResponse<GithubIntegrationTestResult>>(
+      '/settings/integrations/github/test',
+    );
+    return data.data;
+  },
+
+  async disconnectGithub(): Promise<GithubIntegrationStatus> {
+    const { data } = await apiClient.delete<ApiResponse<GithubIntegrationStatus>>(
+      '/settings/integrations/github-token',
     );
     return data.data;
   },

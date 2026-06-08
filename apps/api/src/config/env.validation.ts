@@ -23,6 +23,17 @@ export const envValidationSchema = Joi.object({
   GITLAB_CLIENT_SECRET: Joi.string().allow(''),
   GITLAB_CALLBACK_URL: Joi.string().uri().allow(''),
 
+  // SMTP (optional; verification codes fall back to server logs when not configured)
+  SMTP_HOST: Joi.string().allow(''),
+  SMTP_PORT: Joi.number().integer().min(1).max(65535),
+  SMTP_USER: Joi.string().allow(''),
+  SMTP_PASS: Joi.string().allow(''),
+  SMTP_FROM: Joi.string().allow(''),
+  SMTP_SECURE: Joi.boolean()
+    .truthy('true').truthy('1').truthy('yes').truthy('on')
+    .falsy('false').falsy('0').falsy('no').falsy('off')
+    .default(false),
+
   // AI Providers
   OPENAI_API_KEY: Joi.string().allow(''),
   ANTHROPIC_API_KEY: Joi.string().allow(''),

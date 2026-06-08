@@ -1,11 +1,12 @@
-import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import * as bcrypt from 'bcrypt';
 import { UserService } from '../user/user.service';
 import { SyncService } from '../sync/sync.service';
-import { prisma, User } from '@repo-pulse/database';
+import { prisma, Role, User } from '@repo-pulse/database';
+import { EmailVerificationService } from './email-verification.service';
 
 export interface JwtPayload {
   sub: string;
@@ -42,10 +43,11 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly userService: UserService,
     private readonly syncService: SyncService,
+    private readonly emailVerificationService: EmailVerificationService,
   ) {}
 
   async validateUser(email: string, password: string): Promise<User> {
-    const user = await this.userService.findByEmail(email);
+    const user = await this.userService.findByEmail(this.normalizeEmail(email));
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
@@ -60,6 +62,59 @@ export class AuthService {
     }
 
     return user;
+  }
+
+  async validateUserWithVerification(email: string, password: string, verificationCode: string): Promise<User> {
+    const user = await this.validateUser(email, password);
+    await this.emailVerificationService.verifyCode(user.email, 'LOGIN', verificationCode);
+    return user;
+  }
+
+  async sendVerificationCode(email: string, purpose: 'LOGIN' | 'BOOTSTRAP') {
+    return this.emailVerificationService.sendCode(email, purpose);
+  }
+
+  async getBootstrapStatus() {
+    const userCount = await prisma.user.count();
+    return { required: userCount === 0 };
+  }
+
+  async bootstrapFirstAdmin(dto: {
+    email: string;
+    name: string;
+    password: string;
+    verificationCode: string;
+    username?: string;
+  }): Promise<TokenPair & { userId: string; email: string; name: string }> {
+    const userCount = await prisma.user.count();
+    if (userCount > 0) {
+      throw new BadRequestException('Bootstrap is already completed');
+    }
+
+    const email = this.normalizeEmail(dto.email);
+    await this.emailVerificationService.verifyCode(email, 'BOOTSTRAP', dto.verificationCode);
+
+    const user = await this.userService.create({
+      email,
+      name: dto.name.trim() || email,
+      username: dto.username?.trim() || undefined,
+      password: dto.password,
+      role: Role.ADMIN,
+    });
+    this.logger.log(`bootstrap_admin_created userId=${user.id} email=${email}`);
+
+    const tokens = await this.generateTokens({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    return {
+      ...tokens,
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+    };
   }
 
   async generateTokens(payload: JwtPayload): Promise<TokenPair> {
@@ -298,5 +353,9 @@ export class AuthService {
       Authorization: `Bearer ${githubToken}`,
       'User-Agent': 'Repo-Pulse-Desktop',
     };
+  }
+
+  private normalizeEmail(email: string) {
+    return email.trim().toLowerCase();
   }
 }

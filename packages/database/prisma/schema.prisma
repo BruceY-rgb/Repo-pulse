@@ -115,6 +115,11 @@ enum RepositoryAccessLevel {
   NONE
 }
 
+enum EmailVerificationPurpose {
+  LOGIN
+  BOOTSTRAP
+}
+
 // ===== Models =====
 
 model AppConfig {
@@ -123,6 +128,19 @@ model AppConfig {
   updatedBy String?
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
+}
+
+model EmailVerificationCode {
+  id           String                   @id @default(cuid())
+  email        String
+  purpose      EmailVerificationPurpose
+  codeHash     String
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  attemptCount Int                      @default(0)
+  createdAt    DateTime                 @default(now())
+
+  @@index([email, purpose, createdAt])
 }
 
 model User {

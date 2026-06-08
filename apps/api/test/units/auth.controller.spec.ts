@@ -12,8 +12,11 @@ import { AuthController } from '../../src/modules/auth/auth.controller';
 function makeAuthService(overrides: Partial<Record<string, jest.Mock>> = {}) {
   return {
     validateUser: jest.fn().mockResolvedValue({ id: 'u1', email: 'alice@example.com', name: 'Alice', role: 'MEMBER' }),
+    validateUserWithVerification: jest.fn().mockResolvedValue({ id: 'u1', email: 'alice@example.com', name: 'Alice', role: 'MEMBER' }),
     generateTokens: jest.fn().mockResolvedValue({ accessToken: 'acc', refreshToken: 'ref' }),
-    handleGithubEnvTokenAuth: jest.fn().mockResolvedValue({ accessToken: 'acc', refreshToken: 'ref' }),
+    sendVerificationCode: jest.fn().mockResolvedValue({ sent: true }),
+    getBootstrapStatus: jest.fn().mockResolvedValue({ required: false }),
+    bootstrapFirstAdmin: jest.fn().mockResolvedValue({ accessToken: 'acc', refreshToken: 'ref', userId: 'u1', email: 'alice@example.com', name: 'Alice' }),
     refreshTokens: jest.fn().mockResolvedValue({ accessToken: 'acc2', refreshToken: 'ref2' }),
     handleGithubAuth: jest.fn().mockResolvedValue({ accessToken: 'acc', refreshToken: 'ref' }),
     ...overrides,
@@ -23,13 +26,6 @@ function makeAuthService(overrides: Partial<Record<string, jest.Mock>> = {}) {
 function makeUserService(overrides: Partial<Record<string, jest.Mock>> = {}) {
   return {
     findById: jest.fn().mockResolvedValue({ id: 'u1', email: 'alice@example.com' }),
-    ...overrides,
-  } as any;
-}
-
-function makeGithubStrategy(overrides: Partial<Record<string, jest.Mock>> = {}) {
-  return {
-    updateCredentials: jest.fn(),
     ...overrides,
   } as any;
 }
@@ -61,37 +57,49 @@ describe('AuthController', () => {
   let controller: AuthController;
   let authService: ReturnType<typeof makeAuthService>;
   let userService: ReturnType<typeof makeUserService>;
-  let githubStrategy: ReturnType<typeof makeGithubStrategy>;
   let configService: ReturnType<typeof makeConfigService>;
 
   beforeEach(() => {
     authService = makeAuthService();
     userService = makeUserService();
-    githubStrategy = makeGithubStrategy();
     configService = makeConfigService({ FRONTEND_URL: 'http://localhost:5173' });
-    controller = new AuthController(authService, userService, githubStrategy, configService);
+    controller = new AuthController(authService, userService, configService);
   });
 
   // ── login ─────────────────────────────────────────────────────────────────
   describe('login', () => {
     it('sets token cookies and returns user info', async () => {
       const res = makeRes();
-      const result = await controller.login({ email: 'alice@example.com', password: 'pw' } as any, res);
-      expect(authService.validateUser).toHaveBeenCalledWith('alice@example.com', 'pw');
+      const result = await controller.login({ email: 'alice@example.com', password: 'pw', verificationCode: '123456' } as any, res);
+      expect(authService.validateUserWithVerification).toHaveBeenCalledWith('alice@example.com', 'pw', '123456');
       expect(res.cookie).toHaveBeenCalledWith('access_token', 'acc', expect.any(Object));
       expect(res.cookie).toHaveBeenCalledWith('refresh_token', 'ref', expect.any(Object));
       expect(result).toMatchObject({ userId: 'u1', email: 'alice@example.com' });
     });
   });
 
-  // ── desktopGithubLogin ────────────────────────────────────────────────────
-  describe('desktopGithubLogin', () => {
-    it('calls handleGithubEnvTokenAuth and sets cookies', async () => {
+  describe('verification codes and bootstrap', () => {
+    it('sends verification codes', async () => {
+      const result = await controller.sendVerificationCode({ email: 'alice@example.com', purpose: 'LOGIN' });
+      expect(authService.sendVerificationCode).toHaveBeenCalledWith('alice@example.com', 'LOGIN');
+      expect(result).toMatchObject({ sent: true });
+    });
+
+    it('returns bootstrap status', async () => {
+      await expect(controller.bootstrapStatus()).resolves.toMatchObject({ required: false });
+    });
+
+    it('bootstraps first admin and sets cookies', async () => {
       const res = makeRes();
-      const result = await controller.desktopGithubLogin(res);
-      expect(authService.handleGithubEnvTokenAuth).toHaveBeenCalled();
+      const result = await controller.bootstrap({
+        email: 'alice@example.com',
+        name: 'Alice',
+        password: 'password123',
+        verificationCode: '123456',
+      } as any, res);
+      expect(authService.bootstrapFirstAdmin).toHaveBeenCalled();
       expect(res.cookie).toHaveBeenCalledTimes(2);
-      expect(result).toHaveProperty('message');
+      expect(result).toMatchObject({ userId: 'u1' });
     });
   });
 
@@ -120,31 +128,6 @@ describe('AuthController', () => {
       const result = await controller.logout(res);
       expect(res.clearCookie).toHaveBeenCalledWith('access_token', { path: '/' });
       expect(res.clearCookie).toHaveBeenCalledWith('refresh_token', { path: '/' });
-      expect(result).toHaveProperty('message');
-    });
-  });
-
-  // ── getGithubOAuthRuntimeConfig ───────────────────────────────────────────
-  describe('getGithubOAuthRuntimeConfig', () => {
-    it('returns callbackUrl from config', () => {
-      configService.get.mockReturnValue('https://api.example.com/auth/github/callback');
-      const result = controller.getGithubOAuthRuntimeConfig();
-      expect(result).toHaveProperty('callbackUrl', 'https://api.example.com/auth/github/callback');
-    });
-  });
-
-  // ── configureGithubOAuth ──────────────────────────────────────────────────
-  describe('configureGithubOAuth', () => {
-    it('throws when clientId or clientSecret missing', () => {
-      expect(() => controller.configureGithubOAuth({ clientId: '', clientSecret: 'sec' }))
-        .toThrow(UnauthorizedException);
-      expect(() => controller.configureGithubOAuth({ clientId: 'id', clientSecret: '' }))
-        .toThrow(UnauthorizedException);
-    });
-
-    it('calls updateCredentials and returns message', () => {
-      const result = controller.configureGithubOAuth({ clientId: 'client-id', clientSecret: 'client-sec' });
-      expect(githubStrategy.updateCredentials).toHaveBeenCalledWith('client-id', 'client-sec');
       expect(result).toHaveProperty('message');
     });
   });

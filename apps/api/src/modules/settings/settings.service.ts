@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { prisma } from '@repo-pulse/database';
 import type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
 import { AppConfigService } from '../app-config/app-config.service';
+import axios from 'axios';
 
 const API_URL_FALLBACK = 'http://localhost:3001';
 
@@ -25,11 +26,28 @@ export interface FetchModelsResult {
   models: ModelInfo[];
 }
 
+export interface GithubIntegrationStatus {
+  connected: boolean;
+  githubLogin?: string;
+  githubId?: string;
+  tokenMasked?: string;
+}
+
+interface GithubTokenProfile {
+  id: number;
+  login: string;
+  name: string | null;
+  email: string | null;
+  avatar_url: string | null;
+}
+
 @Injectable()
 export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
 
-  constructor(private readonly appConfigService: AppConfigService = createFallbackAppConfigService()) {}
+  constructor(
+    private readonly appConfigService: AppConfigService = createFallbackAppConfigService(),
+  ) {}
 
   /**
    * 读取当前 webhook API_URL，附带来源标识
@@ -48,6 +66,75 @@ export class SettingsService {
   ): Promise<{ value: string; source: 'db' }> {
     await this.appConfigService.set('API_URL', value, userId);
     return { value, source: 'db' };
+  }
+
+  async getGithubIntegrationStatus(userId: string): Promise<GithubIntegrationStatus> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        githubId: true,
+        githubLogin: true,
+        githubAccessToken: true,
+      },
+    });
+
+    return this.toGithubIntegrationStatus(user);
+  }
+
+  async updateGithubToken(userId: string, token: string): Promise<GithubIntegrationStatus> {
+    const trimmedToken = token.trim();
+    if (!trimmedToken) {
+      throw new BadRequestException('GitHub token is required');
+    }
+
+    const profile = await this.fetchGithubProfile(trimmedToken);
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        githubId: String(profile.id),
+        githubLogin: profile.login,
+        githubAccessToken: trimmedToken,
+        githubRefreshToken: null,
+        avatar: profile.avatar_url || undefined,
+      },
+      select: {
+        githubId: true,
+        githubLogin: true,
+        githubAccessToken: true,
+      },
+    });
+
+    this.logger.log(`github_token_configured userId=${userId} login=${profile.login}`);
+
+    return this.toGithubIntegrationStatus(user);
+  }
+
+  async testGithubIntegration(userId: string): Promise<{ ok: boolean; login?: string; message: string }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { githubAccessToken: true },
+    });
+
+    if (!user?.githubAccessToken) {
+      return { ok: false, message: 'GitHub token is not configured' };
+    }
+
+    const profile = await this.fetchGithubProfile(user.githubAccessToken);
+    return { ok: true, login: profile.login, message: 'GitHub token is valid' };
+  }
+
+  async disconnectGithub(userId: string): Promise<GithubIntegrationStatus> {
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        githubId: null,
+        githubLogin: null,
+        githubAccessToken: null,
+        githubRefreshToken: null,
+      },
+    });
+    this.logger.log(`github_token_disconnected userId=${userId}`);
+    return { connected: false };
   }
 
   async getAIConfig(userId: string): Promise<AIConfig> {
@@ -72,6 +159,64 @@ export class SettingsService {
       aiBaseUrl: user.aiBaseUrl || undefined,
       aiModel: user.aiModel || undefined,
     };
+  }
+
+  private async fetchGithubProfile(token: string): Promise<GithubTokenProfile> {
+    try {
+      const response = await axios.get<GithubTokenProfile>('https://api.github.com/user', {
+        headers: {
+          Accept: 'application/vnd.github.v3+json',
+          Authorization: `Bearer ${token}`,
+          'User-Agent': 'Repo-Pulse',
+        },
+      });
+      return response.data;
+    } catch (error) {
+      this.logger.warn('github_token_profile_fetch_failed', this.formatGithubError(error));
+      throw new BadRequestException('Unable to read GitHub account with this token');
+    }
+  }
+
+  private toGithubIntegrationStatus(user: {
+    githubId: string | null;
+    githubLogin: string | null;
+    githubAccessToken: string | null;
+  } | null): GithubIntegrationStatus {
+    if (!user?.githubAccessToken) {
+      return { connected: false };
+    }
+
+    return {
+      connected: true,
+      githubId: user.githubId || undefined,
+      githubLogin: user.githubLogin || undefined,
+      tokenMasked: this.maskToken(user.githubAccessToken),
+    };
+  }
+
+  private maskToken(token: string) {
+    if (token.length <= 8) {
+      return '********';
+    }
+    return `${token.slice(0, 4)}...${token.slice(-4)}`;
+  }
+
+  private formatGithubError(error: unknown) {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const message = (error.response?.data as { message?: unknown } | undefined)?.message;
+      return [
+        error.message,
+        status ? `status=${status}` : undefined,
+        typeof message === 'string' ? `githubMessage=${message}` : undefined,
+      ].filter(Boolean).join(' ');
+    }
+
+    if (error instanceof Error) {
+      return `${error.name}: ${error.message}`;
+    }
+
+    return String(error);
   }
 
   async updateAIConfig(

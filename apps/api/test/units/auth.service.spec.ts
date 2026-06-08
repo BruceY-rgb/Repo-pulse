@@ -46,6 +46,7 @@ function makeService(overrides: Partial<{
   verifyAsync: jest.Mock;
   configGet: jest.Mock;
   syncUserRepos: jest.Mock;
+  verifyCode: jest.Mock;
 }> = {}) {
   const findByEmail = overrides.findByEmail ?? jest.fn().mockResolvedValue(null);
   const findByGithubId = overrides.findByGithubId ?? jest.fn().mockResolvedValue(null);
@@ -55,14 +56,16 @@ function makeService(overrides: Partial<{
   const verifyAsync = overrides.verifyAsync ?? jest.fn();
   const configGet = overrides.configGet ?? jest.fn().mockReturnValue(undefined);
   const syncUserRepos = overrides.syncUserRepos ?? jest.fn().mockResolvedValue(undefined);
+  const verifyCode = overrides.verifyCode ?? jest.fn().mockResolvedValue(undefined);
 
   const jwtService = { signAsync, verifyAsync } as any;
   const configService = { get: configGet } as any;
   const userService = { findByEmail, findByGithubId, create, update } as any;
   const syncService = { syncUserRepositories: syncUserRepos } as any;
+  const emailVerificationService = { verifyCode, sendCode: jest.fn() } as any;
 
-  const service = new AuthService(jwtService, configService, userService, syncService);
-  return { service, findByEmail, findByGithubId, create, update, signAsync, verifyAsync, configGet };
+  const service = new AuthService(jwtService, configService, userService, syncService, emailVerificationService);
+  return { service, findByEmail, findByGithubId, create, update, signAsync, verifyAsync, configGet, verifyCode };
 }
 
 describe('AuthService', () => {
@@ -98,6 +101,17 @@ describe('AuthService', () => {
       mockBcryptCompare.mockResolvedValue(true);
       const result = await service.validateUser('alice@example.com', 'correct');
       expect(result).toBe(user);
+    });
+
+    it('requires a valid login verification code after password succeeds', async () => {
+      const user = makeUser();
+      const { service, verifyCode } = makeService({
+        findByEmail: jest.fn().mockResolvedValue(user),
+      });
+      mockBcryptCompare.mockResolvedValue(true);
+      const result = await service.validateUserWithVerification('alice@example.com', 'correct', '123456');
+      expect(result).toBe(user);
+      expect(verifyCode).toHaveBeenCalledWith('alice@example.com', 'LOGIN', '123456');
     });
   });
 

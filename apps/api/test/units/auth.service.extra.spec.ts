@@ -51,8 +51,9 @@ function makeService(opts: {
     update: opts.update ?? jest.fn().mockResolvedValue(makeUser()),
   } as any;
   const syncService = { syncUserRepositories: opts.syncUserRepos ?? jest.fn().mockResolvedValue(undefined) } as any;
+  const emailVerificationService = { verifyCode: jest.fn(), sendCode: jest.fn() } as any;
 
-  return new AuthService(jwtService, configService, userService, syncService);
+  return new AuthService(jwtService, configService, userService, syncService, emailVerificationService);
 }
 
 const makeGithubProfile = () => ({

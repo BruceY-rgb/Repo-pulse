@@ -19,10 +19,8 @@ export interface User {
   preferences: UserPreferences;
   createdAt: string;
   updatedAt: string;
-  // TODO: 生产环境移除 - 用于 WebSocket 测试
-  accessToken?: string;
-  githubAccessToken?: string;
   githubId?: string;
+  githubLogin?: string | null;
   username?: string;
   company?: string | null;
   bio?: string | null;

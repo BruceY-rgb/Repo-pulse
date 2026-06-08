@@ -90,6 +90,8 @@ import {
   type AIProvider,
   type AIConfig,
   type ConnectionTestResult,
+  type GithubIntegrationStatus,
+  type GithubIntegrationTestResult,
   type ModelInfo,
 } from '@/services/settings.service';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -124,6 +126,12 @@ export function Settings() {
     wecom: false,
     wechat: false,
   });
+  const [githubIntegration, setGithubIntegration] = useState<GithubIntegrationStatus>({ connected: false });
+  const [githubTokenInput, setGithubTokenInput] = useState('');
+  const [githubLoading, setGithubLoading] = useState(false);
+  const [githubSaving, setGithubSaving] = useState(false);
+  const [githubTesting, setGithubTesting] = useState(false);
+  const [githubTestResult, setGithubTestResult] = useState<GithubIntegrationTestResult | null>(null);
 
   // 用户信息状态
   const [userLoading, setUserLoading] = useState(false);
@@ -239,6 +247,21 @@ export function Settings() {
     loadImStatus();
   }, []);
 
+  useEffect(() => {
+    const loadGithubIntegration = async () => {
+      setGithubLoading(true);
+      try {
+        const status = await settingsService.getGithubIntegration();
+        setGithubIntegration(status);
+      } catch (error) {
+        console.error('Failed to load GitHub integration:', error);
+      } finally {
+        setGithubLoading(false);
+      }
+    };
+    loadGithubIntegration();
+  }, []);
+
   // 加载 AI 配置
   useEffect(() => {
     const loadAIConfig = async () => {
@@ -349,6 +372,71 @@ export function Settings() {
       toast.error(message);
     } finally {
       setApiUrlSaving(false);
+    }
+  };
+
+  const handleSaveGithubToken = async () => {
+    const token = githubTokenInput.trim();
+    if (!token) {
+      toast.error(t('settings.integrations.github.tokenRequired'));
+      return;
+    }
+
+    setGithubSaving(true);
+    setGithubTestResult(null);
+    try {
+      const status = await settingsService.updateGithubToken(token);
+      setGithubIntegration(status);
+      setGithubTokenInput('');
+      queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });
+      toast.success(t('settings.integrations.github.saved'));
+    } catch (error) {
+      const message =
+        typeof error === 'object' && error !== null && 'message' in error
+          ? String((error as { message?: string }).message)
+          : t('settings.integrations.github.saveFailed');
+      toast.error(message);
+    } finally {
+      setGithubSaving(false);
+    }
+  };
+
+  const handleTestGithubToken = async () => {
+    setGithubTesting(true);
+    setGithubTestResult(null);
+    try {
+      const result = await settingsService.testGithubIntegration();
+      setGithubTestResult(result);
+      if (result.ok) {
+        toast.success(t('settings.integrations.github.testOk'));
+      } else {
+        toast.warning(t('settings.integrations.github.testFailed'));
+      }
+    } catch (error) {
+      const message =
+        typeof error === 'object' && error !== null && 'message' in error
+          ? String((error as { message?: string }).message)
+          : t('settings.integrations.github.testFailed');
+      setGithubTestResult({ ok: false, message });
+      toast.error(message);
+    } finally {
+      setGithubTesting(false);
+    }
+  };
+
+  const handleDisconnectGithub = async () => {
+    setGithubSaving(true);
+    setGithubTestResult(null);
+    try {
+      const status = await settingsService.disconnectGithub();
+      setGithubIntegration(status);
+      setGithubTokenInput('');
+      queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });
+      toast.success(t('settings.integrations.github.disconnected'));
+    } catch {
+      toast.error(t('settings.integrations.github.disconnectFailed'));
+    } finally {
+      setGithubSaving(false);
     }
   };
 
@@ -1254,8 +1342,101 @@ export function Settings() {
               <CardTitle className="text-base font-semibold text-white">{t('settings.integrations.title')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="space-y-4 rounded-lg bg-white/5 p-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary">
+                      <Github className="h-5 w-5 text-foreground" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-medium text-foreground">GitHub</p>
+                        {githubIntegration.connected ? (
+                          <Badge className="badge-success">{t('settings.integrations.connected')}</Badge>
+                        ) : (
+                          <Badge variant="outline">{t('settings.integrations.github.notConnected')}</Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {githubIntegration.connected
+                          ? `${githubIntegration.githubLogin || t('settings.integrations.github.connectedAccount')} · ${githubIntegration.tokenMasked || '****'}`
+                          : t('settings.integrations.github.description')}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      disabled={!githubIntegration.connected || githubTesting || githubLoading}
+                      onClick={handleTestGithubToken}
+                    >
+                      {githubTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                      {t('settings.integrations.github.test')}
+                    </Button>
+                    {githubIntegration.connected ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="border-border text-destructive hover:text-destructive"
+                        disabled={githubSaving}
+                        onClick={handleDisconnectGithub}
+                      >
+                        {t('settings.integrations.disconnect')}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+                  <div className="space-y-2">
+                    <Label htmlFor="github-token-input">{t('settings.integrations.github.token')}</Label>
+                    <Input
+                      id="github-token-input"
+                      type="password"
+                      autoComplete="off"
+                      value={githubTokenInput}
+                      onChange={(event) => setGithubTokenInput(event.target.value)}
+                      placeholder={
+                        githubIntegration.connected
+                          ? t('settings.integrations.github.updatePlaceholder')
+                          : t('settings.integrations.github.placeholder')
+                      }
+                      disabled={githubSaving || githubLoading}
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <Button
+                      type="button"
+                      className="btn-x-primary w-full gap-2 lg:w-auto"
+                      disabled={githubSaving || githubLoading || !githubTokenInput.trim()}
+                      onClick={handleSaveGithubToken}
+                    >
+                      {githubSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      {githubIntegration.connected
+                        ? t('settings.integrations.github.update')
+                        : t('settings.integrations.github.save')}
+                    </Button>
+                  </div>
+                </div>
+
+                {githubTestResult ? (
+                  <p className={cn(
+                    'text-xs',
+                    githubTestResult.ok ? 'text-[var(--github-success)]' : 'text-destructive',
+                  )}>
+                    {githubTestResult.ok
+                      ? `${t('settings.integrations.github.testOk')}${githubTestResult.login ? ` · ${githubTestResult.login}` : ''}`
+                      : githubTestResult.message || t('settings.integrations.github.testFailed')}
+                  </p>
+                ) : null}
+              </div>
+
               {[
-                { provider: 'GitHub', username: userProfile.githubId ? userProfile.name || 'Connected' : 'Not connected', connected: !!userProfile.githubId, icon: Github },
                 { provider: 'Feishu', username: imConnected.feishu ? t('settings.integrations.feishu.ready') : t('settings.integrations.feishu.notConfigured'), connected: imConnected.feishu, logo: feishuLogo, action: 'feishu' as const },
                 { provider: '钉钉', username: imConnected.dingtalk ? t('settings.integrations.feishu.ready') : t('settings.integrations.feishu.notConfigured'), connected: imConnected.dingtalk, logo: dingtalkLogo, action: 'dingtalk' as const },
                 { provider: '企业微信', username: imConnected.wecom ? t('settings.integrations.feishu.ready') : t('settings.integrations.feishu.notConfigured'), connected: imConnected.wecom, logo: wecomLogo, action: 'wecom' as const },

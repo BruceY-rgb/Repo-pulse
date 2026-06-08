@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { authService } from '@/services/auth.service';
 import { useApiMutation, useApiQuery } from '@/lib/query-hooks';
@@ -6,7 +5,7 @@ import { useApiMutation, useApiQuery } from '@/lib/query-hooks';
 export const authQueryKeys = {
   all: ['auth'] as const,
   currentUser: () => [...authQueryKeys.all, 'current-user'] as const,
-  githubOAuthRuntimeConfig: () => [...authQueryKeys.all, 'github-oauth-runtime-config'] as const,
+  bootstrapStatus: () => [...authQueryKeys.all, 'bootstrap-status'] as const,
 };
 
 export function useCurrentUserQuery(enabled = true) {
@@ -19,18 +18,19 @@ export function useCurrentUserQuery(enabled = true) {
   });
 }
 
-export function useGithubOAuthRuntimeConfigQuery() {
+export function useBootstrapStatusQuery() {
   return useApiQuery({
-    queryKey: authQueryKeys.githubOAuthRuntimeConfig(),
-    queryFn: authService.getGithubOAuthRuntimeConfig,
+    queryKey: authQueryKeys.bootstrapStatus(),
+    queryFn: authService.getBootstrapStatus,
     retry: false,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30 * 1000,
   });
 }
 
 interface LoginPayload {
   email: string;
   password: string;
+  verificationCode: string;
 }
 
 export function useLoginMutation() {
@@ -38,8 +38,8 @@ export function useLoginMutation() {
 
   return useApiMutation({
     mutationKey: [...authQueryKeys.all, 'login'],
-    mutationFn: async ({ email, password }: LoginPayload) => {
-      await authService.login(email, password);
+    mutationFn: async ({ email, password, verificationCode }: LoginPayload) => {
+      await authService.login(email, password, verificationCode);
       return authService.getSession();
     },
     onSuccess: async () => {
@@ -48,35 +48,36 @@ export function useLoginMutation() {
   });
 }
 
-export function useDesktopGithubLoginMutation() {
+export function useBootstrapMutation() {
   const queryClient = useQueryClient();
 
   return useApiMutation({
-    mutationKey: [...authQueryKeys.all, 'desktop-github-login'],
-    mutationFn: async () => {
-      await authService.loginWithDesktopGithub();
+    mutationKey: [...authQueryKeys.all, 'bootstrap'],
+    mutationFn: async (payload: {
+      email: string;
+      name: string;
+      password: string;
+      verificationCode: string;
+      username?: string;
+    }) => {
+      await authService.bootstrap(payload);
       return authService.getSession();
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });
     },
   });
-}
-
-interface GithubOAuthConfigPayload {
-  clientId: string;
-  clientSecret: string;
 }
 
 interface UpdatePreferencesPayload {
   preferences: Record<string, unknown>;
 }
 
-export function useGithubOAuthConfigMutation() {
+export function useSendVerificationCodeMutation() {
   return useApiMutation({
-    mutationKey: [...authQueryKeys.all, 'github-oauth-config'],
-    mutationFn: async ({ clientId, clientSecret }: GithubOAuthConfigPayload) =>
-      authService.configureGithubOAuth(clientId, clientSecret),
+    mutationKey: [...authQueryKeys.all, 'send-verification-code'],
+    mutationFn: ({ email, purpose }: { email: string; purpose: 'LOGIN' | 'BOOTSTRAP' }) =>
+      authService.sendVerificationCode(email, purpose),
   });
 }
 
@@ -106,13 +107,4 @@ export function useLogoutMutation() {
       await queryClient.removeQueries({ queryKey: authQueryKeys.currentUser() });
     },
   });
-}
-
-export function useGithubOAuthLogin() {
-  return useMemo(
-    () => () => {
-      window.location.href = authService.getGithubAuthUrl();
-    },
-    [],
-  );
 }

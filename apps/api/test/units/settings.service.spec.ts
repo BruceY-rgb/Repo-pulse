@@ -1,9 +1,16 @@
 import { SettingsService } from '../../src/modules/settings/settings.service';
+import axios from 'axios';
 
 const mockUserFindUnique = jest.fn();
 const mockUserUpdate = jest.fn();
 
 jest.mock('@repo-pulse/database', () => ({
+  RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
+  RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
+  NotificationChannel: { EMAIL: 'EMAIL', DINGTALK: 'DINGTALK', FEISHU: 'FEISHU', WEBHOOK: 'WEBHOOK', IN_APP: 'IN_APP', WECOM: 'WECOM', WECHAT: 'WECHAT' },
+  NotificationStatus: { PENDING: 'PENDING', SENT: 'SENT', FAILED: 'FAILED', READ: 'READ' },
+  EventType: { PUSH: 'PUSH' },
+  Platform: { GITHUB: 'GITHUB', GITLAB: 'GITLAB' },
   prisma: {
     user: {
       findUnique: (...a: any[]) => mockUserFindUnique(...a),
@@ -11,6 +18,10 @@ jest.mock('@repo-pulse/database', () => ({
     },
   },
 }));
+
+jest.mock('axios');
+
+const mockAxios = axios as jest.Mocked<typeof axios>;
 
 function makeDbUser(overrides: object = {}) {
   return {
@@ -28,6 +39,56 @@ describe('SettingsService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     service = new SettingsService();
+  });
+
+  describe('GitHub integration', () => {
+    it('returns disconnected when no GitHub token exists', async () => {
+      mockUserFindUnique.mockResolvedValue({ githubId: null, githubLogin: null, githubAccessToken: null });
+      await expect(service.getGithubIntegrationStatus('u1')).resolves.toEqual({ connected: false });
+    });
+
+    it('validates and stores GitHub token without returning it', async () => {
+      mockAxios.get.mockResolvedValueOnce({
+        data: { id: 123, login: 'alice', name: 'Alice', email: 'a@example.com', avatar_url: 'https://avatar' },
+      });
+      mockUserUpdate.mockResolvedValue({
+        githubId: '123',
+        githubLogin: 'alice',
+        githubAccessToken: 'github_pat_secret1234',
+      });
+
+      const result = await service.updateGithubToken('u1', 'github_pat_secret1234');
+
+      expect(mockUserUpdate).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'u1' },
+        data: expect.objectContaining({
+          githubId: '123',
+          githubLogin: 'alice',
+          githubAccessToken: 'github_pat_secret1234',
+          githubRefreshToken: null,
+        }),
+      }));
+      expect(result).toEqual({
+        connected: true,
+        githubId: '123',
+        githubLogin: 'alice',
+        tokenMasked: 'gith...1234',
+      });
+      expect(result).not.toHaveProperty('githubAccessToken');
+    });
+
+    it('disconnects GitHub token and returns disconnected status', async () => {
+      await expect(service.disconnectGithub('u1')).resolves.toEqual({ connected: false });
+      expect(mockUserUpdate).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'u1' },
+        data: expect.objectContaining({
+          githubId: null,
+          githubLogin: null,
+          githubAccessToken: null,
+          githubRefreshToken: null,
+        }),
+      }));
+    });
   });
 
   // ── getAIConfig ────────────────────────────────────────────────────────────
