@@ -115,7 +115,7 @@ describe('AIProcessor', () => {
     });
 
     it('broadcasts analysis started then completed with the repository-scoped payload', async () => {
-      mockEventFindUnique.mockResolvedValue({ repositoryId: 'r1' });
+      mockEventFindUnique.mockResolvedValue({ repositoryId: 'r1', repository: { users: [] } });
       await processor.process(makeJob({ eventId: 'e1' }));
       expect(mockEventGateway.broadcastAnalysisStarted).toHaveBeenCalledWith(
         expect.objectContaining({ eventId: 'e1', repositoryId: 'r1', source: 'auto' }),
@@ -127,7 +127,7 @@ describe('AIProcessor', () => {
     });
 
     it('uses source=manual for forced (manual) analysis when broadcasting started', async () => {
-      mockEventFindUnique.mockResolvedValue({ repositoryId: 'r1' });
+      mockEventFindUnique.mockResolvedValue({ repositoryId: 'r1', repository: { users: [] } });
       await processor.process(makeJob({ eventId: 'e1', force: true }));
       expect(mockEventGateway.broadcastAnalysisStarted).toHaveBeenCalledWith(
         expect.objectContaining({ eventId: 'e1', repositoryId: 'r1', source: 'manual' }),

@@ -147,7 +147,7 @@ function formatTable(results: BenchmarkResult[]): string {
 }
 
 async function generateReport(results: BenchmarkResult[], date: string): Promise<void> {
-  const reportDir = path.join(__dirname, '../../..', '../../docs/test-reports');
+  const reportDir = path.join(__dirname, '../../../..', 'docs/test-reports');
   if (!fs.existsSync(reportDir)) {
     fs.mkdirSync(reportDir, { recursive: true });
   }

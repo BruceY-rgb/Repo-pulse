@@ -6,6 +6,18 @@ import { RepositoryService } from '../src/modules/repository/repository.service'
 import { GithubService } from '../src/modules/repository/services/github.service';
 import { GitlabService } from '../src/modules/repository/services/gitlab.service';
 
+// getBranches 现在通过 assertUserCanAccessRepository（直连真实 prisma）做成员鉴权。
+// 本套件是纯逻辑单测（手工注入 mock prisma），不依赖真实库，故在此拦截鉴权工具，
+// 按仓库 id 模拟“有权 / 无权”两种结果。
+jest.mock('../src/common/utils/repository-access', () => ({
+  ...jest.requireActual('../src/common/utils/repository-access'),
+  assertUserCanAccessRepository: jest.fn(async (_userId: string, id: string) => {
+    if (id === 'repo-3') {
+      throw new ForbiddenException('You do not have access to this repository');
+    }
+  }),
+}));
+
 describe('RepositoryService.getBranches', () => {
   let service: RepositoryService;
   let githubServiceMock: { getBranches: jest.Mock };
@@ -64,11 +76,13 @@ describe('RepositoryService.getBranches', () => {
         branch: 'feature/auth',
         sourceBranch: 'release/1.0',
         targetBranch: null,
+        branches: [],
       },
       {
         branch: null,
         sourceBranch: null,
         targetBranch: 'hotfix/login',
+        branches: [],
       },
     ]);
     githubServiceMock.getBranches.mockResolvedValue([
@@ -131,11 +145,13 @@ describe('RepositoryService.getBranches', () => {
         branch: 'feature/alerts',
         sourceBranch: null,
         targetBranch: null,
+        branches: [],
       },
       {
         branch: null,
         sourceBranch: 'develop',
         targetBranch: 'release/2.0',
+        branches: [],
       },
     ]);
     githubServiceMock.getBranches.mockRejectedValue(new Error('provider unavailable'));

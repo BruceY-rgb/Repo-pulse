@@ -54,6 +54,18 @@ function makePrefs(im: object = {}) {
 
 describe('ImService', () => {
   let service: ImService;
+  const originalRunImBridges = process.env.RUN_IM_BRIDGES;
+
+  beforeAll(() => {
+    // 服务出于多实例安全，所有 IM 桥接连接均受 RUN_IM_BRIDGES 开关控制；
+    // 这些用例需要桥接真实建立才能验证发送/绑定逻辑，故在测试环境显式开启。
+    process.env.RUN_IM_BRIDGES = 'true';
+  });
+
+  afterAll(() => {
+    if (originalRunImBridges === undefined) delete process.env.RUN_IM_BRIDGES;
+    else process.env.RUN_IM_BRIDGES = originalRunImBridges;
+  });
 
   beforeEach(async () => {
     jest.clearAllMocks();
