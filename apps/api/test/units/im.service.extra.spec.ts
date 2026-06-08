@@ -40,6 +40,17 @@ function makeFeishuPrefs(overrides: object = {}) {
 
 describe('ImService - additional coverage', () => {
   let service: ImService;
+  const originalRunImBridges = process.env.RUN_IM_BRIDGES;
+
+  beforeAll(() => {
+    // testFeishuConnection 需桥接真实建立，受 RUN_IM_BRIDGES 开关控制，测试环境显式开启。
+    process.env.RUN_IM_BRIDGES = 'true';
+  });
+
+  afterAll(() => {
+    if (originalRunImBridges === undefined) delete process.env.RUN_IM_BRIDGES;
+    else process.env.RUN_IM_BRIDGES = originalRunImBridges;
+  });
 
   beforeEach(async () => {
     jest.clearAllMocks();

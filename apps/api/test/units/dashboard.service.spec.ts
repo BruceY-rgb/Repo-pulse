@@ -1,8 +1,11 @@
+import { NotFoundException } from '@nestjs/common';
 import { DashboardService } from '../../src/modules/dashboard/dashboard.service';
 
 const mockRepoFindMany = jest.fn();
+const mockRepoFindFirst = jest.fn();
 const mockEventCount = jest.fn();
 const mockEventFindMany = jest.fn();
+const mockEventFindFirst = jest.fn();
 
 jest.mock('@repo-pulse/database', () => ({
   EventType: {
@@ -22,10 +25,12 @@ jest.mock('@repo-pulse/database', () => ({
   prisma: {
     repository: {
       findMany: (...a: any[]) => mockRepoFindMany(...a),
+      findFirst: (...a: any[]) => mockRepoFindFirst(...a),
     },
     event: {
       count: (...a: any[]) => mockEventCount(...a),
       findMany: (...a: any[]) => mockEventFindMany(...a),
+      findFirst: (...a: any[]) => mockEventFindFirst(...a),
     },
   },
 }));
@@ -260,6 +265,135 @@ describe('DashboardService', () => {
       const d = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
       const time = await getTime(d);
       expect(time).toBe(d.toLocaleDateString());
+    });
+  });
+
+  // ── getProjectRiverRepositoryDashboard ─────────────────────────────────────
+  describe('getProjectRiverRepositoryDashboard', () => {
+    function pushEvent(overrides: Record<string, any> = {}) {
+      return {
+        id: 'e1',
+        type: 'PUSH',
+        action: 'push',
+        title: 'Push to main',
+        body: 'commit body',
+        author: 'alice',
+        externalUrl: 'https://example.com/e1',
+        metadata: {},
+        rawPayload: {
+          commits: [
+            { author: { name: 'alice' }, additions: 30, deletions: 5, modified: ['a.ts', 'b.ts'] },
+            { author: { name: 'bob' }, additions: 10, deletions: 2, added: ['c.ts'] },
+          ],
+        },
+        occurredAt: new Date('2024-02-01T10:00:00Z'),
+        createdAt: new Date('2024-02-01T10:00:00Z'),
+        ...overrides,
+      };
+    }
+
+    it('throws NotFoundException when the repository is not accessible', async () => {
+      mockRepoFindMany.mockResolvedValue([]); // resolveRepositoryIds → no access
+      await expect(
+        service.getProjectRiverRepositoryDashboard('u1', 'r1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('throws NotFoundException when the repository record is missing', async () => {
+      mockRepoFindMany.mockResolvedValue([{ id: 'r1' }]);
+      mockEventCount.mockResolvedValue(0);
+      mockEventFindFirst.mockResolvedValue(null);
+      mockRepoFindFirst.mockResolvedValue(null);
+      await expect(
+        service.getProjectRiverRepositoryDashboard('u1', 'r1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('builds a project-river payload from commit events (cache miss)', async () => {
+      mockRepoFindMany.mockResolvedValue([{ id: 'r1' }]);
+      mockEventCount.mockResolvedValue(1);
+      mockEventFindFirst.mockResolvedValue({
+        id: 'e1',
+        createdAt: new Date('2024-02-01T10:00:00Z'),
+        occurredAt: new Date('2024-02-01T10:00:00Z'),
+      });
+      mockRepoFindFirst.mockResolvedValue({ id: 'r1', lastSyncAt: new Date('2024-02-01T09:00:00Z') });
+      mockEventFindMany.mockResolvedValue([pushEvent()]);
+
+      const result = await service.getProjectRiverRepositoryDashboard('u1', 'r1');
+
+      expect(result.repositoryId).toBe('r1');
+      expect(result.source).toBe('event_store');
+      expect(result.cache.status).toBe('miss');
+      // two non-automation contributors from rawPayload.commits
+      expect(result.summary.totalContributors).toBe(2);
+      expect(result.summary.totalCommits).toBe(2);
+      expect(result.summary.totalEvents).toBe(1);
+      expect(result.dailyRows.length).toBeGreaterThan(0);
+      expect(result.eventMarkers).toHaveLength(1);
+      expect(result.eventMarkers[0].type).toBe('push');
+    });
+
+    it('serves the cached payload on the second call with identical fingerprint', async () => {
+      mockRepoFindMany.mockResolvedValue([{ id: 'r1' }]);
+      mockEventCount.mockResolvedValue(1);
+      mockEventFindFirst.mockResolvedValue({
+        id: 'e1',
+        createdAt: new Date('2024-02-01T10:00:00Z'),
+        occurredAt: new Date('2024-02-01T10:00:00Z'),
+      });
+      mockRepoFindFirst.mockResolvedValue({ id: 'r1', lastSyncAt: null });
+      mockEventFindMany.mockResolvedValue([pushEvent()]);
+
+      await service.getProjectRiverRepositoryDashboard('u1', 'r1');
+      mockEventFindMany.mockClear();
+      const second = await service.getProjectRiverRepositoryDashboard('u1', 'r1');
+
+      expect(second.cache.status).toBe('hit');
+      // cache hit must not re-query the event list
+      expect(mockEventFindMany).not.toHaveBeenCalled();
+    });
+
+    it('skips automation/bot authors when building daily rows', async () => {
+      mockRepoFindMany.mockResolvedValue([{ id: 'r1' }]);
+      mockEventCount.mockResolvedValue(1);
+      mockEventFindFirst.mockResolvedValue({
+        id: 'e2', createdAt: new Date('2024-03-01T10:00:00Z'), occurredAt: null,
+      });
+      mockRepoFindFirst.mockResolvedValue({ id: 'r1', lastSyncAt: null });
+      mockEventFindMany.mockResolvedValue([
+        pushEvent({
+          id: 'e2',
+          rawPayload: { commits: [{ author: { name: 'feishu bot' }, additions: 1, deletions: 1 }] },
+        }),
+      ]);
+
+      const result = await service.getProjectRiverRepositoryDashboard('u1', 'r1');
+      expect(result.summary.totalContributors).toBe(0);
+      expect(result.dailyRows).toHaveLength(0);
+    });
+
+    it('derives commits from metadata when rawPayload has no commit array', async () => {
+      mockRepoFindMany.mockResolvedValue([{ id: 'r1' }]);
+      mockEventCount.mockResolvedValue(1);
+      mockEventFindFirst.mockResolvedValue({
+        id: 'e3', createdAt: new Date('2024-04-01T10:00:00Z'), occurredAt: new Date('2024-04-01T10:00:00Z'),
+      });
+      mockRepoFindFirst.mockResolvedValue({ id: 'r1', lastSyncAt: null });
+      mockEventFindMany.mockResolvedValue([
+        pushEvent({
+          id: 'e3',
+          author: 'carol',
+          rawPayload: {},
+          metadata: { commitCount: 4, linesAdded: 100, linesDeleted: 20, filesTouched: 7 },
+        }),
+      ]);
+
+      const result = await service.getProjectRiverRepositoryDashboard('u1', 'r1');
+      expect(result.summary.totalCommits).toBe(4);
+      expect(result.dailyRows[0].contributor).toBe('carol');
+      expect(result.dailyRows[0].linesAdded).toBe(100);
+      expect(result.dailyRows[0].filesTouched).toBe(7);
     });
   });
 });

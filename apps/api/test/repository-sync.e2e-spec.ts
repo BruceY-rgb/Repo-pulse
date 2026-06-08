@@ -158,37 +158,26 @@ describe('Repository sync (e2e)', () => {
     await app.close();
   });
 
-  it('POST /repositories/:id/sync should create history events and return a sync summary', async () => {
+  // 说明：/sync 端点已由“同步返回 summary（201）”改为“异步入队（202）”。
+  // 实际的 createdCount/skippedCount/occurredAt 等同步结果，现由 service 级
+  // repository-sync.service.e2e-spec.ts 直接断言；此处只校验端点的异步入队契约。
+  it('POST /repositories/:id/sync should enqueue an async history-sync job (202)', async () => {
     const res = await request(app.getHttpServer())
       .post(`/repositories/${testRepoId}/sync`)
       .set('Cookie', authCookie)
-      .expect(201);
+      .expect(202);
 
-    expect(res.body.data.repositoryId).toBe(testRepoId);
-    expect(res.body.data.createdCount).toBe(3);
-    expect(res.body.data.skippedCount).toBe(0);
-    expect(res.body.data.failedSources).toEqual([]);
-    expect(typeof res.body.data.lastSyncAt).toBe('string');
-
-    const events = await prisma.event.findMany({
-      where: { repositoryId: testRepoId },
-      select: { externalId: true, occurredAt: true, createdAt: true },
-    });
-
-    expect(events).toHaveLength(3);
-    expect(events.every((event) => event.occurredAt instanceof Date)).toBe(true);
-    expect(
-      events.some((event) => event.externalId === 'commit-sha-1' && event.occurredAt?.toISOString() === '2026-04-20T08:30:00.000Z'),
-    ).toBe(true);
+    expect(res.body.data.status).toBe('queued');
+    expect(res.body.data.jobId).toBeDefined();
   });
 
-  it('POST /repositories/:id/sync should skip already imported history on the second run', async () => {
+  it('POST /repositories/:id/sync accepts repeated calls, enqueueing a fresh job each time', async () => {
     const res = await request(app.getHttpServer())
       .post(`/repositories/${testRepoId}/sync`)
       .set('Cookie', authCookie)
-      .expect(201);
+      .expect(202);
 
-    expect(res.body.data.createdCount).toBe(0);
-    expect(res.body.data.skippedCount).toBeGreaterThanOrEqual(3);
+    expect(res.body.data.status).toBe('queued');
+    expect(res.body.data.jobId).toBeDefined();
   });
 });

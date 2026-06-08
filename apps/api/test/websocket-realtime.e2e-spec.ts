@@ -6,6 +6,7 @@ import { performance } from 'perf_hooks';
 import type { AddressInfo } from 'net';
 import { io, Socket } from 'socket.io-client';
 import { EventGateway } from '../src/modules/event/event.gateway';
+import { MetricsService } from '../src/modules/observability/metrics.service';
 
 const JWT_SECRET = 'websocket-realtime-secret';
 const TRANSPORT_BUDGET_MS = 250;
@@ -126,6 +127,17 @@ describe('WebSocket realtime transport (e2e)', () => {
               if (key === 'FRONTEND_URL') return 'http://localhost:5173';
               return fallback;
             }),
+          },
+        },
+        {
+          // EventGateway 新增 MetricsService 依赖（Prometheus 指标），此处提供 no-op 实现
+          provide: MetricsService,
+          useValue: {
+            incrementConnections: jest.fn(),
+            decrementConnections: jest.fn(),
+            incrementSubscriptions: jest.fn(),
+            decrementSubscriptions: jest.fn(),
+            observeEmitLatency: jest.fn(),
           },
         },
       ],
