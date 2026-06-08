@@ -22,6 +22,8 @@
   ·
   <a href="#桌面端-workbench">桌面端 Workbench</a>
   ·
+  <a href="#当前进度dev-electron">当前进度</a>
+  ·
   <a href="#权限与消息分流约定">权限分流</a>
   ·
   <a href="#当前重点待办">当前待办</a>
@@ -59,7 +61,26 @@
 - **会话式工作台**：仓库是会话，Push、PR、Issue、Release、审批、通知和报告摘要都是消息。
 - **权限分层**：有写权限的仓库可以执行审批、PR、Agent 等真实操作；只读监控仓库只展示消息和分析。
 - **关注动态**：接入系统但未加入监控范围的仓库进入 Watch Feed，用信息流方式查看生态动态。
+- **本地优先实时链路**：桌面端通过 Electron 主进程连接后端实时网关，再经 IPC 推送到渲染进程；本地 Git 仓库变化优先走本地 watcher。
+- **零手配 Webhook**：桌面端自动拉起 cloudflared quick tunnel，并在隧道 URL 就绪后自动同步 GitHub webhook。
 - **复用旧功能**：Dashboard、Reports、Repositories、Settings 继续复用原 Web 页面，通过 Workbench 路由嵌入桌面工作流。
+
+## 当前进度（dev-electron）
+
+截至 2026-06-08，`dev-electron` 已经从早期 Dashboard 产品推进到桌面端工作台形态。下面是当前主干口径：
+
+| 模块 | 当前状态 |
+| :--- | :--- |
+| Electron 桌面壳 | 已接入主进程、preload bridge、桌面启动脚本与打包流程；开发入口为 `pnpm dev:electron`。 |
+| Workbench 会话 | 已具备仓库会话、统一 Conversation Message API、未读边界、详情抽屉、审批/Agent 入口和仓库 Git 状态侧栏。 |
+| 权限分流 | 已按可操作仓库 / 只读监控仓库分流，前端用 `canOperate` 控制真实修改入口，后端仓库服务返回当前用户视角能力字段。 |
+| Watch Feed | 已接入真实关注动态 API，支持分页、收藏、忽略、搜索、噪音过滤和按 Issue / PR / Push / Release 等类型筛选。 |
+| 实时推送 | 已完成 Electron 主进程 socket.io 客户端 → `desktop:realtime` IPC → React Query handler 的桌面实时链路；Web 环境仍保留 socket.io 回退。 |
+| 本地 Git 事件 | 已接入 LocalGitWatcher；本地 clone 存在时优先监听 HEAD、分支和工作区变化，推送 `local.git.changed` 刷新 Git 面板。 |
+| 自动隧道 / Webhook | 已完成 cloudflared quick tunnel、仅暴露 `/webhooks` 的本地反代、隧道状态 IPC、Settings 状态卡和批量重建 webhook。 |
+| AI 分析 | 已有 AI Provider 抽象层、异步分析队列、analysis.started / completed / failed 实时事件，以及前端分析面板。 |
+| Agent 会话 | 已接入桌面端 Agent session 视图、运行/停止、工具调用日志、权限确认卡、GitTree 入口和按仓库维护 session 的 UI 状态。 |
+| 测试与验证 | Web 类型检查可用；实时 IPC 相关后端单测和跨包 typecheck 已在交接文档中完成验收。全量 lint / test 仍存在既有测试隔离与 lint 债务。 |
 
 ## Monorepo 结构
 
@@ -114,11 +135,11 @@ scripts/      本地启动、停止和基础服务脚本
   </tr>
   <tr>
     <td><strong>仓库会话</strong></td>
-    <td>单仓库消息流，支持 Markdown 消息、详情抽屉、审批按钮、Agent 入口和右键操作。</td>
+    <td>单仓库消息流，支持 Markdown 消息、详情抽屉、审批按钮、Agent 入口、Webhook 状态和 Git 状态侧栏。</td>
   </tr>
   <tr>
     <td><strong>关注动态</strong></td>
-    <td>未进入监控范围的仓库事件流，适合浏览 star / follow / 接入系统的仓库动态。</td>
+    <td>未进入监控范围的仓库事件流，支持分页、收藏、忽略、搜索、噪音过滤和事件类型筛选。</td>
   </tr>
   <tr>
     <td><strong>仓库看板</strong></td>
@@ -130,7 +151,7 @@ scripts/      本地启动、停止和基础服务脚本
   </tr>
   <tr>
     <td><strong>Agent 会话</strong></td>
-    <td>后续用于承载每个仓库独立的 Agent session、run、step、log 和确认流。</td>
+    <td>按仓库维护 Agent session，展示运行日志、工具调用、权限确认、停止/重试和 GitTree 发起任务入口。</td>
   </tr>
   <tr>
     <td><strong>设置</strong></td>
@@ -154,6 +175,34 @@ scripts/      本地启动、停止和基础服务脚本
 - 二级侧边栏支持展开、收起和宽度拖拽。
 - 二级侧边栏收起后保留仓库头像栏、未读提示、右键菜单和添加仓库入口。
 - 非聊天页面不显示二级侧边栏，让 Dashboard、Reports、Settings 等页面获得完整宽度。
+
+### 实时链路
+
+桌面端默认不让浏览器渲染进程直接持有实时连接，而是使用：
+
+```text
+API /events Gateway
+  → Electron 主进程 RealtimeBridge（socket.io client）
+  → desktop:realtime IPC
+  → Web 渲染层 React Query handler
+```
+
+同一套 handler 同时服务桌面 IPC 和 Web socket.io 回退，保证 Dashboard、仓库列表、会话消息、通知红点、审批、AI 分析和同步进度刷新口径一致。
+
+本地有 clone 的仓库还会启用 `LocalGitWatcher`，直接监听本地 HEAD、分支和工作区变化，通过 `local.git.changed` 刷新 Git 状态面板；没有本地 clone 时继续依赖远端 webhook 事件。
+
+### 自动隧道与 Webhook
+
+桌面端是本地优先客户端，后端默认运行在 `127.0.0.1:3001`。为了让 GitHub 能回调本机 webhook，Electron 主进程会在登录后的实时连接阶段幂等启动自动隧道编排：
+
+```text
+WebhookProxy（仅放行 /webhooks）
+  → cloudflared quick tunnel
+  → 写入后端 API_URL
+  → 批量重建 GitHub webhook
+```
+
+Settings 的集成页会显示隧道状态和公网 URL，并提供刷新隧道入口。详细设计与约束见 `docs/auto-tunnel-webhook.md`。
 
 ## 权限与消息分流约定
 
@@ -186,7 +235,7 @@ Workbench 中的仓库会话分为两类：
 
 前端隐藏按钮不是安全边界。后端所有写操作接口必须校验当前用户对目标仓库的权限。
 
-建议后端统一返回当前用户视角下的仓库权限：
+后端仓库相关接口应返回当前用户视角下的权限上下文：
 
 ```ts
 type RepositoryAccessLevel =
@@ -206,7 +255,7 @@ interface RepositoryAccessContext {
 }
 ```
 
-建议 Chat 仓库列表接口直接返回分组或分组字段：
+Chat 仓库列表接口按分组字段区分可操作仓库和只读监控仓库：
 
 ```ts
 type ChatRepositoryKind = 'editable' | 'monitored-readonly';
@@ -222,7 +271,7 @@ interface ChatRepository {
 }
 ```
 
-关注动态应使用独立 Feed API，展示“已接入系统但未加入监控范围”的仓库消息，并支持事件类型过滤：
+关注动态使用独立 Feed API，展示“已接入系统但未加入监控范围”的仓库消息，并支持事件类型过滤：
 
 ```text
 全部 / Issue / PR / Push / Release / Security
@@ -318,12 +367,19 @@ pnpm dev:electron
 - API: `http://localhost:3001`
 - Web/Vite: `http://127.0.0.1:5173`
 - Electron 桌面应用
+- Electron 主进程实时桥接和自动隧道编排（登录后触发）
 
 桌面端默认使用：
 
 ```text
 FRONTEND_URL=http://127.0.0.1:5173
 DESKTOP_AUTH_MODE=env
+```
+
+如果需要验证远端 GitHub webhook 实时回调，首次运行前先准备 cloudflared 二进制：
+
+```bash
+pnpm --filter @repo-pulse/electron fetch:cloudflared
 ```
 
 ### 分别启动 Web 和 API
@@ -373,6 +429,12 @@ apps/electron/release/
 
 ## 常用验证命令
 
+共享类型构建：
+
+```bash
+pnpm --filter @repo-pulse/shared build
+```
+
 前端类型检查：
 
 ```bash
@@ -399,13 +461,14 @@ pnpm --filter @repo-pulse/electron typecheck
 
 ## 当前重点待办
 
-- 后端补齐仓库权限识别，返回 `canOperate`、`isEditable`、`isMonitored`。
-- 后端统一 Conversation Message API，减少前端临时聚合 events、approvals、notifications。
-- 前端二级侧边栏按“可操作仓库 / 只读监控仓库”分组。
-- 前端根据 `canOperate` 控制审批、PR 和 Agent 操作入口。
-- 后端为所有写操作接口增加仓库权限校验。
-- Watch Feed 接入真实 Feed API，并支持 Issue、PR、Push、Release、Security 过滤。
-- Agent 会话接入真实 session、run、step、log 和确认后执行流程。
+- **安全收口**：`/auth/me`、`/auth/session` 等用户信息接口需要只返回安全字段，避免 GitHub token / AI key 等敏感字段透传到前端。
+- **桌面登出链路**：登出或切换用户时需要调用 `repoPulseDesktop.realtime.disconnect()`，避免主进程实时连接继续停留在旧用户房间。
+- **Replay 合并刷新**：实时 replay 补发目前仍按 `event.created` 逐条触发查询失效；需要在 replay 窗口内合并刷新，避免大量补发时产生失效风暴。
+- **订阅抖动优化**：仓库列表内容变化时，实时订阅可能出现全量 leave + join；需要按稳定 ID 签名做增量 diff。
+- **打包运行策略**：Electron 打包产物目前包含 Web 资源和桌面壳，仍依赖本地 API 独立运行；生产形态需要明确 API 随 App 启动或外部部署方案。
+- **Workbench 拆分**：`DesktopWorkbench.tsx` 已承载大量视图和业务逻辑，需要逐步拆成会话列表、消息流、Agent 面板、Watch Feed 等子组件。
+- **测试 / lint 债务**：Web 全量 lint 仍有既有 `any` 和 hooks warnings；后端部分 auth/github 单测存在同跑污染，需要单独收敛。
+- **IM 通道补完**：飞书 / 企业微信 / 钉钉等 IM 通道已有配置和框架，仍需补齐真实投递、验签和运行时验收。
 
 ## 设计原则
 
