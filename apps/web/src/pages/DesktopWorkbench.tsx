@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -3605,6 +3606,8 @@ function RepositoryConversation({
     return localStorage.getItem('repo-pulse:repo-git-tree-open') === 'true';
   });
   const unreadBoundaryRef = useRef<HTMLDivElement | null>(null);
+  const coldLoadSentinelRef = useRef<HTMLDivElement | null>(null);
+  const coldLoadGuardRef = useRef(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const focusMessageId = searchParams.get('messageId');
@@ -3741,6 +3744,33 @@ function RepositoryConversation({
   }, [hasUnreadBoundary, isUnreadBoundaryVisible, pendingUnreadJump]);
 
   useEffect(() => {
+    const sentinel = coldLoadSentinelRef.current;
+    if (!sentinel || !hasOlderMessages || !onLoadOlderMessages) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry?.isIntersecting && !loadingOlderMessages && !coldLoadGuardRef.current) {
+          coldLoadGuardRef.current = true;
+          onLoadOlderMessages();
+        }
+      },
+      { rootMargin: '200px' },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasOlderMessages, loadingOlderMessages, onLoadOlderMessages]);
+
+  useEffect(() => {
+    if (!loadingOlderMessages) {
+      coldLoadGuardRef.current = false;
+    }
+  }, [loadingOlderMessages]);
+
+  useEffect(() => {
     if (!contextMenu) {
       return;
     }
@@ -3864,23 +3894,30 @@ function RepositoryConversation({
                 );
               })}
               {hasOlderMessages ? (
-                <div className="flex justify-center">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-8 gap-2 rounded-full"
-                    disabled={loadingOlderMessages}
-                    onClick={onLoadOlderMessages}
-                  >
-                    {loadingOlderMessages ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <ChevronDown className="h-4 w-4" />
-                    )}
-                    加载更早消息
-                  </Button>
-                </div>
+                <>
+                  <div
+                    ref={coldLoadSentinelRef}
+                    className="h-px w-full"
+                    aria-hidden
+                  />
+                  <div className="flex justify-center">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 gap-2 rounded-full"
+                      disabled={loadingOlderMessages}
+                      onClick={onLoadOlderMessages}
+                    >
+                      {loadingOlderMessages ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4" />
+                      )}
+                      加载更早消息
+                    </Button>
+                  </div>
+                </>
               ) : null}
             </>
           ) : (
@@ -5612,6 +5649,99 @@ function AgentPermissionRequestCard({
   );
 }
 
+type AgentInputDraft = {
+  id: number;
+  prompt: string;
+};
+
+function AgentChatInputField({
+  onSend,
+  onStop,
+  isRunning,
+  hasApiKey,
+  hasSessionPrompt,
+  initialPrompt = '',
+}: {
+  onSend: (prompt: string) => void;
+  onStop: () => void;
+  isRunning: boolean;
+  hasApiKey: boolean;
+  hasSessionPrompt: boolean;
+  initialPrompt?: string;
+}) {
+  const [input, setInput] = useState(initialPrompt);
+
+  const handleSend = useCallback(() => {
+    const trimmed = input.trim();
+    if (!trimmed && !hasSessionPrompt) {
+      return;
+    }
+    if (!hasApiKey) {
+      return;
+    }
+    setInput('');
+    onSend(trimmed);
+  }, [hasApiKey, hasSessionPrompt, input, onSend]);
+
+  return (
+    <div className="border-t border-border bg-background px-6 py-4">
+      <div className="mx-auto flex max-w-4xl flex-col gap-2">
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-2 shadow-sm focus-within:ring-1 focus-within:ring-primary focus-within:border-primary">
+          <Input
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            className="border-0 bg-transparent focus-visible:ring-0 text-sm flex-1"
+            placeholder={
+              !hasApiKey
+                ? '未检测到 API 密钥，请先前往“设置”配置 AI 渠道'
+                : '向 Agent 补充说明或要求，回车发送...'
+            }
+            disabled={!hasApiKey}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') {
+                return;
+              }
+              event.preventDefault();
+              if (input.trim()) {
+                handleSend();
+              }
+            }}
+          />
+          <div className="flex items-center gap-2 shrink-0">
+            {isRunning ? (
+              <Button
+                onClick={onStop}
+                variant="destructive"
+                size="sm"
+                className="h-8 gap-1.5 font-semibold text-xs rounded-lg"
+              >
+                <X className="h-3.5 w-3.5" />
+                停止
+              </Button>
+            ) : (
+              <Button
+                onClick={handleSend}
+                disabled={(!input.trim() && !hasSessionPrompt) || !hasApiKey}
+                size="sm"
+                className="h-8 gap-1.5 font-semibold text-xs rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground"
+              >
+                <Play className="h-3.5 w-3.5" />
+                {hasSessionPrompt && !input.trim() ? '重试' : '运行'}
+              </Button>
+            )}
+          </div>
+        </div>
+        {!hasApiKey && (
+          <p className="text-[11px] text-amber-500 flex items-center gap-1.5 px-1 animate-pulse">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            未在系统设置中配置有效的 Anthropic AI 渠道，Agent 无法使用。请在页面顶部的“设置”中进行配置。
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AgentRunView({
   repository: initialRepository,
   prompt: initialPrompt,
@@ -5656,7 +5786,7 @@ function AgentRunView({
   const [sidebarRenameTitle, setSidebarRenameTitle] = useState('');
 
   const [isAddProjectOpen, setIsAddProjectOpen] = useState(false);
-  const [chatInput, setChatInput] = useState('');
+  const [chatInputDraft, setChatInputDraft] = useState<AgentInputDraft | null>(null);
   const [isGitTreeOpen, setIsGitTreeOpen] = useState(() => {
     return localStorage.getItem('repo-pulse:agent-git-tree-open') !== 'false';
   });
@@ -6522,14 +6652,12 @@ function AgentRunView({
       console.warn('[AgentRunView] handleSendChat: activeSession or activeRepoId is missing.');
       return;
     }
-    const userPrompt = (overridePrompt ?? chatInput).trim();
+    const userPrompt = overridePrompt?.trim() ?? '';
     const nextPrompt = userPrompt || activeSession.prompt;
     if (!nextPrompt) {
       console.warn('[AgentRunView] handleSendChat: prompt is empty.');
       return;
     }
-
-    setChatInput('');
     
     console.log('[AgentRunView] handleSendChat: updating session details (prompt and title).');
     let freshActiveSession = { ...activeSession };
@@ -7092,60 +7220,20 @@ function AgentRunView({
 
         {/* Chat Input Area */}
         {activeSession && activeRepository && (
-          <div className="border-t border-border bg-background px-6 py-4">
-            <div className="mx-auto flex max-w-4xl flex-col gap-2">
-              <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-2 shadow-sm focus-within:ring-1 focus-within:ring-primary focus-within:border-primary">
-                <Input
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  className="border-0 bg-transparent focus-visible:ring-0 text-sm flex-1"
-                  placeholder={
-                    !activeApiKey 
-                      ? "未检测到 API 密钥，请先前往“设置”配置 AI 渠道" 
-                      : "向 Agent 补充说明或要求，回车发送..."
-                  }
-                  disabled={!activeApiKey}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      if (chatInput.trim() && activeApiKey) {
-                        handleSendChat();
-                      }
-                    }
-                  }}
-                />
-                <div className="flex items-center gap-2 shrink-0">
-                  {activeSession.status === 'running' || activeSession.status === 'waiting_permission' ? (
-                    <Button
-                      onClick={() => stopSessionOnSession(activeSession)}
-                      variant="destructive"
-                      size="sm"
-                      className="h-8 gap-1.5 font-semibold text-xs rounded-lg"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                      停止
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={() => handleSendChat()}
-                      disabled={(!chatInput.trim() && !activeSession.prompt) || !activeApiKey}
-                      size="sm"
-                      className="h-8 gap-1.5 font-semibold text-xs rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground"
-                    >
-                      <Play className="h-3.5 w-3.5" />
-                      {activeSession.prompt && !chatInput.trim() ? '重试' : '运行'}
-                    </Button>
-                  )}
-                </div>
-              </div>
-              {!activeApiKey && (
-                <p className="text-[11px] text-amber-500 flex items-center gap-1.5 px-1 animate-pulse">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  未在系统设置中配置有效的 Anthropic AI 渠道，Agent 无法使用。请在页面顶部的“设置”中进行配置。
-                </p>
-              )}
-            </div>
-          </div>
+          <AgentChatInputField
+            key={chatInputDraft?.id ?? 0}
+            onSend={(prompt) => {
+              void handleSendChat(prompt);
+            }}
+            onStop={() => stopSessionOnSession(activeSession)}
+            isRunning={
+              activeSession.status === 'running' ||
+              activeSession.status === 'waiting_permission'
+            }
+            hasApiKey={Boolean(activeApiKey)}
+            hasSessionPrompt={Boolean(activeSession.prompt)}
+            initialPrompt={chatInputDraft?.prompt}
+          />
         )}
       </div>
 
@@ -7174,7 +7262,10 @@ function AgentRunView({
             localCwd={getAgentWorkspaceMemory(activeRepository.id)?.cwd}
             refreshTrigger={gitRefreshTrigger}
             onAskAgent={(prompt) => {
-              setChatInput(prompt);
+              setChatInputDraft((current) => ({
+                id: (current?.id ?? 0) + 1,
+                prompt,
+              }));
             }}
           />
         </div>
@@ -7785,7 +7876,7 @@ export function DesktopWorkbench() {
     return getRepoMessages(selectedRepository.id, allMessages);
   }, [conversationMessagesQuery.data, olderConversationMessages, selectedRepository, allMessages]);
 
-  const handleLoadOlderConversationMessages = async () => {
+  const handleLoadOlderConversationMessages = useCallback(async () => {
     if (!selectedRepository?.id || !conversationNextCursor || isLoadingOlderConversationMessages) {
       return;
     }
@@ -7804,7 +7895,7 @@ export function DesktopWorkbench() {
     } finally {
       setIsLoadingOlderConversationMessages(false);
     }
-  };
+  }, [conversationNextCursor, isLoadingOlderConversationMessages, selectedRepository?.id]);
 
   // 通过后端 API 接口查询该仓库的完整贡献者列表（集成后端缓存与鉴权支持）
   const contributorsQuery = useApiQuery({

@@ -25,7 +25,7 @@ import { getLastSeq, setLastSeq } from '@/lib/event-seq';
 export const REALTIME_INVALIDATION_BUDGET_MS = 50;
 
 type LegacyRealtimeEventName = 'event:new' | 'events:new' | 'analysis:completed';
-type RealtimeQueryClient = Pick<QueryClient, 'invalidateQueries'>;
+type RealtimeQueryClient = Pick<QueryClient, 'invalidateQueries' | 'refetchQueries'>;
 
 interface RepositoryRealtimePayload {
   repositoryId?: string;
@@ -106,7 +106,22 @@ export function invalidateRepositoryRealtimeQueries(
   queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.list() });
   queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.chatRepositories() });
   queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.watchFeedRoot() });
-  queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.conversationMessagesRoot() });
+  if (repositoryId) {
+    void queryClient.refetchQueries({
+      predicate: (query) => {
+        const key = query.queryKey;
+        return (
+          Array.isArray(key) &&
+          key[0] === 'workbench' &&
+          key[1] === 'conversation-messages' &&
+          key[2] === repositoryId
+        );
+      },
+      type: 'active',
+    });
+  } else {
+    queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.conversationMessagesRoot() });
+  }
   queryClient.invalidateQueries({ queryKey: notificationQueryKeys.list() });
   queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
   queryClient.invalidateQueries({ queryKey: notificationQueryKeys.preferences() });
