@@ -1,8 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Mail, ShieldCheck } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { ShieldCheck, UserPlus } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,69 +22,84 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import {
-  useBootstrapMutation,
   useBootstrapStatusQuery,
   useLoginMutation,
-  useSendVerificationCodeMutation,
+  useRegisterMutation,
 } from '@/hooks/queries/use-auth-queries';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { ApiClientError } from '@/lib/query-hooks';
 
-interface LoginFormValues {
+type AuthMode = 'login' | 'register';
+
+interface AuthFormValues {
   name: string;
   email: string;
   password: string;
-  verificationCode: string;
+  confirmPassword: string;
 }
 
 export function Login() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { t } = useLanguage();
   const loginMutation = useLoginMutation();
-  const bootstrapMutation = useBootstrapMutation();
-  const sendCodeMutation = useSendVerificationCodeMutation();
+  const registerMutation = useRegisterMutation();
   const bootstrapStatusQuery = useBootstrapStatusQuery();
-  const [codeCooldown, setCodeCooldown] = useState(0);
   const bootstrapRequired = bootstrapStatusQuery.data?.required ?? false;
 
-  const loginSchema = useMemo(
-    () =>
-      z.object({
-        name: bootstrapRequired
-          ? z.string().min(1, t('auth.login.form.error.nameRequired'))
-          : z.string().optional().default(''),
-        email: z.email(t('auth.login.form.error.invalidEmail')),
-        password: z.string().min(6, t('auth.login.form.error.passwordMin')),
-        verificationCode: z.string().length(6, t('auth.login.form.error.codeLength')),
-      }),
-    [bootstrapRequired, t],
-  );
+  // 首次使用（本地实例还没有任何账号）默认进入注册模式
+  const [modeOverride, setModeOverride] = useState<AuthMode | null>(null);
+  const mode: AuthMode = modeOverride ?? (bootstrapRequired ? 'register' : 'login');
+  const isRegister = mode === 'register';
 
-  const form = useForm<LoginFormValues>({
-    resolver: zodResolver(loginSchema),
+  const formSchema = useMemo(() => {
+    const base = {
+      email: z.email(t('auth.login.form.error.invalidEmail')),
+      password: z.string().min(6, t('auth.login.form.error.passwordMin')),
+    };
+
+    if (!isRegister) {
+      return z.object({
+        ...base,
+        name: z.string().optional().default(''),
+        confirmPassword: z.string().optional().default(''),
+      });
+    }
+
+    return z
+      .object({
+        ...base,
+        name: z.string().min(1, t('auth.login.form.error.nameRequired')),
+        confirmPassword: z.string(),
+      })
+      .refine((values) => values.password === values.confirmPassword, {
+        message: t('auth.login.form.error.confirmPasswordMismatch'),
+        path: ['confirmPassword'],
+      });
+  }, [isRegister, t]);
+
+  const form = useForm<AuthFormValues>({
+    resolver: zodResolver(formSchema),
     defaultValues: {
       name: '',
       email: '',
       password: '',
-      verificationCode: '',
+      confirmPassword: '',
     },
   });
 
-  const oauthError = searchParams.get('error') === 'oauth_failed';
-  const oauthErrorReason = searchParams.get('reason');
-
-  const onSubmit = async (values: LoginFormValues) => {
+  const onSubmit = async (values: AuthFormValues) => {
     try {
-      if (bootstrapRequired) {
-        await bootstrapMutation.mutateAsync({
+      if (isRegister) {
+        await registerMutation.mutateAsync({
           email: values.email,
           name: values.name,
           password: values.password,
-          verificationCode: values.verificationCode,
         });
       } else {
-        await loginMutation.mutateAsync(values);
+        await loginMutation.mutateAsync({
+          email: values.email,
+          password: values.password,
+        });
       }
       navigate('/workbench', { replace: true });
     } catch {
@@ -92,41 +107,17 @@ export function Login() {
     }
   };
 
-  const onSendVerificationCode = async () => {
-    const emailIsValid = await form.trigger('email');
-    if (!emailIsValid || codeCooldown > 0) {
-      return;
-    }
-
-    try {
-      await sendCodeMutation.mutateAsync({
-        email: form.getValues('email'),
-        purpose: bootstrapRequired ? 'BOOTSTRAP' : 'LOGIN',
-      });
-      setCodeCooldown(60);
-    } catch {
-      // Mutation error is rendered below.
-    }
+  const switchMode = (next: AuthMode) => {
+    setModeOverride(next);
+    loginMutation.reset();
+    registerMutation.reset();
+    form.clearErrors();
   };
 
-  useEffect(() => {
-    if (codeCooldown <= 0) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      setCodeCooldown((current) => Math.max(current - 1, 0));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [codeCooldown]);
-
-  const loginErrorMessage = getLoginErrorMessage(loginMutation.error, t);
-  const bootstrapErrorMessage = getLoginErrorMessage(bootstrapMutation.error, t);
-  const sendCodeErrorMessage = getVerificationCodeErrorMessage(sendCodeMutation.error, t);
-  const submitErrorMessage = bootstrapRequired ? bootstrapErrorMessage : loginErrorMessage;
-  const submitting = loginMutation.isPending || bootstrapMutation.isPending;
-  const codeButtonDisabled =
-    sendCodeMutation.isPending || codeCooldown > 0 || bootstrapStatusQuery.isLoading;
+  const submitErrorMessage = isRegister
+    ? getRegisterErrorMessage(registerMutation.error, t)
+    : getLoginErrorMessage(loginMutation.error, t);
+  const submitting = loginMutation.isPending || registerMutation.isPending;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
@@ -137,10 +128,10 @@ export function Login() {
           </div>
           <div className="space-y-2">
             <CardTitle className="text-2xl font-bold tracking-tight text-foreground">
-              {bootstrapRequired ? t('auth.login.bootstrapTitle') : t('auth.login.title')}
+              {isRegister ? t('auth.login.registerTitle') : t('auth.login.title')}
             </CardTitle>
             <CardDescription className="text-sm text-muted-foreground">
-              {bootstrapRequired ? t('auth.login.bootstrapDescription') : t('auth.login.description')}
+              {isRegister ? t('auth.login.registerDescription') : t('auth.login.description')}
             </CardDescription>
           </div>
         </CardHeader>
@@ -148,7 +139,7 @@ export function Login() {
         <CardContent className="space-y-4">
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              {bootstrapRequired && (
+              {isRegister && (
                 <FormField
                   control={form.control}
                   name="name"
@@ -196,7 +187,7 @@ export function Login() {
                     <FormControl>
                       <Input
                         type="password"
-                        autoComplete="current-password"
+                        autoComplete={isRegister ? 'new-password' : 'current-password'}
                         placeholder={t('auth.login.form.passwordPlaceholder')}
                         {...field}
                       />
@@ -206,48 +197,35 @@ export function Login() {
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="verificationCode"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('auth.login.form.verificationCode')}</FormLabel>
-                    <div className="flex gap-2">
+              {isRegister && (
+                <FormField
+                  control={form.control}
+                  name="confirmPassword"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('auth.login.form.confirmPassword')}</FormLabel>
                       <FormControl>
                         <Input
-                          inputMode="numeric"
-                          autoComplete="one-time-code"
-                          placeholder={t('auth.login.form.verificationCodePlaceholder')}
-                          maxLength={6}
+                          type="password"
+                          autoComplete="new-password"
+                          placeholder={t('auth.login.form.confirmPasswordPlaceholder')}
                           {...field}
                         />
                       </FormControl>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="min-w-28 gap-2"
-                        onClick={onSendVerificationCode}
-                        disabled={codeButtonDisabled}
-                      >
-                        <Mail className="h-4 w-4" />
-                        {sendCodeMutation.isPending
-                          ? t('auth.login.form.codeSending')
-                          : codeCooldown > 0
-                            ? `${codeCooldown}s`
-                            : t('auth.login.form.sendCode')}
-                      </Button>
-                    </div>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
-              {(oauthError || submitErrorMessage || sendCodeErrorMessage) && (
-                <p className="text-sm text-destructive">
-                  {oauthError
-                    ? getOAuthFailureMessage(oauthErrorReason, t)
-                    : submitErrorMessage || sendCodeErrorMessage}
+              {isRegister && bootstrapRequired && (
+                <p className="text-xs text-muted-foreground">
+                  {t('auth.login.bootstrapHint')}
                 </p>
+              )}
+
+              {submitErrorMessage && (
+                <p className="text-sm text-destructive">{submitErrorMessage}</p>
               )}
 
               <Button
@@ -256,15 +234,27 @@ export function Login() {
                 size="lg"
                 disabled={submitting || bootstrapStatusQuery.isLoading}
               >
-                <ShieldCheck className="h-4 w-4" />
+                {isRegister ? <UserPlus className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
                 {submitting
-                  ? t('auth.login.form.submitting')
-                  : bootstrapRequired
-                    ? t('auth.login.form.bootstrapSubmit')
+                  ? isRegister
+                    ? t('auth.login.form.registerSubmitting')
+                    : t('auth.login.form.submitting')
+                  : isRegister
+                    ? t('auth.login.form.registerSubmit')
                     : t('auth.login.form.submit')}
               </Button>
             </form>
           </Form>
+
+          {!bootstrapRequired && (
+            <button
+              type="button"
+              className="w-full text-center text-sm text-primary hover:underline"
+              onClick={() => switchMode(isRegister ? 'login' : 'register')}
+            >
+              {isRegister ? t('auth.login.switchToLogin') : t('auth.login.switchToRegister')}
+            </button>
+          )}
 
           <p className="text-center text-xs text-muted-foreground">
             {t('auth.login.notice')}
@@ -287,18 +277,10 @@ function getLoginErrorMessage(
     return t('auth.login.form.error.invalidCredentials');
   }
 
-  if (typeof error.statusCode === 'number' && error.statusCode >= 500) {
-    return t('auth.login.form.error.server');
-  }
-
-  if (error.statusCode === undefined) {
-    return t('auth.login.form.error.network');
-  }
-
-  return error.message || t('auth.login.form.error.generic');
+  return getCommonErrorMessage(error, t);
 }
 
-function getVerificationCodeErrorMessage(
+function getRegisterErrorMessage(
   error: ApiClientError | null,
   t: (key: string) => string,
 ): string | null {
@@ -306,10 +288,17 @@ function getVerificationCodeErrorMessage(
     return null;
   }
 
-  if (error.statusCode === 400) {
-    return t('auth.login.form.error.codeRecentlySent');
+  if (error.statusCode === 409) {
+    return t('auth.login.form.error.emailTaken');
   }
 
+  return getCommonErrorMessage(error, t);
+}
+
+function getCommonErrorMessage(
+  error: ApiClientError,
+  t: (key: string) => string,
+): string {
   if (typeof error.statusCode === 'number' && error.statusCode >= 500) {
     return t('auth.login.form.error.server');
   }
@@ -319,21 +308,4 @@ function getVerificationCodeErrorMessage(
   }
 
   return error.message || t('auth.login.form.error.generic');
-}
-
-function getOAuthFailureMessage(
-  reason: string | null,
-  t: (key: string) => string,
-): string {
-  switch (reason) {
-    case 'incorrect_client_credentials':
-    case 'invalid_client':
-      return 'GitHub Client ID 或 Client Secret 不正确，请检查是否填写的是 GitHub OAuth App 凭据。';
-    case 'bad_verification_code':
-      return 'GitHub 授权码已失效，请重新发起一次登录。';
-    case 'redirect_uri_mismatch':
-      return 'GitHub OAuth 回调地址不匹配，请确认 GitHub App 中的 callback URL 与页面提示一致。';
-    default:
-      return t('auth.login.form.error.oauthFailed');
-  }
 }

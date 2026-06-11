@@ -7,32 +7,18 @@ export const envValidationSchema = Joi.object({
   // Redis
   REDIS_URL: Joi.string().default('redis://localhost:6379'),
 
-  // JWT
+  // JWT（桌面端本地实例：access token 默认 7 天，保证同设备登录态长期有效）
   JWT_SECRET: Joi.string().min(16).required(),
-  JWT_EXPIRATION: Joi.string().default('15m'),
+  JWT_EXPIRATION: Joi.string().default('7d'),
   JWT_REFRESH_EXPIRATION: Joi.string().default('30d'),
 
-  // GitHub OAuth
-  GITHUB_CLIENT_ID: Joi.string().allow(''),
-  GITHUB_CLIENT_SECRET: Joi.string().allow(''),
-  GITHUB_CALLBACK_URL: Joi.string().uri().allow(''),
+  // GitHub（全局兜底 PAT，按用户的 token 在设置页配置）
   GITHUB_TOKEN: Joi.string().allow(''),
 
   // GitLab OAuth
   GITLAB_CLIENT_ID: Joi.string().allow(''),
   GITLAB_CLIENT_SECRET: Joi.string().allow(''),
   GITLAB_CALLBACK_URL: Joi.string().uri().allow(''),
-
-  // SMTP (optional; verification codes fall back to server logs when not configured)
-  SMTP_HOST: Joi.string().allow(''),
-  SMTP_PORT: Joi.number().integer().min(1).max(65535),
-  SMTP_USER: Joi.string().allow(''),
-  SMTP_PASS: Joi.string().allow(''),
-  SMTP_FROM: Joi.string().allow(''),
-  SMTP_SECURE: Joi.boolean()
-    .truthy('true').truthy('1').truthy('yes').truthy('on')
-    .falsy('false').falsy('0').falsy('no').falsy('off')
-    .default(false),
 
   // AI Providers
   OPENAI_API_KEY: Joi.string().allow(''),
@@ -59,11 +45,10 @@ export const envValidationSchema = Joi.object({
   // App
   APP_HOST: Joi.string().hostname().default('127.0.0.1'),
   APP_PORT: Joi.number().default(3001),
-  // FRONTEND_URL: 前端应用的访问地址，用于 OAuth 回调重定向和 CORS
+  // FRONTEND_URL: 前端应用的访问地址，用于 CORS
   FRONTEND_URL: Joi.string().uri().default('http://localhost:5173'),
   // API_URL: 后端 API 的公开访问地址，用于生成 Webhook 回调 URL
   API_URL: Joi.string().uri().default('http://localhost:3001'),
-  DESKTOP_AUTH_MODE: Joi.string().valid('oauth', 'env').default('oauth'),
 
   // Rate Limiting
   THROTTLE_TTL: Joi.number().default(60),

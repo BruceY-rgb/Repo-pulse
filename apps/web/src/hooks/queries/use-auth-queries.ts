@@ -30,7 +30,6 @@ export function useBootstrapStatusQuery() {
 interface LoginPayload {
   email: string;
   password: string;
-  verificationCode: string;
 }
 
 export function useLoginMutation() {
@@ -38,8 +37,8 @@ export function useLoginMutation() {
 
   return useApiMutation({
     mutationKey: [...authQueryKeys.all, 'login'],
-    mutationFn: async ({ email, password, verificationCode }: LoginPayload) => {
-      await authService.login(email, password, verificationCode);
+    mutationFn: async ({ email, password }: LoginPayload) => {
+      await authService.login(email, password);
       return authService.getSession();
     },
     onSuccess: async () => {
@@ -48,37 +47,30 @@ export function useLoginMutation() {
   });
 }
 
-export function useBootstrapMutation() {
+interface RegisterPayload {
+  email: string;
+  name: string;
+  password: string;
+  username?: string;
+}
+
+export function useRegisterMutation() {
   const queryClient = useQueryClient();
 
   return useApiMutation({
-    mutationKey: [...authQueryKeys.all, 'bootstrap'],
-    mutationFn: async (payload: {
-      email: string;
-      name: string;
-      password: string;
-      verificationCode: string;
-      username?: string;
-    }) => {
-      await authService.bootstrap(payload);
+    mutationKey: [...authQueryKeys.all, 'register'],
+    mutationFn: async (payload: RegisterPayload) => {
+      await authService.register(payload);
       return authService.getSession();
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });
+      await queryClient.invalidateQueries({ queryKey: authQueryKeys.all });
     },
   });
 }
 
 interface UpdatePreferencesPayload {
   preferences: Record<string, unknown>;
-}
-
-export function useSendVerificationCodeMutation() {
-  return useApiMutation({
-    mutationKey: [...authQueryKeys.all, 'send-verification-code'],
-    mutationFn: ({ email, purpose }: { email: string; purpose: 'LOGIN' | 'BOOTSTRAP' }) =>
-      authService.sendVerificationCode(email, purpose),
-  });
 }
 
 export function useUpdateUserPreferencesMutation() {

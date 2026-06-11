@@ -3,7 +3,6 @@ import { Toaster } from 'sonner';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { Landing } from '@/pages/Landing';
 import { Login } from '@/pages/Login';
-import { AuthCallback } from '@/pages/AuthCallback';
 import { DesktopWorkbench } from '@/pages/DesktopWorkbench';
 import { isDesktopRuntime } from '@/lib/desktop';
 
@@ -25,7 +24,6 @@ function App() {
           <Route path="/" element={<Navigate to={defaultRoute} replace />} />
           <Route path="/landing" element={isDesktop ? <Navigate to="/workbench" replace /> : <Landing />} />
           <Route path="/login" element={<Login />} />
-          <Route path="/auth/callback" element={<AuthCallback />} />
 
           <Route element={<ProtectedRoute />}>
             <Route path="/workbench" element={<DesktopWorkbench />} />

@@ -13,33 +13,31 @@ export const authService = {
   async login(
     email: string,
     password: string,
-    verificationCode: string,
   ): Promise<{ userId: string; email: string; name: string }> {
     const { data } = await apiClient.post<ApiResponse<{ userId: string; email: string; name: string }>>(
       '/auth/login',
-      { email, password, verificationCode },
+      { email, password },
     );
     return data.data;
   },
 
+  /** 是否还没有任何账号（首次使用，注册的首个用户将成为管理员） */
   async getBootstrapStatus(): Promise<{ required: boolean }> {
     const { data } = await apiClient.get<ApiResponse<{ required: boolean }>>('/auth/bootstrap-status');
     return data.data;
   },
 
-  async sendVerificationCode(email: string, purpose: 'LOGIN' | 'BOOTSTRAP'): Promise<void> {
-    await apiClient.post('/auth/verification-codes', { email, purpose });
-  },
-
-  async bootstrap(payload: {
+  /**
+   * 账号密码注册 — 注册成功后后端直接写入登录 Cookie
+   */
+  async register(payload: {
     email: string;
     name: string;
     password: string;
-    verificationCode: string;
     username?: string;
-  }): Promise<{ userId: string; email: string; name: string }> {
-    const { data } = await apiClient.post<ApiResponse<{ userId: string; email: string; name: string }>>(
-      '/auth/bootstrap',
+  }): Promise<{ userId: string; email: string; name: string; role: string }> {
+    const { data } = await apiClient.post<ApiResponse<{ userId: string; email: string; name: string; role: string }>>(
+      '/auth/register',
       payload,
     );
     return data.data;

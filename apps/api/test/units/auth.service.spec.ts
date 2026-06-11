@@ -2,18 +2,22 @@ jest.mock('@repo-pulse/database', () => ({
   RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
   RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
   NotificationChannel: { EMAIL: 'EMAIL', DINGTALK: 'DINGTALK', FEISHU: 'FEISHU', WEBHOOK: 'WEBHOOK', IN_APP: 'IN_APP' },
-  prisma: {},
+  Role: { ADMIN: 'ADMIN', MANAGER: 'MANAGER', MEMBER: 'MEMBER', VIEWER: 'VIEWER' },
+  prisma: {
+    user: { count: jest.fn() },
+  },
   PrismaClient: jest.fn().mockImplementation(() => ({})),
 }));
 
-import { UnauthorizedException } from '@nestjs/common';
+import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { prisma } from '@repo-pulse/database';
 import { AuthService } from '../../src/modules/auth/auth.service';
 
 jest.mock('bcrypt');
-jest.mock('axios');
 
 const mockBcryptCompare = bcrypt.compare as jest.Mock;
+const mockUserCount = prisma.user.count as jest.Mock;
 
 function makeUser(overrides: object = {}) {
   return {
@@ -39,33 +43,23 @@ function makeUser(overrides: object = {}) {
 
 function makeService(overrides: Partial<{
   findByEmail: jest.Mock;
-  findByGithubId: jest.Mock;
   create: jest.Mock;
-  update: jest.Mock;
   signAsync: jest.Mock;
   verifyAsync: jest.Mock;
   configGet: jest.Mock;
-  syncUserRepos: jest.Mock;
-  verifyCode: jest.Mock;
 }> = {}) {
   const findByEmail = overrides.findByEmail ?? jest.fn().mockResolvedValue(null);
-  const findByGithubId = overrides.findByGithubId ?? jest.fn().mockResolvedValue(null);
   const create = overrides.create ?? jest.fn().mockResolvedValue(makeUser());
-  const update = overrides.update ?? jest.fn().mockResolvedValue(makeUser());
   const signAsync = overrides.signAsync ?? jest.fn().mockResolvedValue('token-xxx');
   const verifyAsync = overrides.verifyAsync ?? jest.fn();
   const configGet = overrides.configGet ?? jest.fn().mockReturnValue(undefined);
-  const syncUserRepos = overrides.syncUserRepos ?? jest.fn().mockResolvedValue(undefined);
-  const verifyCode = overrides.verifyCode ?? jest.fn().mockResolvedValue(undefined);
 
   const jwtService = { signAsync, verifyAsync } as any;
   const configService = { get: configGet } as any;
-  const userService = { findByEmail, findByGithubId, create, update } as any;
-  const syncService = { syncUserRepositories: syncUserRepos } as any;
-  const emailVerificationService = { verifyCode, sendCode: jest.fn() } as any;
+  const userService = { findByEmail, create } as any;
 
-  const service = new AuthService(jwtService, configService, userService, syncService, emailVerificationService);
-  return { service, findByEmail, findByGithubId, create, update, signAsync, verifyAsync, configGet, verifyCode };
+  const service = new AuthService(jwtService, configService, userService);
+  return { service, findByEmail, create, signAsync, verifyAsync, configGet };
 }
 
 describe('AuthService', () => {
@@ -78,7 +72,7 @@ describe('AuthService', () => {
       await expect(service.validateUser('x@x.com', 'pw')).rejects.toThrow(UnauthorizedException);
     });
 
-    it('throws when user has no passwordHash (OAuth user)', async () => {
+    it('throws when user has no passwordHash', async () => {
       const { service } = makeService({
         findByEmail: jest.fn().mockResolvedValue(makeUser({ passwordHash: null })),
       });
@@ -93,6 +87,19 @@ describe('AuthService', () => {
       await expect(service.validateUser('x@x.com', 'wrong')).rejects.toThrow(UnauthorizedException);
     });
 
+    it('uses the same error message for unknown email and wrong password (no user enumeration)', async () => {
+      const { service: noUserService } = makeService({ findByEmail: jest.fn().mockResolvedValue(null) });
+      const noUserError = await noUserService.validateUser('x@x.com', 'pw').catch((e) => e);
+
+      const { service: wrongPwService } = makeService({
+        findByEmail: jest.fn().mockResolvedValue(makeUser()),
+      });
+      mockBcryptCompare.mockResolvedValue(false);
+      const wrongPwError = await wrongPwService.validateUser('x@x.com', 'pw').catch((e) => e);
+
+      expect(noUserError.message).toBe(wrongPwError.message);
+    });
+
     it('returns user on correct password', async () => {
       const user = makeUser();
       const { service } = makeService({
@@ -103,15 +110,90 @@ describe('AuthService', () => {
       expect(result).toBe(user);
     });
 
-    it('requires a valid login verification code after password succeeds', async () => {
+    it('normalizes email before lookup (trim + lowercase)', async () => {
       const user = makeUser();
-      const { service, verifyCode } = makeService({
-        findByEmail: jest.fn().mockResolvedValue(user),
-      });
+      const findByEmail = jest.fn().mockResolvedValue(user);
+      const { service } = makeService({ findByEmail });
       mockBcryptCompare.mockResolvedValue(true);
-      const result = await service.validateUserWithVerification('alice@example.com', 'correct', '123456');
-      expect(result).toBe(user);
-      expect(verifyCode).toHaveBeenCalledWith('alice@example.com', 'LOGIN', '123456');
+      await service.validateUser('  Alice@Example.COM ', 'correct');
+      expect(findByEmail).toHaveBeenCalledWith('alice@example.com');
+    });
+  });
+
+  // ── getBootstrapStatus ─────────────────────────────────────────────────────
+  describe('getBootstrapStatus', () => {
+    it('returns required=true when no users exist', async () => {
+      mockUserCount.mockResolvedValue(0);
+      const { service } = makeService();
+      await expect(service.getBootstrapStatus()).resolves.toEqual({ required: true });
+    });
+
+    it('returns required=false when users exist', async () => {
+      mockUserCount.mockResolvedValue(3);
+      const { service } = makeService();
+      await expect(service.getBootstrapStatus()).resolves.toEqual({ required: false });
+    });
+  });
+
+  // ── register ───────────────────────────────────────────────────────────────
+  describe('register', () => {
+    const dto = { email: 'Bob@Example.com', name: 'Bob', password: 'password123' };
+
+    it('throws ConflictException when email is already registered', async () => {
+      const { service } = makeService({
+        findByEmail: jest.fn().mockResolvedValue(makeUser()),
+      });
+      await expect(service.register(dto)).rejects.toThrow(ConflictException);
+    });
+
+    it('creates the first user as ADMIN', async () => {
+      mockUserCount.mockResolvedValue(0);
+      const create = jest.fn().mockResolvedValue(makeUser({ role: 'ADMIN' }));
+      const { service } = makeService({ create });
+      await service.register(dto);
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ role: 'ADMIN' }));
+    });
+
+    it('creates subsequent users as MEMBER', async () => {
+      mockUserCount.mockResolvedValue(1);
+      const create = jest.fn().mockResolvedValue(makeUser());
+      const { service } = makeService({ create });
+      await service.register(dto);
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ role: 'MEMBER' }));
+    });
+
+    it('normalizes email and passes the raw password for hashing', async () => {
+      mockUserCount.mockResolvedValue(1);
+      const create = jest.fn().mockResolvedValue(makeUser());
+      const { service } = makeService({ create });
+      await service.register(dto);
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'bob@example.com', password: 'password123' }),
+      );
+    });
+
+    it('falls back to email as name when name is blank', async () => {
+      mockUserCount.mockResolvedValue(1);
+      const create = jest.fn().mockResolvedValue(makeUser());
+      const { service } = makeService({ create });
+      await service.register({ ...dto, name: '   ' });
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: 'bob@example.com' }));
+    });
+
+    it('returns token pair and user info on success', async () => {
+      mockUserCount.mockResolvedValue(0);
+      const { service } = makeService({
+        create: jest.fn().mockResolvedValue(makeUser({ role: 'ADMIN' })),
+        signAsync: jest.fn().mockResolvedValue('signed'),
+      });
+      const result = await service.register(dto);
+      expect(result).toMatchObject({
+        accessToken: 'signed',
+        refreshToken: 'signed',
+        userId: 'u1',
+        email: 'alice@example.com',
+        role: 'ADMIN',
+      });
     });
   });
 
@@ -123,6 +205,16 @@ describe('AuthService', () => {
       });
       const result = await service.generateTokens({ sub: 'u1', email: 'a@a.com', role: 'MEMBER' });
       expect(result).toEqual({ accessToken: 'signed-token', refreshToken: 'signed-token' });
+    });
+
+    it('signs the refresh token with the configured refresh expiration', async () => {
+      const signAsync = jest.fn().mockResolvedValue('t');
+      const { service } = makeService({
+        signAsync,
+        configGet: jest.fn((key: string) => (key === 'JWT_REFRESH_EXPIRATION' ? '90d' : undefined)),
+      });
+      await service.generateTokens({ sub: 'u1', email: 'a@a.com', role: 'MEMBER' });
+      expect(signAsync).toHaveBeenCalledWith(expect.any(Object), { expiresIn: '90d' });
     });
   });
 
@@ -146,81 +238,21 @@ describe('AuthService', () => {
     });
   });
 
-  // ── handleGithubAuth ───────────────────────────────────────────────────────
-  describe('handleGithubAuth', () => {
-    const profile = {
-      id: 'gh-123',
-      email: 'alice@example.com',
-      displayName: 'Alice',
-      avatar: 'https://avatar.url',
-      githubAccessToken: 'gat',
-      githubRefreshToken: 'grt',
-    };
-
-    it('throws when email is missing', async () => {
-      const { service } = makeService();
-      await expect(
-        service.handleGithubAuth({ ...profile, email: undefined }),
-      ).rejects.toThrow(UnauthorizedException);
-    });
-
-    it('creates new user when no existing user found', async () => {
-      const { service, create } = makeService({
-        findByGithubId: jest.fn().mockResolvedValue(null),
-        findByEmail: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue(makeUser()),
-      });
-      await service.handleGithubAuth(profile);
-      expect(create).toHaveBeenCalledWith(expect.objectContaining({ email: profile.email }));
-    });
-
-    it('links existing email user to github when githubId not yet set', async () => {
-      const existingUser = makeUser();
-      const { service, update } = makeService({
-        findByGithubId: jest.fn().mockResolvedValue(null),
-        findByEmail: jest.fn().mockResolvedValue(existingUser),
-        update: jest.fn().mockResolvedValue(existingUser),
-      });
-      await service.handleGithubAuth(profile);
-      expect(update).toHaveBeenCalledWith(existingUser.id, expect.objectContaining({ githubId: profile.id }));
-    });
-
-    it('updates tokens when github user already exists', async () => {
-      const existingUser = makeUser({ githubId: 'gh-123' });
-      const { service, update } = makeService({
-        findByGithubId: jest.fn().mockResolvedValue(existingUser),
-        update: jest.fn().mockResolvedValue(existingUser),
-      });
-      await service.handleGithubAuth(profile);
-      expect(update).toHaveBeenCalledWith(existingUser.id, expect.objectContaining({ githubAccessToken: 'gat' }));
-    });
-
-    it('returns token pair on success', async () => {
+  // ── verifyToken ────────────────────────────────────────────────────────────
+  describe('verifyToken', () => {
+    it('returns payload for a valid token', async () => {
+      const payload = { sub: 'u1', email: 'a@a.com', role: 'MEMBER' };
       const { service } = makeService({
-        findByGithubId: jest.fn().mockResolvedValue(makeUser()),
-        update: jest.fn().mockResolvedValue(makeUser()),
-        signAsync: jest.fn().mockResolvedValue('tok'),
+        verifyAsync: jest.fn().mockResolvedValue(payload),
       });
-      const result = await service.handleGithubAuth(profile);
-      expect(result).toHaveProperty('accessToken');
-      expect(result).toHaveProperty('refreshToken');
-    });
-  });
-
-  // ── handleGithubEnvTokenAuth ───────────────────────────────────────────────
-  describe('handleGithubEnvTokenAuth', () => {
-    it('throws when DESKTOP_AUTH_MODE is not env', async () => {
-      const { service } = makeService({ configGet: jest.fn().mockReturnValue('oauth') });
-      await expect(service.handleGithubEnvTokenAuth()).rejects.toThrow(UnauthorizedException);
+      await expect(service.verifyToken('good')).resolves.toEqual(payload);
     });
 
-    it('throws when GITHUB_TOKEN not configured', async () => {
+    it('returns null for an invalid token instead of throwing', async () => {
       const { service } = makeService({
-        configGet: jest.fn().mockImplementation((key: string) =>
-          key === 'DESKTOP_AUTH_MODE' ? 'env' : undefined,
-        ),
+        verifyAsync: jest.fn().mockRejectedValue(new Error('bad signature')),
       });
-      await expect(service.handleGithubEnvTokenAuth()).rejects.toThrow(UnauthorizedException);
+      await expect(service.verifyToken('bad')).resolves.toBeNull();
     });
   });
 });
