@@ -25,6 +25,9 @@ import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api-client';
 import { authQueryKeys } from '@/hooks/queries/use-auth-queries';
+import { repositoryQueryKeys } from '@/hooks/queries/use-repository-queries';
+import { workbenchQueryKeys } from '@/hooks/queries/use-workbench-queries';
+import { dashboardQueryKeys } from '@/hooks/queries/use-dashboard-queries';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -385,11 +388,32 @@ export function Settings() {
     setGithubSaving(true);
     setGithubTestResult(null);
     try {
-      const status = await settingsService.updateGithubToken(token);
+      const { sync, ...status } = await settingsService.updateGithubToken(token);
       setGithubIntegration(status);
       setGithubTokenInput('');
+      const invalidateRepositoryData = () => {
+        queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.all });
+        queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.all });
+        queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.repositories() });
+      };
       queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });
-      toast.success(t('settings.integrations.github.saved'));
+      // 同步已在后端完成（或仍在后台进行），失效仓库相关缓存让列表自动刷新
+      invalidateRepositoryData();
+      if (sync?.status === 'completed') {
+        toast.success(
+          t('settings.integrations.github.syncCompleted', { count: String(sync.synced ?? 0) }),
+        );
+      } else if (sync?.status === 'pending') {
+        toast.success(t('settings.integrations.github.syncPending'));
+        // 后台同步仍在进行，此刻的失效拿不到新仓库；延迟几轮再失效，兑现「稍后自动显示」
+        [30_000, 90_000, 180_000].forEach((delay) => {
+          setTimeout(invalidateRepositoryData, delay);
+        });
+      } else if (sync?.status === 'failed') {
+        toast.warning(t('settings.integrations.github.syncFailed'));
+      } else {
+        toast.success(t('settings.integrations.github.saved'));
+      }
     } catch (error) {
       const message =
         typeof error === 'object' && error !== null && 'message' in error

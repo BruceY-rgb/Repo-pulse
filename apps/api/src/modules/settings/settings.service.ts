@@ -169,6 +169,9 @@ export class SettingsService {
           Authorization: `Bearer ${token}`,
           'User-Agent': 'Repo-Pulse',
         },
+        // token 保存接口还要在响应内等待仓库同步，必须给 profile 校验设上限，
+        // 否则会挤占全局 TimeoutInterceptor 的 30s 预算
+        timeout: 10_000,
       });
       return response.data;
     } catch (error) {

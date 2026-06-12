@@ -306,6 +306,18 @@ describe('SyncService', () => {
       const result = await service.syncUserRepositories('u1');
       expect(result).toEqual({ synced: 0, starred: 0 });
     });
+
+    it('rethrows fetch errors when throwOnFetchError is set (token-save endpoint needs the real failure)', async () => {
+      mockUserFindUnique.mockResolvedValue({ githubAccessToken: 'token' });
+      mockGithubService.getUserRepositories.mockRejectedValue(new Error('API down'));
+
+      await expect(service.syncUserRepositories('u1', { throwOnFetchError: true })).rejects.toThrow('API down');
+      expect(mockGithubService.getUserRepositories).toHaveBeenCalledWith(
+        'token',
+        undefined,
+        { throwOnError: true },
+      );
+    });
   });
 
   // ── syncRepositoryHistory ──────────────────────────────────────────────────

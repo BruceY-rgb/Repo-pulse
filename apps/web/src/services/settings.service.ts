@@ -1,6 +1,12 @@
 import { apiClient } from './api-client';
 import type { ApiResponse } from '@/types/api';
-import type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
+import type {
+  AIProvider,
+  AIConfig,
+  ConnectionTestResult,
+  ModelInfo,
+  GithubTokenSyncSummary,
+} from '@repo-pulse/shared';
 import {
   PROVIDER_LABELS,
   PROVIDER_DEFAULT_MODELS,
@@ -146,11 +152,12 @@ export const settingsService = {
     return data.data;
   },
 
-  async updateGithubToken(token: string): Promise<GithubIntegrationStatus> {
-    const { data } = await apiClient.put<ApiResponse<GithubIntegrationStatus>>(
-      '/settings/integrations/github-token',
-      { token },
-    );
+  async updateGithubToken(
+    token: string,
+  ): Promise<GithubIntegrationStatus & { sync: GithubTokenSyncSummary }> {
+    const { data } = await apiClient.put<
+      ApiResponse<GithubIntegrationStatus & { sync: GithubTokenSyncSummary }>
+    >('/settings/integrations/github-token', { token });
     return data.data;
   },
 

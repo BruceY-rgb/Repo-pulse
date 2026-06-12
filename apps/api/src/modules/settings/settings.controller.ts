@@ -1,5 +1,6 @@
 import { Controller, Delete, Get, Post, Put, Body, UseGuards, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import type { GithubTokenSyncSummary } from '@repo-pulse/shared';
 import { SettingsService, AIProvider } from './settings.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -154,10 +155,33 @@ export class SettingsController {
       throw new BadRequestException('GitHub token is required');
     }
     const result = await this.settingsService.updateGithubToken(user.sub, token);
-    setTimeout(() => {
-      this.syncService.syncUserRepositories(user.sub).catch(() => undefined);
-    }, 100);
-    return result;
+    const sync = await this.runSyncBounded(user.sub);
+    return { ...result, sync };
+  }
+
+  /**
+   * Token 保存后立刻同步仓库，但最多等待 SYNC_WAIT_MS。
+   * 预算：前端 axios 与服务端全局 TimeoutInterceptor 均为 30s，
+   * 前置的 GitHub profile 校验最多占 10s（settings.service 已设超时），故等待上限取 15s。
+   * 超时后同步继续在后台进行，响应标记 pending；同步异常不影响 token 保存结果。
+   */
+  private async runSyncBounded(userId: string): Promise<GithubTokenSyncSummary> {
+    const SYNC_WAIT_MS = 15_000;
+    const syncPromise = this.syncService.syncUserRepositories(userId, { throwOnFetchError: true });
+    syncPromise.catch(() => undefined);
+
+    let timer: NodeJS.Timeout | undefined;
+    const sync = await Promise.race<GithubTokenSyncSummary>([
+      syncPromise.then(
+        ({ synced, starred }) => ({ status: 'completed' as const, synced, starred }),
+        () => ({ status: 'failed' as const }),
+      ),
+      new Promise<GithubTokenSyncSummary>((resolve) => {
+        timer = setTimeout(() => resolve({ status: 'pending' }), SYNC_WAIT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    return sync;
   }
 
   @Post('integrations/github/test')

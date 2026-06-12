@@ -67,7 +67,10 @@ export class SyncService {
       : RepositoryAccessMode.MONITOR;
   }
 
-  async syncUserRepositories(userId: string): Promise<{ synced: number; starred: number }> {
+  async syncUserRepositories(
+    userId: string,
+    options?: { throwOnFetchError?: boolean },
+  ): Promise<{ synced: number; starred: number }> {
     this.logger.log(`Starting to sync repositories for user: ${userId}`);
 
     const user = await prisma.user.findUnique({
@@ -87,6 +90,7 @@ export class SyncService {
       const userRepos = await this.githubService.getUserRepositories(
         user.githubAccessToken,
         user.githubRefreshToken || undefined,
+        { throwOnError: options?.throwOnFetchError },
       );
       this.logger.log(`GitHub API returned ${userRepos.length} user repositories`);
 
@@ -293,6 +297,10 @@ export class SyncService {
       return { synced, starred };
     } catch (error) {
       this.logger.error(`Failed to sync user repositories`, error);
+      // throwOnFetchError：调用方（如 token 保存接口）需要把同步失败如实上报，而不是伪装成 0 个成功
+      if (options?.throwOnFetchError) {
+        throw error;
+      }
       return { synced: 0, starred: 0 };
     }
   }
