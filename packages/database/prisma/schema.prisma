@@ -131,7 +131,7 @@ model User {
   name               String
   avatar             String?   @db.Text
   passwordHash       String?
-  githubId           String?  @unique
+  githubId           String?
   githubLogin        String?
   githubAccessToken  String?
   githubRefreshToken String?

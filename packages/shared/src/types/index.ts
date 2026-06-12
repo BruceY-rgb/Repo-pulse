@@ -416,7 +416,7 @@ export interface BootstrapStatus {
 /**
  * PUT /settings/integrations/github-token 响应中的仓库同步摘要。
  * completed：同步已结束，synced/starred 为本次新增数；
- * pending：同步耗时超过接口等待上限，仍在后台继续；
+ * pending：同步已在后台启动，仓库列表稍后刷新；
  * failed：同步出错（token 本身已保存成功）。
  */
 export interface GithubTokenSyncSummary {

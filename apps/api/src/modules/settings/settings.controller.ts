@@ -1,6 +1,16 @@
-import { Controller, Delete, Get, Post, Put, Body, UseGuards, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Delete,
+  Get,
+  Post,
+  Put,
+  Body,
+  UseGuards,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import type { GithubTokenSyncSummary } from '@repo-pulse/shared';
 import { SettingsService, AIProvider } from './settings.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -10,6 +20,8 @@ import { SyncService } from '../sync/sync.service';
 @ApiTags('设置')
 @Controller('settings')
 export class SettingsController {
+  private readonly logger = new Logger(SettingsController.name);
+
   constructor(
     private readonly settingsService: SettingsService,
     private readonly syncService: SyncService,
@@ -155,33 +167,31 @@ export class SettingsController {
       throw new BadRequestException('GitHub token is required');
     }
     const result = await this.settingsService.updateGithubToken(user.sub, token);
-    const sync = await this.runSyncBounded(user.sub);
-    return { ...result, sync };
+    this.startGithubSync(user.sub);
+    return { ...result, sync: { status: 'pending' as const } };
   }
 
   /**
-   * Token 保存后立刻同步仓库，但最多等待 SYNC_WAIT_MS。
-   * 预算：前端 axios 与服务端全局 TimeoutInterceptor 均为 30s，
-   * 前置的 GitHub profile 校验最多占 10s（settings.service 已设超时），故等待上限取 15s。
-   * 超时后同步继续在后台进行，响应标记 pending；同步异常不影响 token 保存结果。
+   * Token 保存后后台同步仓库。
+   * 同步可能触发 GitHub 多页拉取、webhook 创建和分支同步，不能阻塞保存请求；
+   * 否则仓库多或网络慢时容易撞上前端/API 30s 超时，被误报为 token 保存失败。
    */
-  private async runSyncBounded(userId: string): Promise<GithubTokenSyncSummary> {
-    const SYNC_WAIT_MS = 15_000;
+  private startGithubSync(userId: string): void {
     const syncPromise = this.syncService.syncUserRepositories(userId, { throwOnFetchError: true });
-    syncPromise.catch(() => undefined);
-
-    let timer: NodeJS.Timeout | undefined;
-    const sync = await Promise.race<GithubTokenSyncSummary>([
-      syncPromise.then(
-        ({ synced, starred }) => ({ status: 'completed' as const, synced, starred }),
-        () => ({ status: 'failed' as const }),
-      ),
-      new Promise<GithubTokenSyncSummary>((resolve) => {
-        timer = setTimeout(() => resolve({ status: 'pending' }), SYNC_WAIT_MS);
-      }),
-    ]);
-    clearTimeout(timer);
-    return sync;
+    syncPromise.then(
+      ({ synced, starred }) => {
+        this.logger.log(
+          `github_token_background_sync_completed userId=${userId} synced=${synced} starred=${starred}`,
+        );
+      },
+      (error) => {
+        this.logger.warn(
+          `github_token_background_sync_failed userId=${userId} ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      },
+    );
   }
 
   @Post('integrations/github/test')

@@ -117,6 +117,23 @@ const apiKeys = [
   { name: 'Development API Key', key: 'rp_dev_xxxxxxxxxxxx', created: '2025-02-20', lastUsed: '1 day ago' },
 ];
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error === 'object' && error !== null) {
+    const responseMessage = (error as { response?: { data?: { message?: unknown } } }).response
+      ?.data?.message;
+    if (typeof responseMessage === 'string' && responseMessage.trim()) {
+      return responseMessage;
+    }
+
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) {
+      return message;
+    }
+  }
+
+  return fallback;
+}
+
 export function Settings() {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -415,11 +432,7 @@ export function Settings() {
         toast.success(t('settings.integrations.github.saved'));
       }
     } catch (error) {
-      const message =
-        typeof error === 'object' && error !== null && 'message' in error
-          ? String((error as { message?: string }).message)
-          : t('settings.integrations.github.saveFailed');
-      toast.error(message);
+      toast.error(getErrorMessage(error, t('settings.integrations.github.saveFailed')));
     } finally {
       setGithubSaving(false);
     }
@@ -437,10 +450,7 @@ export function Settings() {
         toast.warning(t('settings.integrations.github.testFailed'));
       }
     } catch (error) {
-      const message =
-        typeof error === 'object' && error !== null && 'message' in error
-          ? String((error as { message?: string }).message)
-          : t('settings.integrations.github.testFailed');
+      const message = getErrorMessage(error, t('settings.integrations.github.testFailed'));
       setGithubTestResult({ ok: false, message });
       toast.error(message);
     } finally {

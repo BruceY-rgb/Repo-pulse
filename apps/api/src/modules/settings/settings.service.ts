@@ -87,15 +87,22 @@ export class SettingsService {
       throw new BadRequestException('GitHub token is required');
     }
 
-    const profile = await this.fetchGithubProfile(trimmedToken);
+    const profile = await this.fetchGithubProfile(trimmedToken, {
+      allowTransientFailure: true,
+    });
+
     const user = await prisma.user.update({
       where: { id: userId },
       data: {
-        githubId: String(profile.id),
-        githubLogin: profile.login,
         githubAccessToken: trimmedToken,
         githubRefreshToken: null,
-        avatar: profile.avatar_url || undefined,
+        ...(profile
+          ? {
+              githubId: String(profile.id),
+              githubLogin: profile.login,
+              avatar: profile.avatar_url || undefined,
+            }
+          : {}),
       },
       select: {
         githubId: true,
@@ -104,7 +111,9 @@ export class SettingsService {
       },
     });
 
-    this.logger.log(`github_token_configured userId=${userId} login=${profile.login}`);
+    this.logger.log(
+      `github_token_configured userId=${userId} login=${profile?.login ?? 'unverified'}`,
+    );
 
     return this.toGithubIntegrationStatus(user);
   }
@@ -120,6 +129,9 @@ export class SettingsService {
     }
 
     const profile = await this.fetchGithubProfile(user.githubAccessToken);
+    if (!profile) {
+      return { ok: false, message: 'Unable to read GitHub account with this token' };
+    }
     return { ok: true, login: profile.login, message: 'GitHub token is valid' };
   }
 
@@ -161,7 +173,10 @@ export class SettingsService {
     };
   }
 
-  private async fetchGithubProfile(token: string): Promise<GithubTokenProfile> {
+  private async fetchGithubProfile(
+    token: string,
+    options?: { allowTransientFailure?: boolean },
+  ): Promise<GithubTokenProfile | null> {
     try {
       const response = await axios.get<GithubTokenProfile>('https://api.github.com/user', {
         headers: {
@@ -175,7 +190,18 @@ export class SettingsService {
       });
       return response.data;
     } catch (error) {
-      this.logger.warn('github_token_profile_fetch_failed', this.formatGithubError(error));
+      const formattedError = this.formatGithubError(error);
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        this.logger.warn('github_token_profile_auth_failed', formattedError);
+        throw new BadRequestException('Invalid GitHub token');
+      }
+
+      if (options?.allowTransientFailure) {
+        this.logger.warn('github_token_profile_fetch_deferred', formattedError);
+        return null;
+      }
+
+      this.logger.warn('github_token_profile_fetch_failed', formattedError);
       throw new BadRequestException('Unable to read GitHub account with this token');
     }
   }

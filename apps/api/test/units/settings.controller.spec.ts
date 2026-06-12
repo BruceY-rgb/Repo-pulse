@@ -27,12 +27,8 @@ function makeSyncService(overrides: Partial<Record<string, jest.Mock>> = {}) {
   } as any;
 }
 
-describe('SettingsController · updateGithubToken（保存后内联同步）', () => {
+describe('SettingsController · updateGithubToken（保存后后台同步）', () => {
   const user = { sub: 'u1' };
-
-  afterEach(() => {
-    jest.useRealTimers();
-  });
 
   it('rejects blank token with BadRequestException without touching services', async () => {
     const settingsService = makeSettingsService();
@@ -44,7 +40,7 @@ describe('SettingsController · updateGithubToken（保存后内联同步）', (
     expect(syncService.syncUserRepositories).not.toHaveBeenCalled();
   });
 
-  it('awaits the sync and returns sync=completed with counts', async () => {
+  it('saves the token, starts background sync, and returns sync=pending immediately', async () => {
     const syncService = makeSyncService({
       syncUserRepositories: jest.fn().mockResolvedValue({ synced: 5, starred: 2 }),
     });
@@ -56,31 +52,17 @@ describe('SettingsController · updateGithubToken（保存后内联同步）', (
     expect(syncService.syncUserRepositories).toHaveBeenCalledWith('u1', { throwOnFetchError: true });
     expect(result).toMatchObject({
       ...INTEGRATION_STATUS,
-      sync: { status: 'completed', synced: 5, starred: 2 },
+      sync: { status: 'pending' },
     });
   });
 
-  it('returns sync=failed when the sync rejects, while the token save itself succeeds', async () => {
+  it('still returns sync=pending when the background sync rejects', async () => {
     const syncService = makeSyncService({
       syncUserRepositories: jest.fn().mockRejectedValue(new Error('github down')),
     });
     const controller = new SettingsController(makeSettingsService(), syncService);
 
     const result = await controller.updateGithubToken(user, { token: 'ghp_x' });
-
-    expect(result).toMatchObject({ ...INTEGRATION_STATUS, sync: { status: 'failed' } });
-  });
-
-  it('returns sync=pending when the sync outlives the 15s wait cap', async () => {
-    jest.useFakeTimers();
-    const syncService = makeSyncService({
-      syncUserRepositories: jest.fn().mockReturnValue(new Promise(() => undefined)),
-    });
-    const controller = new SettingsController(makeSettingsService(), syncService);
-
-    const resultPromise = controller.updateGithubToken(user, { token: 'ghp_x' });
-    await jest.advanceTimersByTimeAsync(15_000);
-    const result = await resultPromise;
 
     expect(result).toMatchObject({ ...INTEGRATION_STATUS, sync: { status: 'pending' } });
   });

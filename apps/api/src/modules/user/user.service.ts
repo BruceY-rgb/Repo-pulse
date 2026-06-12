@@ -18,7 +18,7 @@ export class UserService {
   }
 
   async findByGithubId(githubId: string): Promise<User | null> {
-    return prisma.user.findUnique({ where: { githubId } });
+    return prisma.user.findFirst({ where: { githubId } });
   }
 
   async create(data: {

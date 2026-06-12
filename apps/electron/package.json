@@ -5,7 +5,7 @@
   "type": "commonjs",
   "main": "dist/main/main.js",
   "scripts": {
-    "dev": "concurrently -k -n API,WEB,ELECTRON -c green,cyan,magenta \"cross-env FRONTEND_URL=http://127.0.0.1:5173 pnpm --filter @repo-pulse/api dev\" \"pnpm --filter @repo-pulse/web exec vite --host 127.0.0.1\" \"wait-on tcp:3001 tcp:5173 && pnpm --filter @repo-pulse/shared build && pnpm build:main && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "dev": "pnpm --filter @repo-pulse/shared build && concurrently -k -n API,WEB,ELECTRON -c green,cyan,magenta \"cross-env FRONTEND_URL=http://127.0.0.1:5173 pnpm --filter @repo-pulse/api dev\" \"pnpm --filter @repo-pulse/web exec vite --host 127.0.0.1\" \"wait-on tcp:3001 tcp:5173 && pnpm build:main && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
     "install:electron": "install-electron --no",
     "build": "pnpm --filter @repo-pulse/shared build && pnpm run build:main && cross-env VITE_DESKTOP=true pnpm --filter @repo-pulse/web build",
     "build:main": "tsc -p tsconfig.json",

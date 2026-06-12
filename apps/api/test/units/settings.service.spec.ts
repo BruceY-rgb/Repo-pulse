@@ -38,6 +38,9 @@ describe('SettingsService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAxios.isAxiosError.mockImplementation((error: unknown) =>
+      Boolean((error as { isAxiosError?: boolean } | null)?.isAxiosError),
+    );
     service = new SettingsService();
   });
 
@@ -75,6 +78,44 @@ describe('SettingsService', () => {
         tokenMasked: 'gith...1234',
       });
       expect(result).not.toHaveProperty('githubAccessToken');
+    });
+
+    it('stores GitHub token when profile validation has a transient network failure', async () => {
+      mockAxios.get.mockRejectedValueOnce({
+        isAxiosError: true,
+        message: 'timeout of 10000ms exceeded',
+        code: 'ECONNABORTED',
+      });
+      mockUserUpdate.mockResolvedValue({
+        githubId: null,
+        githubLogin: null,
+        githubAccessToken: 'github_pat_secret1234',
+      });
+
+      const result = await service.updateGithubToken('u1', 'github_pat_secret1234');
+      const callData = mockUserUpdate.mock.calls[0][0].data;
+
+      expect(callData).toEqual(expect.objectContaining({
+        githubAccessToken: 'github_pat_secret1234',
+        githubRefreshToken: null,
+      }));
+      expect(callData).not.toHaveProperty('githubId');
+      expect(callData).not.toHaveProperty('githubLogin');
+      expect(result).toEqual({
+        connected: true,
+        tokenMasked: 'gith...1234',
+      });
+    });
+
+    it('rejects invalid GitHub token without storing it', async () => {
+      mockAxios.get.mockRejectedValueOnce({
+        isAxiosError: true,
+        message: 'Request failed with status code 401',
+        response: { status: 401, data: { message: 'Bad credentials' } },
+      });
+
+      await expect(service.updateGithubToken('u1', 'bad-token')).rejects.toThrow('Invalid GitHub token');
+      expect(mockUserUpdate).not.toHaveBeenCalled();
     });
 
     it('disconnects GitHub token and returns disconnected status', async () => {
