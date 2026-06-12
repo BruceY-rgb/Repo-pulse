@@ -377,3 +377,36 @@ export interface TestFilterResult {
   matched: boolean;
   action: FilterActionValue | null;
 }
+
+// ===== Auth =====
+
+/** POST /auth/login 请求体 */
+export interface LoginPayload {
+  email: string;
+  password: string;
+}
+
+/** POST /auth/register 请求体 */
+export interface RegisterPayload {
+  email: string;
+  name: string;
+  password: string;
+  username?: string;
+}
+
+/** POST /auth/login 响应体（Token 在 HttpOnly Cookie 中，不在响应体） */
+export interface LoginResult {
+  userId: string;
+  email: string;
+  name: string;
+}
+
+/** POST /auth/register 响应体 */
+export interface RegisterResult extends LoginResult {
+  role: string;
+}
+
+/** GET /auth/bootstrap-status 响应体：是否还没有任何账号（首次使用） */
+export interface BootstrapStatus {
+  required: boolean;
+}

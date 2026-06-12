@@ -37,12 +37,13 @@ const DEFAULT_REFRESH_TOKEN_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 天
  * 解析 '15m' / '12h' / '7d' / '30s' 形式的时长为毫秒。
  * Cookie 的 maxAge 必须与 JWT 的有效期一致，否则会出现
  * 「Cookie 还在但 Token 已过期」或反过来的不一致状态。
+ * 合法格式由 env.validation.ts 在启动时强制（^[1-9]\d*[smhd]$），这里的回退只兜底缺省值。
  */
 function parseDurationMs(value: string | undefined, fallbackMs: number): number {
   if (!value) {
     return fallbackMs;
   }
-  const match = /^(\d+)([smhd])$/.exec(value.trim());
+  const match = /^([1-9]\d*)([smhd])$/.exec(value.trim());
   if (!match) {
     return fallbackMs;
   }

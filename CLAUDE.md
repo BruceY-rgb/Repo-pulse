@@ -67,7 +67,7 @@ Repo-Pulse 是一个 AI 驱动的代码仓库监控与管理平台，采用 Mono
 
 ## 6. 项目开发进度
 
-> **最后更新**：2026-06-03
+> **最后更新**：2026-06-12
 
 ### 已完成阶段
 
@@ -77,6 +77,7 @@ Repo-Pulse 是一个 AI 驱动的代码仓库监控与管理平台，采用 Mono
 | **Phase 2** 实时数据流 | ✅ 已完成 | WebSocket Gateway、消息队列联动、React Query 迁移 |
 | **Phase 3** AI 核心引擎 | ✅ 已完成 | AI 抽象层、异步分析工作流、SSE 流式输出 |
 | **桌面端实时推送改造**（Item-4，分支 `feature/IPC-realtime-push`） | ✅ 代码完成（M0–M6），⏳ 待运行时端到端验收 | 桌面端实时从「浏览器 WebSocket」改为「Electron 主进程 socket.io 客户端 → 单一 IPC 通道 `desktop:realtime` → 渲染进程复用 `createRealtimeHandlers`」；主进程从 `session.cookies` 读 HttpOnly `access_token` 鉴权；补齐 `approval.updated`、`analysis.started/failed`、`notification.new`（按 `user:<id>` 房间）广播源 + 「本地优先」`LocalGitWatcher`；M6 补齐广播单元测试（6 spec / 98 测试全绿）。详见 `docs/realtime-push-handoff.md` 与 `docs/electron-ipc-realtime-push-plan.md`。 |
+| **登录注册改为纯账号密码模式**（分支 `dev-electron`） | ✅ 已完成 | 移除邮箱验证码登录与 GitHub OAuth 登录残留；新增 `POST /auth/register`（首个用户自动 ADMIN，后续 MEMBER）；登录页双模式、首次使用默认注册；access_token 默认 15m→7d、Cookie maxAge 与 JWT 配置对齐（`JWT_EXPIRATION`/`JWT_REFRESH_EXPIRATION`，启动期格式校验）；登录失败提示统一防枚举；注册唯一约束冲突映射 409；前端凭据接口 401 不再触发 refresh 跳转；认证 payload/response 类型收敛到 `@repo-pulse/shared`；GitHub PAT 配置保留在「设置 → 集成」。Prisma 移除 `EmailVerificationCode`（迁移 `20260611000000_drop_email_verification_codes` 待 DB 启动后 `pnpm db:migrate` 应用）。 |
 
 ### 本次实现功能详情
 

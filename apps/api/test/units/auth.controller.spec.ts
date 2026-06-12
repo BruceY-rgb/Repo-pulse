@@ -42,7 +42,6 @@ function makeRes() {
   return {
     cookie: jest.fn(),
     clearCookie: jest.fn(),
-    redirect: jest.fn(),
   } as any;
 }
 
@@ -116,6 +115,16 @@ describe('AuthController', () => {
       await controller.login({ email: 'a@b.com', password: 'pw' }, res);
       expect(res.cookie).toHaveBeenCalledWith('access_token', 'acc', expect.objectContaining({ maxAge: SEVEN_DAYS_MS, httpOnly: true }));
       expect(res.cookie).toHaveBeenCalledWith('refresh_token', 'ref', expect.objectContaining({ maxAge: THIRTY_DAYS_MS, httpOnly: true }));
+    });
+
+    it('keeps the cookie attributes the desktop main process depends on (httpOnly + sameSite=lax + path=/)', async () => {
+      const res = makeRes();
+      await controller.login({ email: 'a@b.com', password: 'pw' }, res);
+      expect(res.cookie).toHaveBeenCalledWith(
+        'access_token',
+        'acc',
+        expect.objectContaining({ httpOnly: true, sameSite: 'lax', path: '/' }),
+      );
     });
 
     it('derives cookie maxAge from JWT_EXPIRATION / JWT_REFRESH_EXPIRATION', async () => {

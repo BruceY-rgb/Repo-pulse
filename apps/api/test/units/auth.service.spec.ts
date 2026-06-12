@@ -180,6 +180,31 @@ describe('AuthService', () => {
       expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: 'bob@example.com' }));
     });
 
+    it('trims username and omits it when blank', async () => {
+      mockUserCount.mockResolvedValue(1);
+      const create = jest.fn().mockResolvedValue(makeUser());
+      const { service } = makeService({ create });
+      await service.register({ ...dto, username: '  bob-dev  ' });
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ username: 'bob-dev' }));
+
+      await service.register({ ...dto, username: '   ' });
+      expect(create).toHaveBeenLastCalledWith(expect.objectContaining({ username: undefined }));
+    });
+
+    it('maps unique-constraint violations (P2002) during create to ConflictException', async () => {
+      mockUserCount.mockResolvedValue(1);
+      const p2002 = Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
+      const { service } = makeService({ create: jest.fn().mockRejectedValue(p2002) });
+      await expect(service.register(dto)).rejects.toThrow(ConflictException);
+    });
+
+    it('rethrows non-P2002 create errors untouched', async () => {
+      mockUserCount.mockResolvedValue(1);
+      const dbDown = new Error('connection refused');
+      const { service } = makeService({ create: jest.fn().mockRejectedValue(dbDown) });
+      await expect(service.register(dto)).rejects.toThrow('connection refused');
+    });
+
     it('returns token pair and user info on success', async () => {
       mockUserCount.mockResolvedValue(0);
       const { service } = makeService({

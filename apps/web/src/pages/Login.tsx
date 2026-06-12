@@ -51,31 +51,37 @@ export function Login() {
   const mode: AuthMode = modeOverride ?? (bootstrapRequired ? 'register' : 'login');
   const isRegister = mode === 'register';
 
-  const formSchema = useMemo(() => {
-    const base = {
-      email: z.email(t('auth.login.form.error.invalidEmail')),
-      password: z.string().min(6, t('auth.login.form.error.passwordMin')),
-    };
-
-    if (!isRegister) {
-      return z.object({
-        ...base,
-        name: z.string().optional().default(''),
-        confirmPassword: z.string().optional().default(''),
-      });
-    }
-
-    return z
-      .object({
-        ...base,
-        name: z.string().min(1, t('auth.login.form.error.nameRequired')),
-        confirmPassword: z.string(),
-      })
-      .refine((values) => values.password === values.confirmPassword, {
-        message: t('auth.login.form.error.confirmPasswordMismatch'),
-        path: ['confirmPassword'],
-      });
-  }, [isRegister, t]);
+  const formSchema = useMemo(
+    () =>
+      z
+        .object({
+          name: z.string(),
+          email: z.email(t('auth.login.form.error.invalidEmail')),
+          password: z.string().min(6, t('auth.login.form.error.passwordMin')),
+          confirmPassword: z.string(),
+        })
+        .superRefine((values, ctx) => {
+          // 姓名与确认密码仅在注册模式下校验
+          if (!isRegister) {
+            return;
+          }
+          if (!values.name.trim()) {
+            ctx.addIssue({
+              code: 'custom',
+              path: ['name'],
+              message: t('auth.login.form.error.nameRequired'),
+            });
+          }
+          if (values.password !== values.confirmPassword) {
+            ctx.addIssue({
+              code: 'custom',
+              path: ['confirmPassword'],
+              message: t('auth.login.form.error.confirmPasswordMismatch'),
+            });
+          }
+        }),
+    [isRegister, t],
+  );
 
   const form = useForm<AuthFormValues>({
     resolver: zodResolver(formSchema),
@@ -112,6 +118,8 @@ export function Login() {
     loginMutation.reset();
     registerMutation.reset();
     form.clearErrors();
+    form.resetField('password');
+    form.resetField('confirmPassword');
   };
 
   const submitErrorMessage = isRegister

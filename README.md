@@ -289,19 +289,13 @@ FRONTEND_URL=http://localhost:5173
 API_URL=http://localhost:3001
 ```
 
-桌面端可以使用本地 `GITHUB_TOKEN` 登录：
+登录与注册使用本地账号密码：首次使用默认进入注册，首个注册账号自动成为本地实例的管理员。GitHub 数据访问在登录后通过「设置 → 集成 → GitHub」配置 Personal Access Token，不再依赖 OAuth 或环境变量登录。
+
+同设备会话有效期可通过环境变量调整（默认 access 7 天 / refresh 30 天，活跃使用下自动滑动续期）：
 
 ```env
-DESKTOP_AUTH_MODE=env
-GITHUB_TOKEN=ghp_xxx
-```
-
-如果使用 OAuth 登录，需要配置：
-
-```env
-GITHUB_CLIENT_ID=xxx
-GITHUB_CLIENT_SECRET=xxx
-DESKTOP_AUTH_MODE=oauth
+JWT_EXPIRATION=7d
+JWT_REFRESH_EXPIRATION=30d
 ```
 
 ## 安装依赖

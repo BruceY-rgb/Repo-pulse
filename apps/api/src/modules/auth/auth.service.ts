@@ -2,6 +2,7 @@ import { ConflictException, Injectable, UnauthorizedException, Logger } from '@n
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import type { RegisterPayload, RegisterResult } from '@repo-pulse/shared';
 import { UserService } from '../user/user.service';
 import { prisma, Role, User } from '@repo-pulse/database';
 
@@ -49,12 +50,7 @@ export class AuthService {
   /**
    * 账号密码注册。首个注册的用户成为本地实例的 ADMIN，后续用户为 MEMBER。
    */
-  async register(dto: {
-    email: string;
-    name: string;
-    password: string;
-    username?: string;
-  }): Promise<TokenPair & { userId: string; email: string; name: string; role: string }> {
+  async register(dto: RegisterPayload): Promise<TokenPair & RegisterResult> {
     const email = this.normalizeEmail(dto.email);
 
     const existing = await this.userService.findByEmail(email);
@@ -65,13 +61,23 @@ export class AuthService {
     const userCount = await prisma.user.count();
     const role = userCount === 0 ? Role.ADMIN : Role.MEMBER;
 
-    const user = await this.userService.create({
-      email,
-      name: dto.name.trim() || email,
-      username: dto.username?.trim() || undefined,
-      password: dto.password,
-      role,
-    });
+    let user: User;
+    try {
+      user = await this.userService.create({
+        email,
+        name: dto.name.trim() || email,
+        username: dto.username?.trim() || undefined,
+        password: dto.password,
+        role,
+      });
+    } catch (error) {
+      // 并发注册/重复提交可能绕过上面的 findByEmail 预检，
+      // 唯一约束冲突（email/username）统一映射为 409 而不是 500
+      if ((error as { code?: string })?.code === 'P2002') {
+        throw new ConflictException('Email or username is already registered');
+      }
+      throw error;
+    }
     this.logger.log(`user_registered userId=${user.id} role=${role}`);
 
     const tokens = await this.generateTokens({

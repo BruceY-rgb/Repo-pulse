@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
+import type { LoginPayload, RegisterPayload } from '@repo-pulse/shared';
 import { authService } from '@/services/auth.service';
 import { useApiMutation, useApiQuery } from '@/lib/query-hooks';
 
@@ -27,11 +28,6 @@ export function useBootstrapStatusQuery() {
   });
 }
 
-interface LoginPayload {
-  email: string;
-  password: string;
-}
-
 export function useLoginMutation() {
   const queryClient = useQueryClient();
 
@@ -45,13 +41,6 @@ export function useLoginMutation() {
       await queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });
     },
   });
-}
-
-interface RegisterPayload {
-  email: string;
-  name: string;
-  password: string;
-  username?: string;
 }
 
 export function useRegisterMutation() {

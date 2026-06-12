@@ -8,9 +8,11 @@ export const envValidationSchema = Joi.object({
   REDIS_URL: Joi.string().default('redis://localhost:6379'),
 
   // JWT（桌面端本地实例：access token 默认 7 天，保证同设备登录态长期有效）
+  // 格式限定为 数字+单位(s/m/h/d)：Cookie maxAge 解析与 JWT 签名使用同一字符串，
+  // jsonwebtoken 支持但这里不支持的格式（如 '2w'）会导致两者静默不一致，故在启动时直接拒绝
   JWT_SECRET: Joi.string().min(16).required(),
-  JWT_EXPIRATION: Joi.string().default('7d'),
-  JWT_REFRESH_EXPIRATION: Joi.string().default('30d'),
+  JWT_EXPIRATION: Joi.string().pattern(/^[1-9]\d*[smhd]$/).default('7d'),
+  JWT_REFRESH_EXPIRATION: Joi.string().pattern(/^[1-9]\d*[smhd]$/).default('30d'),
 
   // GitHub（全局兜底 PAT，按用户的 token 在设置页配置）
   GITHUB_TOKEN: Joi.string().allow(''),
