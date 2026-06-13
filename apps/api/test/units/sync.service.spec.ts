@@ -297,6 +297,21 @@ describe('SyncService', () => {
       expect(historySpy).not.toHaveBeenCalled();
     });
 
+    it('schedules history sync for explicitly monitored repositories even when none are starred', async () => {
+      mockUserFindUnique.mockResolvedValue({ githubAccessToken: 'token', githubRefreshToken: null });
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r-editable']);
+      mockGithubService.getUserRepositories.mockResolvedValue([]);
+      mockGithubService.getStarredRepos.mockResolvedValue([]);
+      const historySpy = jest
+        .spyOn(service, 'syncAllUserRepositoriesHistory')
+        .mockResolvedValue(undefined);
+
+      await service.syncUserRepositories('u1');
+      jest.runOnlyPendingTimers();
+
+      expect(historySpy).toHaveBeenCalledWith('u1', []);
+    });
+
     it('triggers branch sync after repository sync', async () => {
       mockUserFindUnique.mockResolvedValue({ githubAccessToken: 'token', githubRefreshToken: null });
       mockGithubService.getUserRepositories.mockResolvedValue([]);

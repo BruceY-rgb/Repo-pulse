@@ -293,7 +293,7 @@ export class SyncService {
       this.logger.log(`Sync completed: ${synced} new repos, ${starred} new starred repos`);
 
       setTimeout(() => {
-        if (monitoredStarredRepositoryIds.size > 0) {
+        if (monitoredRepositoryIdSet.size > 0) {
           this.syncAllUserRepositoriesHistory(userId, Array.from(monitoredStarredRepositoryIds)).catch((err) => {
             this.logger.error(`Failed to sync repository history for user ${userId}`, err);
           });

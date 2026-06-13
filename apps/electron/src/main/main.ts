@@ -568,6 +568,12 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('before-quit', () => {
+  realtimeBridge?.dispose();
+  realtimeBridge = null;
+  disposeTunnel();
+});
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();

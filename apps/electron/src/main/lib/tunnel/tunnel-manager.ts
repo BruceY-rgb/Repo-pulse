@@ -1,7 +1,10 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import fs from 'node:fs';
 import * as http from 'node:http';
 import * as https from 'node:https';
 import { Resolver } from 'node:dns/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { URL } from 'node:url';
 import type { Readable } from 'node:stream';
 import type { TunnelManagerOptions, TunnelState, TunnelStatus } from './types';
@@ -27,12 +30,22 @@ const EDGE_PROBE_BUDGET_MS = PROBE_MAX_ATTEMPTS * (PROBE_TIMEOUT_MS + PROBE_INTE
 const DEFAULT_MAX_RETRIES = 3;
 const STARTUP_RETRY_DELAY_MS = 1_500;
 const MAX_CAPTURED_OUTPUT_CHARS = 4_000;
+const PROCESS_LOOKUP_TIMEOUT_MS = 2_000;
+const STALE_PROCESS_TERM_TIMEOUT_MS = 1_500;
+const PID_REGISTRY_PATH = path.join(os.tmpdir(), 'repo-pulse-cloudflared-pids.json');
 /**
  * 公共 DNS 兜底解析器：部分受限网络的默认解析器不解析 *.trycloudflare.com
  * （返回 NXDOMAIN），导致系统级 fetch/lookup 拿不到边缘 IP。此时改用公共
  * 解析器解出 IP，再按 IP 直连（HTTP Host + TLS SNI 仍用原主机名，保证边缘路由）。
  */
 const PUBLIC_DNS_SERVERS = ['1.1.1.1', '8.8.8.8'];
+
+interface ManagedTunnelProcessRecord {
+  pid: number;
+  cloudflaredPath: string;
+  targetPort: number;
+  startedAt: number;
+}
 
 /**
  * TunnelManager —— cloudflared quick tunnel 生命周期管理（纯 node）。
@@ -54,6 +67,7 @@ export class TunnelManager {
 
   /** stdio = ['ignore','pipe','pipe'] → stdin 为 null，stdout/stderr 为 Readable。 */
   private child: ChildProcessByStdio<null, Readable, Readable> | null = null;
+  private startPromise: Promise<string> | null = null;
   private state: TunnelState = 'idle';
   private publicUrl: string | null = null;
   private retries = 0;
@@ -82,8 +96,21 @@ export class TunnelManager {
     if (this.state === 'running' && this.publicUrl) {
       return this.publicUrl;
     }
-    this.stopping = false;
+    if (this.startPromise) {
+      return this.startPromise;
+    }
 
+    this.stopping = false;
+    const promise = this.startWithRetries().finally(() => {
+      if (this.startPromise === promise) {
+        this.startPromise = null;
+      }
+    });
+    this.startPromise = promise;
+    return promise;
+  }
+
+  private async startWithRetries(): Promise<string> {
     let lastError: Error | null = null;
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
       if (attempt > 0) {
@@ -105,7 +132,9 @@ export class TunnelManager {
     throw lastError ?? new Error('[tunnel-manager] failed to start');
   }
 
-  private startOnce(): Promise<string> {
+  private async startOnce(): Promise<string> {
+    await this.killChild();
+    await this.cleanupStaleCloudflaredProcesses();
     this.setState('starting');
 
     return new Promise<string>((resolve, reject) => {
@@ -124,6 +153,12 @@ export class TunnelManager {
         { stdio: ['ignore', 'pipe', 'pipe'] },
       );
       this.child = child;
+      registerManagedPid({
+        pid: child.pid,
+        cloudflaredPath: this.cloudflaredPath,
+        targetPort: this.targetPort,
+        startedAt: Date.now(),
+      });
 
       // 启动总超时只守「URL 必须出现」：URL 一出现就清掉它（见 onChunk），
       // 之后边缘就绪探测自带预算且超时非致命，不再受此计时器约束。
@@ -182,6 +217,7 @@ export class TunnelManager {
 
       child.on('error', (error: Error) => {
         console.warn('[tunnel-manager] spawn error', error.message);
+        unregisterManagedPid(child.pid);
         if (settled) {
           return;
         }
@@ -193,6 +229,7 @@ export class TunnelManager {
 
       child.on('exit', (code, signal) => {
         this.child = null;
+        unregisterManagedPid(child.pid);
         // 启动阶段就退出 → 视为启动失败。
         if (!settled) {
           settled = true;
@@ -227,6 +264,7 @@ export class TunnelManager {
   /** 主动停止隧道（kill 子进程并等待退出）。幂等。 */
   async stop(): Promise<void> {
     this.stopping = true;
+    this.startPromise = null;
     await this.killChild();
     this.publicUrl = null;
     this.setState('stopped');
@@ -235,9 +273,11 @@ export class TunnelManager {
   /** 清理：kill 子进程，不再回调（应用退出/对象销毁时调用）。 */
   dispose(): void {
     this.stopping = true;
+    this.startPromise = null;
     const child = this.child;
     this.child = null;
     if (child && child.exitCode === null && child.signalCode === null) {
+      unregisterManagedPid(child.pid);
       child.removeAllListeners();
       // 先 SIGTERM 优雅退出，兜底 SIGKILL 防僵尸。
       child.kill('SIGTERM');
@@ -265,8 +305,10 @@ export class TunnelManager {
     const child = this.child;
     this.child = null;
     if (!child || (child.exitCode !== null || child.signalCode !== null)) {
+      unregisterManagedPid(child?.pid);
       return Promise.resolve();
     }
+    const pid = child.pid;
     return new Promise<void>((resolve) => {
       let done = false;
       const finish = (): void => {
@@ -274,6 +316,7 @@ export class TunnelManager {
           return;
         }
         done = true;
+        unregisterManagedPid(pid);
         resolve();
       };
       child.once('exit', finish);
@@ -287,6 +330,41 @@ export class TunnelManager {
       }, 2_000);
       killTimer.unref();
     });
+  }
+
+  /**
+   * 启动新 quick tunnel 前，清理上一次应用崩溃/强退后登记表里残留的 cloudflared。
+   * 只处理本应用记录过的 PID，并再次校验命令行形态，避免影响用户自行运行的隧道。
+   */
+  private async cleanupStaleCloudflaredProcesses(): Promise<void> {
+    const records = readManagedPidRecords();
+    if (records.length === 0) {
+      return;
+    }
+
+    const currentPid = this.child?.pid ?? null;
+    const remaining: ManagedTunnelProcessRecord[] = [];
+    for (const record of records) {
+      if (record.pid === currentPid) {
+        remaining.push(record);
+        continue;
+      }
+
+      const command = await readProcessCommand(record.pid);
+      if (!command) {
+        continue;
+      }
+      if (!isManagedQuickTunnelCommand(command, record)) {
+        continue;
+      }
+
+      console.warn(`[tunnel-manager] cleaning stale cloudflared pid=${record.pid} port=${record.targetPort}`);
+      const stopped = await terminateProcess(record.pid);
+      if (!stopped) {
+        remaining.push(record);
+      }
+    }
+    writeManagedPidRecords(remaining);
   }
 
   /** 运行期异常退出后的自动重启（maxRetries 内，简单实现）。 */
@@ -470,4 +548,173 @@ function extractTryCloudflareUrl(text: string): string | null {
     }
   }
   return null;
+}
+
+function readManagedPidRecords(): ManagedTunnelProcessRecord[] {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(PID_REGISTRY_PATH, 'utf8');
+  } catch {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter(isManagedTunnelProcessRecord);
+  } catch {
+    return [];
+  }
+}
+
+function writeManagedPidRecords(records: ManagedTunnelProcessRecord[]): void {
+  const deduped = new Map<number, ManagedTunnelProcessRecord>();
+  for (const record of records) {
+    deduped.set(record.pid, record);
+  }
+  const values = Array.from(deduped.values()).slice(-20);
+  try {
+    if (values.length === 0) {
+      fs.rmSync(PID_REGISTRY_PATH, { force: true });
+      return;
+    }
+    fs.writeFileSync(PID_REGISTRY_PATH, JSON.stringify(values, null, 2), 'utf8');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[tunnel-manager] failed to write pid registry: ${message}`);
+  }
+}
+
+function registerManagedPid(record: Omit<ManagedTunnelProcessRecord, 'pid'> & { pid: number | undefined }): void {
+  if (!Number.isInteger(record.pid) || !record.pid) {
+    return;
+  }
+  const records = readManagedPidRecords().filter((item) => item.pid !== record.pid);
+  records.push({
+    pid: record.pid,
+    cloudflaredPath: record.cloudflaredPath,
+    targetPort: record.targetPort,
+    startedAt: record.startedAt,
+  });
+  writeManagedPidRecords(records);
+}
+
+function unregisterManagedPid(pid: number | undefined): void {
+  if (!Number.isInteger(pid) || !pid) {
+    return;
+  }
+  const next = readManagedPidRecords().filter((record) => record.pid !== pid);
+  writeManagedPidRecords(next);
+}
+
+function isManagedTunnelProcessRecord(value: unknown): value is ManagedTunnelProcessRecord {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const record = value as Partial<ManagedTunnelProcessRecord>;
+  return (
+    Number.isInteger(record.pid) &&
+    typeof record.cloudflaredPath === 'string' &&
+    Number.isInteger(record.targetPort) &&
+    Number.isInteger(record.startedAt)
+  );
+}
+
+function isManagedQuickTunnelCommand(command: string, record: ManagedTunnelProcessRecord): boolean {
+  if (
+    !command.includes(' tunnel ') ||
+    !command.includes('--url') ||
+    !command.includes(`http://127.0.0.1:${record.targetPort}`) ||
+    !command.includes('--no-autoupdate')
+  ) {
+    return false;
+  }
+
+  const normalizedCommand = command.replace(/\\/g, '/');
+  const normalizedPath = record.cloudflaredPath.replace(/\\/g, '/');
+  if (normalizedPath.includes('/')) {
+    return normalizedCommand.includes(normalizedPath);
+  }
+
+  const binaryPattern = new RegExp(`(^|[/\\s])${escapeRegExp(normalizedPath)}(\\.exe)?(\\s|$)`);
+  return binaryPattern.test(normalizedCommand);
+}
+
+function readProcessCommand(pid: number): Promise<string | null> {
+  return new Promise<string | null>((resolve) => {
+    let settled = false;
+    let stdout = '';
+    const finish = (result: string | null): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(result);
+    };
+
+    const child = spawn('ps', ['-p', String(pid), '-o', 'command='], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(null);
+    }, PROCESS_LOOKUP_TIMEOUT_MS);
+    timer.unref();
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.on('error', () => {
+      clearTimeout(timer);
+      finish(null);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      finish(code === 0 ? stdout.trim() || null : null);
+    });
+  });
+}
+
+async function terminateProcess(pid: number): Promise<boolean> {
+  if (!isProcessAlive(pid)) {
+    return true;
+  }
+
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch (error) {
+    return isNoSuchProcessError(error);
+  }
+
+  await delay(STALE_PROCESS_TERM_TIMEOUT_MS);
+  if (!isProcessAlive(pid)) {
+    return true;
+  }
+
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch (error) {
+    return isNoSuchProcessError(error);
+  }
+  await delay(100);
+  return !isProcessAlive(pid);
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !isNoSuchProcessError(error);
+  }
+}
+
+function isNoSuchProcessError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ESRCH';
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
