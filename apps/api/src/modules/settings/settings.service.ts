@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { prisma } from '@repo-pulse/database';
+import { RepositoryAccessMode, prisma } from '@repo-pulse/database';
 import type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
 import { AppConfigService } from '../app-config/app-config.service';
 import axios from 'axios';
@@ -66,6 +66,21 @@ export class SettingsService {
   ): Promise<{ value: string; source: 'db' }> {
     await this.appConfigService.set('API_URL', value, userId);
     return { value, source: 'db' };
+  }
+
+  async canUpdateApiUrlConfig(userId: string): Promise<boolean> {
+    const editableRepoCount = await prisma.repository.count({
+      where: {
+        isActive: true,
+        users: {
+          some: {
+            userId,
+            accessMode: RepositoryAccessMode.EDITABLE,
+          },
+        },
+      },
+    });
+    return editableRepoCount > 0;
   }
 
   async getGithubIntegrationStatus(userId: string): Promise<GithubIntegrationStatus> {

@@ -14,7 +14,6 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { SettingsService, AIProvider } from './settings.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { SyncService } from '../sync/sync.service';
 
 @ApiTags('设置')
@@ -125,19 +124,19 @@ export class SettingsController {
   }
 
   /**
-   * 更新 webhook API_URL（仅 ADMIN）
+   * 更新 webhook API_URL（拥有可编辑仓库的用户）
    */
   @Post('app-config/api-url')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @Roles('ADMIN')
-  @ApiOperation({ summary: '更新 webhook API_URL（ADMIN）' })
+  @ApiOperation({ summary: '更新 webhook API_URL' })
   async updateApiUrlConfig(
-    @CurrentUser() user: { sub: string; role?: string },
+    @CurrentUser() user: { sub: string },
     @Body() body: { value: string },
   ) {
-    if (user.role !== 'ADMIN') {
-      throw new ForbiddenException('Admin role required');
+    const canManageWebhooks = await this.settingsService.canUpdateApiUrlConfig(user.sub);
+    if (!canManageWebhooks) {
+      throw new ForbiddenException('Editable repository required to update webhook API_URL');
     }
     const value = body?.value?.trim();
     if (!value || !/^https?:\/\//i.test(value)) {

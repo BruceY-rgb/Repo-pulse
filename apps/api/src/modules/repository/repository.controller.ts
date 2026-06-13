@@ -27,6 +27,7 @@ import type { RepositorySyncJob } from './repository-sync.processor';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
+import { RequestTimeoutMs } from '../../common/interceptors';
 
 @ApiTags('Repository Management')
 @ApiBearerAuth()
@@ -176,7 +177,8 @@ export class RepositoryController {
   }
 
   @Post('batch-retry-webhooks')
-  @ApiOperation({ summary: 'Re-register webhook for every active repo where caller is ADMIN' })
+  @RequestTimeoutMs(180_000)
+  @ApiOperation({ summary: 'Re-register webhook for every editable active repo' })
   async batchRetryWebhooks(@Req() req: Request) {
     const userId = (req.user as { sub: string }).sub;
     return this.repositoryService.batchRetryWebhooks(userId);

@@ -125,7 +125,7 @@ export const settingsService = {
   },
 
   /**
-   * 更新 webhook API_URL（需要 ADMIN role）
+   * 更新 webhook API_URL（拥有可编辑仓库）
    */
   async updateApiUrlConfig(value: string): Promise<ApiUrlConfig> {
     const { data } = await apiClient.post<ApiResponse<ApiUrlConfig>>(
@@ -136,11 +136,13 @@ export const settingsService = {
   },
 
   /**
-   * 批量重建用户作为 ADMIN 的所有 active 仓库 webhook
+   * 批量重建用户可编辑的所有 active 仓库 webhook
    */
   async batchRetryWebhooks(): Promise<BatchRetryWebhooksResult> {
     const { data } = await apiClient.post<ApiResponse<BatchRetryWebhooksResult>>(
       '/repositories/batch-retry-webhooks',
+      undefined,
+      { timeout: 180_000 },
     );
     return data.data;
   },

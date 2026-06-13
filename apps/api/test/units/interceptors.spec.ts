@@ -62,8 +62,14 @@ describe('TransformInterceptor', () => {
 
 // ── TimeoutInterceptor ─────────────────────────────────────────────────────
 describe('TimeoutInterceptor', () => {
-  const interceptor = new TimeoutInterceptor();
-  const mockContext = {} as any;
+  const mockReflector = {
+    getAllAndOverride: jest.fn().mockReturnValue(undefined),
+  };
+  const interceptor = new TimeoutInterceptor(mockReflector as any);
+  const mockContext = {
+    getHandler: jest.fn(),
+    getClass: jest.fn(),
+  } as any;
 
   function makeNext(value: any) {
     return { handle: () => of(value) } as any;

@@ -18,7 +18,8 @@ const LOG = '[tunnel-orchestrator]';
  *
  * cloudflared quick tunnel 的公网 URL 每次启动都随机，因此每次隧道就绪后都要：
  *   1. setApiUrl：把 `${publicUrl}` 写进后端 AppConfig 的 API_URL（进程级，影响后续
- *      webhook 回调地址拼接 `${API_URL}/webhooks/github`）。需调用者为 ADMIN（403→needsAdmin）。
+ *      webhook 回调地址拼接 `${API_URL}/webhooks/github`）。需调用者有 webhook 管理权限
+ *      （403→needsWebhookPermission）。
  *   2. rebuildAll：对调用者名下所有 active 仓库逐个删旧建新 webhook（回调地址自动取新 API_URL）。
  *
  * 所有请求都带 `Authorization: Bearer <token>`，token 每次现取（不缓存），URL 去尾斜杠归一化。
@@ -35,17 +36,17 @@ export class TunnelOrchestrator {
 
   /**
    * 写后端 AppConfig 的 API_URL。
-   * 403 视为 needsAdmin（调用者非 ADMIN）；其它非 2xx 仅置 ok=false 带 status 返回。
+   * 403 视为权限不足；其它非 2xx 仅置 ok=false 带 status 返回。
    */
-  async setApiUrl(publicUrl: string): Promise<{ ok: boolean; status: number; needsAdmin?: boolean }> {
+  async setApiUrl(publicUrl: string): Promise<{ ok: boolean; status: number; forbidden?: boolean }> {
     const value = stripTrailingSlash(publicUrl);
     const res = await this.post('/settings/app-config/api-url', { value });
     if (!res) {
       return { ok: false, status: 0 };
     }
     if (res.status === 403) {
-      console.warn(`${LOG} setApiUrl forbidden (needs ADMIN)`);
-      return { ok: false, status: 403, needsAdmin: true };
+      console.warn(`${LOG} setApiUrl forbidden`);
+      return { ok: false, status: 403, forbidden: true };
     }
     const ok = res.status >= 200 && res.status < 300;
     if (!ok) {
@@ -109,12 +110,12 @@ export class TunnelOrchestrator {
     if (!setRes.ok) {
       const result: OrchestratorResult = {
         apiUrlSet: false,
-        error: setRes.needsAdmin
-          ? 'set api-url forbidden: caller is not ADMIN'
+        error: setRes.forbidden
+          ? 'set api-url forbidden: editable repository permission required'
           : `set api-url failed (status=${setRes.status})`,
       };
-      if (setRes.needsAdmin) {
-        result.needsAdmin = true;
+      if (setRes.forbidden) {
+        result.needsWebhookPermission = true;
       }
       return result;
     }

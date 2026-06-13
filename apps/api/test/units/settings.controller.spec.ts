@@ -8,7 +8,7 @@ jest.mock('@repo-pulse/database', () => ({
   PrismaClient: jest.fn().mockImplementation(() => ({})),
 }));
 
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { SettingsController } from '../../src/modules/settings/settings.controller';
 
 const INTEGRATION_STATUS = { connected: true, githubLogin: 'ZichaoZhu', githubId: '167670554', tokenMasked: 'ghp_***' };
@@ -16,6 +16,8 @@ const INTEGRATION_STATUS = { connected: true, githubLogin: 'ZichaoZhu', githubId
 function makeSettingsService(overrides: Partial<Record<string, jest.Mock>> = {}) {
   return {
     updateGithubToken: jest.fn().mockResolvedValue(INTEGRATION_STATUS),
+    canUpdateApiUrlConfig: jest.fn().mockResolvedValue(false),
+    updateApiUrlConfig: jest.fn().mockResolvedValue({ value: 'https://example.test', source: 'db' }),
     ...overrides,
   } as any;
 }
@@ -65,5 +67,42 @@ describe('SettingsController · updateGithubToken（保存后后台同步）', (
     const result = await controller.updateGithubToken(user, { token: 'ghp_x' });
 
     expect(result).toMatchObject({ ...INTEGRATION_STATUS, sync: { status: 'pending' } });
+  });
+});
+
+describe('SettingsController · updateApiUrlConfig', () => {
+  it('allows users with editable repositories to update webhook API_URL', async () => {
+    const settingsService = makeSettingsService({
+      canUpdateApiUrlConfig: jest.fn().mockResolvedValue(true),
+    });
+    const controller = new SettingsController(settingsService, makeSyncService());
+
+    await controller.updateApiUrlConfig(
+      { sub: 'u1' },
+      { value: 'https://fresh.trycloudflare.com ' },
+    );
+
+    expect(settingsService.canUpdateApiUrlConfig).toHaveBeenCalledWith('u1');
+    expect(settingsService.updateApiUrlConfig).toHaveBeenCalledWith(
+      'u1',
+      'https://fresh.trycloudflare.com',
+    );
+  });
+
+  it('rejects users without editable repositories regardless of global role', async () => {
+    const settingsService = makeSettingsService({
+      canUpdateApiUrlConfig: jest.fn().mockResolvedValue(false),
+    });
+    const controller = new SettingsController(settingsService, makeSyncService());
+    const adminUser = { sub: 'u1', role: 'ADMIN' };
+
+    await expect(
+      controller.updateApiUrlConfig(
+        adminUser,
+        { value: 'https://fresh.trycloudflare.com' },
+      ),
+    ).rejects.toThrow(ForbiddenException);
+    expect(settingsService.canUpdateApiUrlConfig).toHaveBeenCalledWith('u1');
+    expect(settingsService.updateApiUrlConfig).not.toHaveBeenCalled();
   });
 });

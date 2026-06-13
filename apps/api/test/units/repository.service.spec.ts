@@ -1,4 +1,5 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { WebhookStatus } from '@repo-pulse/shared';
 import { RepositoryService } from '../../src/modules/repository/repository.service';
 
 const mockAssertUserCanAccessRepository = jest.fn();
@@ -115,6 +116,7 @@ describe('RepositoryService', () => {
       searchRepositories: jest.fn().mockResolvedValue([]),
       getUserRepositories: jest.fn().mockResolvedValue([]),
       getStarredRepos: jest.fn().mockResolvedValue([]),
+      getWebhook: jest.fn().mockResolvedValue({ active: true, last_response: null }),
     };
     mockGitlabService = {
       getRepository: jest.fn(),
@@ -136,6 +138,61 @@ describe('RepositoryService', () => {
       mockGitlabService as any,
       mockEventService as any,
     );
+  });
+
+  describe('getWebhookStatus', () => {
+    it('returns FAILED when GitHub hook exists but the last delivery could not connect', async () => {
+      mockRepoFindUnique.mockResolvedValue(makeRepo({
+        webhookId: 'wh-1',
+        users: [
+          {
+            userId: 'u1',
+            accessMode: 'EDITABLE',
+            user: { id: 'u1', githubAccessToken: 'token' },
+          },
+        ],
+      }));
+      mockGithubService.getWebhook.mockResolvedValueOnce({
+        active: true,
+        last_response: {
+          code: null,
+          status: 'failed to connect to host',
+          message: 'failed to connect to host',
+        },
+      });
+
+      const result = await service.getWebhookStatus('u1', 'r1');
+
+      expect(result.status).toBe(WebhookStatus.FAILED);
+      expect(result.lastError).toBe('failed to connect to host');
+      expect(result.active).toBe(true);
+    });
+
+    it('returns ACTIVE when GitHub hook exists and last delivery was successful', async () => {
+      mockRepoFindUnique.mockResolvedValue(makeRepo({
+        webhookId: 'wh-1',
+        users: [
+          {
+            userId: 'u1',
+            accessMode: 'EDITABLE',
+            user: { id: 'u1', githubAccessToken: 'token' },
+          },
+        ],
+      }));
+      mockGithubService.getWebhook.mockResolvedValueOnce({
+        active: true,
+        last_response: {
+          code: 200,
+          status: 'OK',
+          message: null,
+        },
+      });
+
+      const result = await service.getWebhookStatus('u1', 'r1');
+
+      expect(result.status).toBe(WebhookStatus.ACTIVE);
+      expect(result.lastError).toBeNull();
+    });
   });
 
   // ── findById ───────────────────────────────────────────────────────────────

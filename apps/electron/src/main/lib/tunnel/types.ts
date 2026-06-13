@@ -26,6 +26,8 @@ export interface TunnelManagerOptions {
   targetPort: number;
   /** 状态变更回调（idle→starting→running / error / stopped）。 */
   onStatus?: (status: TunnelStatus) => void;
+  /** 每次隧道进入 running 且拿到公网 URL 时触发；包括运行期异常退出后的自动重连。 */
+  onPublicUrl?: (publicUrl: string) => void;
   /** 进程异常退出后的最大自动重启次数。 */
   maxRetries?: number;
 }
@@ -34,8 +36,8 @@ export interface TunnelManagerOptions {
 export interface OrchestratorResult {
   /** API_URL 是否成功写入后端 AppConfig。 */
   apiUrlSet: boolean;
-  /** 写 API_URL 时被 403 拒绝（调用者非 ADMIN）；仅失败场景出现。 */
-  needsAdmin?: boolean;
+  /** 写 API_URL 时被 403 拒绝（无可编辑仓库或权限不足）；仅失败场景出现。 */
+  needsWebhookPermission?: boolean;
   /** webhook 批量重建结果（仅在 API_URL 成功且批量调用返回计数时存在）。 */
   rebuild?: {
     total: number;

@@ -2038,7 +2038,7 @@ export function Settings() {
                   </>
                 ) : (
                   <p>
-                    将遍历你作为 ADMIN 的所有 active 仓库，删除 GitHub 上的旧 webhook 并用当前 API_URL 重新注册。可能耗时数秒到数十秒。
+                    将遍历你的所有可编辑 active 仓库，删除 GitHub 上的旧 webhook 并用当前 API_URL 重新注册。可能耗时数秒到数十秒。
                   </p>
                 )}
               </div>

@@ -6,8 +6,8 @@ import { URL } from 'node:url';
 import type { Readable } from 'node:stream';
 import type { TunnelManagerOptions, TunnelState, TunnelStatus } from './types';
 
-/** 从 cloudflared 输出里抓 quick tunnel 公网 URL。 */
-const TRYCLOUDFLARE_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/;
+/** 从 cloudflared 输出里抓 quick tunnel 公网 URL，排除 api.trycloudflare.com 等非隧道服务端点。 */
+const TRYCLOUDFLARE_RE = /https:\/\/(?!api\.)([a-z0-9-]+)\.trycloudflare\.com/g;
 /**
  * 启动总超时：cloudflared 至少要在此窗口内打印出 URL。
  * 注意：URL 出现后边缘就绪探测是 best-effort，超时不再致命（见 start()）。
@@ -25,6 +25,8 @@ const PROBE_INTERVAL_MS = 1_500;
  */
 const EDGE_PROBE_BUDGET_MS = PROBE_MAX_ATTEMPTS * (PROBE_TIMEOUT_MS + PROBE_INTERVAL_MS);
 const DEFAULT_MAX_RETRIES = 3;
+const STARTUP_RETRY_DELAY_MS = 1_500;
+const MAX_CAPTURED_OUTPUT_CHARS = 4_000;
 /**
  * 公共 DNS 兜底解析器：部分受限网络的默认解析器不解析 *.trycloudflare.com
  * （返回 NXDOMAIN），导致系统级 fetch/lookup 拿不到边缘 IP。此时改用公共
@@ -47,6 +49,7 @@ export class TunnelManager {
   private readonly cloudflaredPath: string;
   private readonly targetPort: number;
   private readonly onStatus?: (status: TunnelStatus) => void;
+  private readonly onPublicUrl?: (publicUrl: string) => void;
   private readonly maxRetries: number;
 
   /** stdio = ['ignore','pipe','pipe'] → stdin 为 null，stdout/stderr 为 Readable。 */
@@ -61,6 +64,7 @@ export class TunnelManager {
     this.cloudflaredPath = options.cloudflaredPath;
     this.targetPort = options.targetPort;
     this.onStatus = options.onStatus;
+    this.onPublicUrl = options.onPublicUrl;
     this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   }
 
@@ -74,16 +78,40 @@ export class TunnelManager {
    *
    * 仅在 cloudflared 启动阶段异常退出 / spawn 失败 / 总超时（连 URL 都没出现）时才 reject。
    */
-  start(): Promise<string> {
+  async start(): Promise<string> {
     if (this.state === 'running' && this.publicUrl) {
-      return Promise.resolve(this.publicUrl);
+      return this.publicUrl;
     }
     this.stopping = false;
+
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+      if (attempt > 0) {
+        console.log(`[tunnel-manager] startup retrying (${attempt}/${this.maxRetries})...`);
+        await delay(STARTUP_RETRY_DELAY_MS * attempt);
+      }
+
+      try {
+        return await this.startOnce();
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        await this.killChild();
+        if (this.stopping || attempt >= this.maxRetries) {
+          break;
+        }
+      }
+    }
+
+    throw lastError ?? new Error('[tunnel-manager] failed to start');
+  }
+
+  private startOnce(): Promise<string> {
     this.setState('starting');
 
     return new Promise<string>((resolve, reject) => {
       let settled = false;
       let capturedUrl: string | null = null;
+      let startupOutput = '';
 
       const child = spawn(
         this.cloudflaredPath,
@@ -105,26 +133,29 @@ export class TunnelManager {
         }
         settled = true;
         // 连 URL 都没出现 → cloudflared 没起来，仍按失败处理。
-        this.fail('tunnel start timed out before url appeared');
-        reject(new Error('[tunnel-manager] start timed out'));
+        const message = withOutputDetail('tunnel start timed out before url appeared', startupOutput);
+        this.fail(message);
+        reject(new Error(`[tunnel-manager] ${message}`));
       }, START_TIMEOUT_MS);
 
       const onChunk = (chunk: Buffer): void => {
         const text = chunk.toString();
+        startupOutput = appendRecentOutput(startupOutput, text);
         if (capturedUrl) {
           return;
         }
-        const match = TRYCLOUDFLARE_RE.exec(text);
+        const match = extractTryCloudflareUrl(text);
         if (!match) {
           return;
         }
-        capturedUrl = match[0];
+        capturedUrl = match;
         // URL 已出现 → cloudflared 已连边缘；解除「URL 必须出现」超时，避免它误判后续探测。
         clearTimeout(overallTimer);
         console.log(`[tunnel-manager] captured url=${capturedUrl}, probing edge readiness...`);
         // 抓到 URL 不一定立即可服务；尽力探测边缘路由生效（探到则有价值），
         // 但探不到也不致命：cloudflared 已打印 URL=已连边缘，访问隧道的是 GitHub（公网）非本机。
-        void this.waitForEdge(capturedUrl).then((ready) => {
+        const resolvedUrl = capturedUrl;
+        void this.waitForEdge(resolvedUrl).then((ready) => {
           if (settled) {
             return;
           }
@@ -137,11 +168,12 @@ export class TunnelManager {
                 'proceeding with url (GitHub reaches the tunnel externally)',
             );
           }
-          this.publicUrl = capturedUrl;
+          this.publicUrl = resolvedUrl;
           this.retries = 0;
           this.setState('running');
-          console.log(`[tunnel-manager] running publicUrl=${capturedUrl}`);
-          resolve(capturedUrl as string);
+          this.onPublicUrl?.(resolvedUrl);
+          console.log(`[tunnel-manager] running publicUrl=${resolvedUrl}`);
+          resolve(resolvedUrl);
         });
       };
 
@@ -165,8 +197,12 @@ export class TunnelManager {
         if (!settled) {
           settled = true;
           clearTimeout(overallTimer);
-          this.fail(`cloudflared exited during startup (code=${code ?? 'null'} signal=${signal ?? 'null'})`);
-          reject(new Error('[tunnel-manager] cloudflared exited during startup'));
+          const message = withOutputDetail(
+            `cloudflared exited during startup (code=${code ?? 'null'} signal=${signal ?? 'null'})`,
+            startupOutput,
+          );
+          this.fail(message);
+          reject(new Error(`[tunnel-manager] ${message}`));
           return;
         }
         // 主动停止 → 不当作错误，也不重启。
@@ -400,4 +436,38 @@ function delay(ms: number): Promise<void> {
 
 function isReadyStatus(status: number | null): boolean {
   return status !== null && status < 500;
+}
+
+function appendRecentOutput(current: string, next: string): string {
+  const combined = current + next;
+  if (combined.length <= MAX_CAPTURED_OUTPUT_CHARS) {
+    return combined;
+  }
+  return combined.slice(combined.length - MAX_CAPTURED_OUTPUT_CHARS);
+}
+
+function withOutputDetail(message: string, output: string): string {
+  const detail = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-8)
+    .join(' | ');
+  return detail ? `${message}; output=${detail}` : message;
+}
+
+function extractTryCloudflareUrl(text: string): string | null {
+  TRYCLOUDFLARE_RE.lastIndex = 0;
+  for (const match of text.matchAll(TRYCLOUDFLARE_RE)) {
+    const url = match[0];
+    try {
+      const { hostname } = new URL(url);
+      if (hostname !== 'api.trycloudflare.com') {
+        return url;
+      }
+    } catch {
+      // 忽略无法解析的片段，继续查找下一项。
+    }
+  }
+  return null;
 }

@@ -3,6 +3,7 @@ import axios from 'axios';
 
 const mockUserFindUnique = jest.fn();
 const mockUserUpdate = jest.fn();
+const mockRepositoryCount = jest.fn();
 
 jest.mock('@repo-pulse/database', () => ({
   RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
@@ -15,6 +16,9 @@ jest.mock('@repo-pulse/database', () => ({
     user: {
       findUnique: (...a: any[]) => mockUserFindUnique(...a),
       update: (...a: any[]) => mockUserUpdate(...a),
+    },
+    repository: {
+      count: (...a: any[]) => mockRepositoryCount(...a),
     },
   },
 }));
@@ -129,6 +133,32 @@ describe('SettingsService', () => {
           githubRefreshToken: null,
         }),
       }));
+    });
+  });
+
+  describe('canUpdateApiUrlConfig', () => {
+    it('allows users with editable repositories to update webhook API_URL', async () => {
+      mockRepositoryCount.mockResolvedValue(1);
+
+      await expect(service.canUpdateApiUrlConfig('u1')).resolves.toBe(true);
+
+      expect(mockRepositoryCount).toHaveBeenCalledWith({
+        where: {
+          isActive: true,
+          users: {
+            some: {
+              userId: 'u1',
+              accessMode: 'EDITABLE',
+            },
+          },
+        },
+      });
+    });
+
+    it('rejects users without editable repositories', async () => {
+      mockRepositoryCount.mockResolvedValue(0);
+
+      await expect(service.canUpdateApiUrlConfig('u1')).resolves.toBe(false);
     });
   });
 

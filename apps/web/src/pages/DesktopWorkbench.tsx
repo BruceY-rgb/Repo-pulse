@@ -3316,6 +3316,33 @@ function getWebhookStatusMeta(status: WebhookStatus) {
   }
 }
 
+function getWebhookDeliveryMeta(lastResponse: {
+  code: number | null;
+  status: string | null;
+  message: string | null;
+} | null) {
+  if (!lastResponse) {
+    return {
+      label: '暂无投递记录',
+      className: 'text-muted-foreground',
+    };
+  }
+
+  const status = lastResponse.status?.trim();
+  const message = lastResponse.message?.trim();
+  const code = lastResponse.code;
+  const ok =
+    status?.toLowerCase() === 'ok' ||
+    (typeof code === 'number' && code >= 200 && code < 300);
+  const prefix = typeof code === 'number' ? `${code}` : (status || 'unknown');
+  const detail = message && message !== status ? ` · ${message}` : '';
+
+  return {
+    label: `${ok ? '成功' : '异常'}：${prefix}${detail}`,
+    className: ok ? 'text-success-foreground' : 'text-destructive',
+  };
+}
+
 function RepositoryWebhookSection({
   repository,
   canManageWebhook,
@@ -3324,6 +3351,7 @@ function RepositoryWebhookSection({
   canManageWebhook?: boolean;
 }) {
   const [secretVisible, setSecretVisible] = useState(false);
+  const [isRefreshingTunnel, setIsRefreshingTunnel] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const autoRetryTriggeredRef = useRef(false);
   const canUseWebhookControls =
@@ -3332,6 +3360,7 @@ function RepositoryWebhookSection({
   const retryMutation = useRetryWebhookMutation();
   const testMutation = useTestWebhookMutation();
   const data = statusQuery.data;
+  const isRetryingWebhook = retryMutation.isPending || isRefreshingTunnel;
 
   const handleCopy = (text: string, label: string) => {
     void navigator.clipboard.writeText(text).then(
@@ -3342,9 +3371,23 @@ function RepositoryWebhookSection({
 
   const handleRetry = async () => {
     try {
+      let refreshedTunnel = false;
+      const tunnelBridge = isDesktopRuntime() ? window.repoPulseDesktop?.tunnel : undefined;
+      if (tunnelBridge) {
+        setIsRefreshingTunnel(true);
+        const status = await tunnelBridge.refresh();
+        refreshedTunnel = true;
+        if (status.state === 'error') {
+          throw new Error(status.error ?? '隧道刷新失败');
+        }
+        if (!status.publicUrl) {
+          throw new Error('隧道刷新后未返回公网 URL');
+        }
+      }
+
       const result = await retryMutation.mutateAsync(repository.id);
       if (result.webhookStatus === WebhookStatus.ACTIVE) {
-        toast.success('Webhook 重建成功');
+        toast.success(refreshedTunnel ? '隧道已刷新，Webhook 重建成功' : 'Webhook 重建成功');
       } else {
         toast.warning(
           `Webhook 仍未配置成功：${result.webhookError ?? result.webhookStatus}`,
@@ -3352,6 +3395,8 @@ function RepositoryWebhookSection({
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '重建失败');
+    } finally {
+      setIsRefreshingTunnel(false);
     }
   };
 
@@ -3433,6 +3478,7 @@ function RepositoryWebhookSection({
 
   const meta = getWebhookStatusMeta(data.status);
   const StatusIcon = meta.Icon;
+  const deliveryMeta = getWebhookDeliveryMeta(data.lastResponse);
   const secretDisplay = data.secret
     ? secretVisible
       ? data.secret
@@ -3507,6 +3553,13 @@ function RepositoryWebhookSection({
             <span className="min-w-0 flex-1 text-destructive">{data.lastError}</span>
           </div>
         ) : null}
+
+        <div className="flex items-start gap-2">
+          <span className="w-14 shrink-0 text-muted-foreground">最近投递</span>
+          <span className={cn('min-w-0 flex-1', deliveryMeta.className)}>
+            {deliveryMeta.label}
+          </span>
+        </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -3531,9 +3584,9 @@ function RepositoryWebhookSection({
           variant="outline"
           className="gap-1.5"
           onClick={handleRetry}
-          disabled={retryMutation.isPending}
+          disabled={isRetryingWebhook}
         >
-          {retryMutation.isPending ? (
+          {isRetryingWebhook ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
             <RotateCcw className="h-3.5 w-3.5" />
