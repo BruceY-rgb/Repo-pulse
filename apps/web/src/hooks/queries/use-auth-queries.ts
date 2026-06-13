@@ -37,8 +37,11 @@ export function useLoginMutation() {
       await authService.login(email, password);
       return authService.getSession();
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });
+    // 直接用刚拿到的会话替换 currentUser 缓存（而非仅 invalidate）。
+    // invalidate 会先把旧的过期值（桌面端启动时缓存的 null）返回给路由守卫，
+    // 导致登录后被瞬时弹回登录页、需登录两次。setQueryData 让守卫同步读到真实用户。
+    onSuccess: (user) => {
+      queryClient.setQueryData(authQueryKeys.currentUser(), user);
     },
   });
 }
@@ -52,8 +55,11 @@ export function useRegisterMutation() {
       await authService.register(payload);
       return authService.getSession();
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: authQueryKeys.all });
+    // 同登录：以真实会话替换 currentUser 缓存，注册成功后直达工作台、不再回登录页。
+    // bootstrap-status 仅影响登录页文案，单独 invalidate 即可（不再失效 currentUser）。
+    onSuccess: async (user) => {
+      queryClient.setQueryData(authQueryKeys.currentUser(), user);
+      await queryClient.invalidateQueries({ queryKey: authQueryKeys.bootstrapStatus() });
     },
   });
 }
