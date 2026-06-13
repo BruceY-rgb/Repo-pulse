@@ -221,9 +221,8 @@ export class EventService {
     }
 
     for (const entry of userRepositories) {
-      // Empty repository scope means all accessible repositories are monitored.
       const scopeIds = userScopeMap.get(entry.userId) || [];
-      if (scopeIds.length > 0 && !scopeIds.includes(event.repositoryId)) {
+      if (!scopeIds.includes(event.repositoryId)) {
         continue;
       }
       const userId = entry.userId;
@@ -445,7 +444,7 @@ export class EventService {
       const prefs = (u.preferences as Record<string, unknown>) || {};
       const scope = (prefs.monitoringScope as Record<string, unknown>) || {};
       const ids = Array.isArray(scope.repositoryIds) ? scope.repositoryIds : [];
-      return ids.length === 0 || ids.includes(event.repositoryId);
+      return ids.includes(event.repositoryId);
     });
     if (!anyInScope) {
       this.logger.log(`ai_skipped eventId=${eventId} reason=not_in_monitoring_scope`);

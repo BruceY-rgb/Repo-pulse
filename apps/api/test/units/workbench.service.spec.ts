@@ -324,6 +324,32 @@ describe('WorkbenchService — 私有辅助方法', () => {
       ]);
     });
 
+    it('does not mark starred sources as monitored when monitoring scope is empty', async () => {
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue([]);
+      mockUserRepoFindMany.mockResolvedValue([
+        {
+          repositoryId: 'r1',
+          repository: {
+            ...makeRepo('r1', {
+              webhookId: 'hook-1',
+              webhookStatus: 'ACTIVE',
+            }),
+            _count: { events: 4 },
+          },
+        },
+      ]);
+
+      const result = await svc.getWatchRepositories('u1');
+
+      expect(result).toEqual([
+        expect.objectContaining({
+          id: 'r1',
+          isMonitored: false,
+          canAddToMonitoring: true,
+        }),
+      ]);
+    });
+
     it('queues fallback sync for stale watch sources without active webhook', async () => {
       jest.spyOn(Date, 'now').mockReturnValue(1_000_000_000_000);
       mockGetUserMonitoredRepositoryIds.mockResolvedValue([]);

@@ -62,11 +62,9 @@ export class ReportService {
     const scope = (prefs.monitoringScope as Record<string, unknown>) || {};
     const scopeRepoIds = Array.isArray(scope.repositoryIds)
       ? (scope.repositoryIds as string[]).filter((id) => accessibleIds.includes(id))
-      : accessibleIds;
+      : [];
 
-    const effectiveIds = scopeRepoIds.length > 0 ? scopeRepoIds : [];
-
-    if (!repositoryIdsParam) return effectiveIds;
+    if (!repositoryIdsParam) return scopeRepoIds;
 
     const requested = repositoryIdsParam
       .split(',')

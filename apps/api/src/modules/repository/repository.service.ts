@@ -1572,7 +1572,6 @@ export class RepositoryService {
     }
 
     const monitoredExternalIds = await this.getMonitoredGithubExternalIds(userId);
-    const defaultMonitorAllRepositories = monitoredExternalIds === null;
     const repos = await this.githubService.getUserRepositories(
       userOAuthToken,
       userRefreshToken,
@@ -1596,7 +1595,7 @@ export class RepositoryService {
         accessLevel: this.mapAccessLevelToApi(accessLevel),
         canOperate: isEditable,
         isEditable,
-        isMonitored: defaultMonitorAllRepositories || monitoredExternalIds.has(String(repo.id)),
+        isMonitored: monitoredExternalIds.has(String(repo.id)),
       };
     });
   }
@@ -1612,7 +1611,6 @@ export class RepositoryService {
     }
 
     const monitoredExternalIds = await this.getMonitoredGithubExternalIds(userId);
-    const defaultMonitorAllRepositories = monitoredExternalIds === null;
     const repos = await this.githubService.getStarredRepos(
       userOAuthToken,
       userRefreshToken,
@@ -1633,14 +1631,14 @@ export class RepositoryService {
       accessLevel: this.mapAccessLevelToApi(RepositoryAccessLevel.READ),
       canOperate: false,
       isEditable: false,
-      isMonitored: defaultMonitorAllRepositories || monitoredExternalIds.has(String(repo.id)),
+      isMonitored: monitoredExternalIds.has(String(repo.id)),
     }));
   }
 
-  private async getMonitoredGithubExternalIds(userId: string): Promise<Set<string> | null> {
+  private async getMonitoredGithubExternalIds(userId: string): Promise<Set<string>> {
     const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
     if (monitoredRepositoryIds.length === 0) {
-      return null;
+      return new Set();
     }
 
     const repositories = await this.prisma.repository.findMany({
@@ -1655,7 +1653,7 @@ export class RepositoryService {
   }
 
   private isRepositoryInMonitoringScope(monitoredRepositoryIds: string[], repositoryId: string): boolean {
-    return monitoredRepositoryIds.length === 0 || monitoredRepositoryIds.includes(repositoryId);
+    return monitoredRepositoryIds.includes(repositoryId);
   }
 
   async syncForUser(

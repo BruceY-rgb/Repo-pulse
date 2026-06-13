@@ -252,7 +252,7 @@ function isRepositoryMonitoredInScope(monitoredRepositoryIds: string[], reposito
   if (!repositoryId) {
     return false;
   }
-  return monitoredRepositoryIds.length === 0 || monitoredRepositoryIds.includes(repositoryId);
+  return monitoredRepositoryIds.includes(repositoryId);
 }
 
 const markdownComponents: Components = {
@@ -1051,7 +1051,7 @@ function doesMessageMatchMonitoringScope(
     return true;
   }
 
-  if (monitoredRepositoryIds.length > 0 && !monitoredRepositoryIds.includes(repositoryId)) {
+  if (!monitoredRepositoryIds.includes(repositoryId)) {
     return false;
   }
 
@@ -7786,8 +7786,8 @@ export function DesktopWorkbench() {
   } = useMonitoringScopePreferences();
   const monitoredRepositoryIds = monitoringScope.repositoryIds ?? [];
   const effectiveMonitoredRepositoryIds = useMemo(
-    () => (monitoredRepositoryIds.length === 0 ? repositoryIds : monitoredRepositoryIds),
-    [monitoredRepositoryIds, repositoryIds],
+    () => monitoredRepositoryIds,
+    [monitoredRepositoryIds],
   );
   const realtimeRepositoryIds = useMemo(
     () =>
@@ -8189,11 +8189,9 @@ export function DesktopWorkbench() {
     }
 
     const nextRepositoryIds =
-      monitoredRepositoryIds.length === 0
-        ? repositoryIds.filter((repositoryId) => repositoryId !== selectedRepository.id)
-        : monitoredRepositoryIds.includes(selectedRepository.id)
-          ? monitoredRepositoryIds.filter((repositoryId) => repositoryId !== selectedRepository.id)
-          : [...monitoredRepositoryIds, selectedRepository.id];
+      monitoredRepositoryIds.includes(selectedRepository.id)
+        ? monitoredRepositoryIds.filter((repositoryId) => repositoryId !== selectedRepository.id)
+        : [...monitoredRepositoryIds, selectedRepository.id];
     const nextBranchScopes = { ...(monitoringScope.repositoryBranchScopes ?? {}) };
     if (!nextRepositoryIds.includes(selectedRepository.id)) {
       delete nextBranchScopes[selectedRepository.id];
@@ -8208,9 +8206,7 @@ export function DesktopWorkbench() {
       return;
     }
 
-    const currentRepositoryIds = monitoredRepositoryIds.length === 0
-      ? monitoredRepositoryIds
-      : monitoredRepositoryIds.includes(selectedRepository.id)
+    const currentRepositoryIds = monitoredRepositoryIds.includes(selectedRepository.id)
       ? monitoredRepositoryIds
       : [...monitoredRepositoryIds, selectedRepository.id];
     const currentBranches = monitoringScope.repositoryBranchScopes?.[selectedRepository.id] ?? [];
@@ -8232,9 +8228,7 @@ export function DesktopWorkbench() {
 
     const nextBranchScopes = { ...(monitoringScope.repositoryBranchScopes ?? {}) };
     delete nextBranchScopes[selectedRepository.id];
-    const currentRepositoryIds = monitoredRepositoryIds.length === 0
-      ? monitoredRepositoryIds
-      : monitoredRepositoryIds.includes(selectedRepository.id)
+    const currentRepositoryIds = monitoredRepositoryIds.includes(selectedRepository.id)
       ? monitoredRepositoryIds
       : [...monitoredRepositoryIds, selectedRepository.id];
 
@@ -8243,9 +8237,7 @@ export function DesktopWorkbench() {
   };
 
   const removeRepositoryFromMonitoring = async (repository: Repository) => {
-    const nextRepositoryIds = monitoredRepositoryIds.length === 0
-      ? repositoryIds.filter((repositoryId) => repositoryId !== repository.id)
-      : monitoredRepositoryIds.filter((repositoryId) => repositoryId !== repository.id);
+    const nextRepositoryIds = monitoredRepositoryIds.filter((repositoryId) => repositoryId !== repository.id);
     const nextBranchScopes = { ...(monitoringScope.repositoryBranchScopes ?? {}) };
     delete nextBranchScopes[repository.id];
 

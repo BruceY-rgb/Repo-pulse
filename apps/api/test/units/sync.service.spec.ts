@@ -10,6 +10,11 @@ const mockUserRepoUpdate = jest.fn();
 const mockUserRepoUpdateMany = jest.fn();
 const mockEventFindFirst = jest.fn();
 const mockEventCreate = jest.fn();
+const mockGetUserMonitoredRepositoryIds = jest.fn();
+
+jest.mock('../../src/common/utils/repository-access', () => ({
+  getUserMonitoredRepositoryIds: (...a: any[]) => mockGetUserMonitoredRepositoryIds(...a),
+}));
 
 jest.mock('@repo-pulse/database', () => ({
   EventType: {
@@ -82,6 +87,7 @@ describe('SyncService', () => {
       syncBranchesForUser: jest.fn().mockResolvedValue(undefined),
     };
     mockUserRepoUpdateMany.mockResolvedValue({ count: 0 });
+    mockGetUserMonitoredRepositoryIds.mockResolvedValue([]);
     service = new SyncService(
       mockGithubService as any,
       mockRepositoryService as any,
@@ -254,8 +260,9 @@ describe('SyncService', () => {
       expect(mockUserRepoUpdateMany).not.toHaveBeenCalled();
     });
 
-    it('schedules history sync so starred repository events can populate Watch Feed', async () => {
+    it('schedules history sync only for monitored starred repositories', async () => {
       mockUserFindUnique.mockResolvedValue({ githubAccessToken: 'token', githubRefreshToken: null });
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r-starred']);
       mockGithubService.getUserRepositories.mockResolvedValue([]);
       mockGithubService.getStarredRepos.mockResolvedValue([
         { id: 999, full_name: 'org/starred-repo' },
@@ -270,6 +277,24 @@ describe('SyncService', () => {
       jest.runOnlyPendingTimers();
 
       expect(historySpy).toHaveBeenCalledWith('u1', ['r-starred']);
+    });
+
+    it('does not sync starred repository history when monitoring scope is empty', async () => {
+      mockUserFindUnique.mockResolvedValue({ githubAccessToken: 'token', githubRefreshToken: null });
+      mockGithubService.getUserRepositories.mockResolvedValue([]);
+      mockGithubService.getStarredRepos.mockResolvedValue([
+        { id: 999, full_name: 'org/starred-repo' },
+      ]);
+      mockRepoFindFirst.mockResolvedValue({ id: 'r-starred' });
+      mockUserRepoFindUnique.mockResolvedValue({ accessMode: 'MONITOR' });
+      const historySpy = jest
+        .spyOn(service, 'syncAllUserRepositoriesHistory')
+        .mockResolvedValue(undefined);
+
+      await service.syncUserRepositories('u1');
+      jest.runOnlyPendingTimers();
+
+      expect(historySpy).not.toHaveBeenCalled();
     });
 
     it('triggers branch sync after repository sync', async () => {
@@ -441,7 +466,16 @@ describe('SyncService', () => {
 
   // ── syncAllUserRepositoriesHistory ─────────────────────────────────────────
   describe('syncAllUserRepositoriesHistory', () => {
-    it('iterates all user repos and calls syncRepositoryHistory for each', async () => {
+    it('returns without syncing when monitoring scope is empty', async () => {
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue([]);
+
+      await service.syncAllUserRepositoriesHistory('u1');
+
+      expect(mockRepoFindMany).not.toHaveBeenCalled();
+    });
+
+    it('iterates monitored user repos and calls syncRepositoryHistory for each', async () => {
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r1', 'r2']);
       mockRepoFindMany.mockResolvedValueOnce([{ id: 'r1' }, { id: 'r2' }]);
       // syncRepositoryHistory will call findMany/findUnique for repo details
       // For simplicity, mock it to throw (handled silently per repo)
@@ -451,11 +485,17 @@ describe('SyncService', () => {
       await service.syncAllUserRepositoriesHistory('u1');
       // Verify it tried to find repos for user
       expect(mockRepoFindMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { users: { some: { userId: 'u1' } } } }),
+        expect.objectContaining({
+          where: {
+            id: { in: ['r1', 'r2'] },
+            users: { some: { userId: 'u1' } },
+          },
+        }),
       );
     });
 
-    it('syncs priority repos before the rest of the user repos', async () => {
+    it('syncs priority repos before the rest of the monitored repos', async () => {
+      mockGetUserMonitoredRepositoryIds.mockResolvedValue(['r1', 'r2']);
       mockRepoFindMany
         .mockResolvedValueOnce([{ id: 'r1' }, { id: 'r2' }])
         .mockResolvedValue({ fullName: 'o/r', defaultBranch: 'main', users: [{ user: { githubAccessToken: null } }] });

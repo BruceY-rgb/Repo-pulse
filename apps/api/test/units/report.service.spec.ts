@@ -51,11 +51,9 @@ function makePrefs(overrides: object = {}) {
 
 function mockResolveRepos(repoIds: string[], scopeRepoIds?: string[]) {
   mockUserRepoFindMany.mockResolvedValue(repoIds.map((id) => ({ repositoryId: id })));
-  if (scopeRepoIds) {
-    mockUserFindUnique.mockResolvedValue(makePrefs({ monitoringScope: { repositoryIds: scopeRepoIds } }));
-  } else {
-    mockUserFindUnique.mockResolvedValue(makePrefs({}));
-  }
+  mockUserFindUnique.mockResolvedValue(
+    makePrefs({ monitoringScope: { repositoryIds: scopeRepoIds ?? repoIds } }),
+  );
 }
 
 function mockAnalysisCounts(critical = 0, high = 0, medium = 0) {
@@ -157,9 +155,8 @@ describe('ReportService', () => {
     expect(eventCall.where.repositoryId.in).not.toContain('r2');
   });
 
-  it('uses all accessible repos when monitoringScope is empty', async () => {
+  it('returns no reports when monitoringScope is empty', async () => {
     mockResolveRepos(['r1', 'r2'], []);
-    // Empty scopeRepoIds → effectiveIds = []
     const result = await service.getReports('u1');
     expect(result).toEqual([]);
   });
