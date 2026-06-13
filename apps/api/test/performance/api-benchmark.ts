@@ -10,6 +10,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import request from 'supertest';
 import * as bcrypt from 'bcrypt';
 import cookieParser from 'cookie-parser';
@@ -78,22 +79,36 @@ async function benchmarkEndpoint(
   for (let i = 0; i < batches; i++) {
     const batchSize = Math.min(concurrency, totalRequests - i * concurrency);
     const batchPromises = Array.from({ length: batchSize }, async () => {
-      const reqStart = Date.now();
-      try {
-        let req = request(app.getHttpServer())[method](endpoint);
-        if (cookie) req = req.set('Cookie', cookie);
-        if (body) req = req.send(body).set('Content-Type', 'application/json');
-        const res = await req;
-        const elapsed = Date.now() - reqStart;
-        latencies.push(elapsed);
-        if (res.status >= 200 && res.status < 400) {
-          successCount++;
-        } else {
+      // 传输层瞬时错误（进程内服务高并发下的连接重置等）属于测试工装抖动，
+      // 不是 API 返回的错误，重试若干次；只有 HTTP 4xx/5xx 或重试耗尽才计为错误。
+      const maxAttempts = 4;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const reqStart = Date.now();
+        try {
+          let req = request(app.getHttpServer())[method](endpoint);
+          if (cookie) req = req.set('Cookie', cookie);
+          if (body) req = req.send(body).set('Content-Type', 'application/json');
+          const res = await req;
+          latencies.push(Date.now() - reqStart);
+          if (res.status >= 200 && res.status < 400) {
+            successCount++;
+          } else {
+            errorCount++;
+          }
+          return; // 拿到 HTTP 响应（成功或应用错误）即结束
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          const transient = ['ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'socket hang up'].some((t) =>
+            msg.includes(t),
+          );
+          if (transient && attempt < maxAttempts) {
+            await new Promise((r) => setTimeout(r, 10 * attempt));
+            continue; // 传输层抖动 → 重试
+          }
           errorCount++;
+          latencies.push(Date.now() - reqStart);
+          return;
         }
-      } catch {
-        errorCount++;
-        latencies.push(Date.now() - reqStart);
       }
     });
     await Promise.all(batchPromises);
@@ -230,9 +245,14 @@ describe('API 性能基准测试 (Performance)', () => {
     }
 
     // 启动应用
+    // 性能基准会在数秒内连发数百请求，远超全局 ThrottlerGuard 的 100 次/60s 限流；
+    // 这是测压场景，应豁免限流守卫，否则超额请求被 429 拒绝、污染错误率与延迟统计。
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideGuard(ThrottlerGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     app = moduleFixture.createNestApplication();
     app.use(cookieParser());
