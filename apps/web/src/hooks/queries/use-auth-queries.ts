@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { LoginPayload, RegisterPayload } from '@repo-pulse/shared';
 import { authService } from '@/services/auth.service';
 import { useApiMutation, useApiQuery } from '@/lib/query-hooks';
+import { setActiveAccountId } from '@/lib/account-storage';
 
 export const authQueryKeys = {
   all: ['auth'] as const,
@@ -37,10 +38,14 @@ export function useLoginMutation() {
       await authService.login(email, password);
       return authService.getSession();
     },
-    // 直接用刚拿到的会话替换 currentUser 缓存（而非仅 invalidate）。
-    // invalidate 会先把旧的过期值（桌面端启动时缓存的 null）返回给路由守卫，
-    // 导致登录后被瞬时弹回登录页、需登录两次。setQueryData 让守卫同步读到真实用户。
+    // 切换账号时先清空整个查询缓存，避免上一个账号的仓库/AI 配置等缓存被本账号读到；
+    // 再登记当前账号 id（供 localStorage 命名空间使用），最后用刚拿到的会话替换
+    // currentUser 缓存（而非仅 invalidate）。invalidate 会先把旧的过期值（桌面端启动时
+    // 缓存的 null）返回给路由守卫，导致登录后被瞬时弹回登录页、需登录两次；setQueryData
+    // 让守卫同步读到真实用户。
     onSuccess: (user) => {
+      queryClient.clear();
+      setActiveAccountId(user?.id);
       queryClient.setQueryData(authQueryKeys.currentUser(), user);
     },
   });
@@ -55,9 +60,12 @@ export function useRegisterMutation() {
       await authService.register(payload);
       return authService.getSession();
     },
-    // 同登录：以真实会话替换 currentUser 缓存，注册成功后直达工作台、不再回登录页。
-    // bootstrap-status 仅影响登录页文案，单独 invalidate 即可（不再失效 currentUser）。
+    // 同登录：先清空缓存 + 登记账号 id，再以真实会话替换 currentUser 缓存，
+    // 注册成功后直达工作台、不再回登录页。bootstrap-status 仅影响登录页文案，
+    // 单独 invalidate 即可（不再失效 currentUser）。
     onSuccess: async (user) => {
+      queryClient.clear();
+      setActiveAccountId(user?.id);
       queryClient.setQueryData(authQueryKeys.currentUser(), user);
       await queryClient.invalidateQueries({ queryKey: authQueryKeys.bootstrapStatus() });
     },
@@ -90,8 +98,11 @@ export function useLogoutMutation() {
       await authService.logout();
       return true;
     },
-    onSuccess: async () => {
-      await queryClient.removeQueries({ queryKey: authQueryKeys.currentUser() });
+    // 登出即清空整个查询缓存并注销当前账号 id，确保同一台主机上的下一个账号
+    // 不会读到本账号遗留的任何缓存数据。
+    onSuccess: () => {
+      setActiveAccountId(null);
+      queryClient.clear();
     },
   });
 }

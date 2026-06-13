@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { isDesktopRuntime } from '@/lib/desktop';
+import { accountScopedKey } from '@/lib/account-storage';
 import { toast } from 'sonner';
 
 interface GitFileChange {
@@ -290,7 +291,7 @@ export function GitTreePanel({
           branch: result.branch || 'HEAD',
           authorizedAt: new Date().toISOString(),
         };
-        const key = `repo-pulse:agent-workspace-memory:${repositoryId}`;
+        const key = accountScopedKey(`repo-pulse:agent-workspace-memory:${repositoryId}`);
         localStorage.setItem(key, JSON.stringify(memory));
         setCwd(result.cwd);
         toast.success('本地工作区关联成功！');

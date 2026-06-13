@@ -143,6 +143,7 @@ import { workbenchService } from '@/services/workbench.service';
 import { settingsService, PROVIDER_LABELS, type AIProvider } from '@/services/settings.service';
 import { getApiBaseUrl, isDesktopRuntime } from '@/lib/desktop';
 import { getProviderLogo } from '@/lib/provider-logo';
+import { accountStorage, accountScopedKey } from '@/lib/account-storage';
 import { GitTreePanel } from '@/components/shared/GitTreePanel';
 import {
   useWorkbenchUnreadStore,
@@ -4949,7 +4950,8 @@ interface AgentWorkspaceMemory {
   authorizedAt: string;
 }
 
-const agentWorkspaceMemoryKey = (repoId: string) => `repo-pulse:agent-workspace-memory:${repoId}`;
+const agentWorkspaceMemoryKey = (repoId: string) =>
+  accountScopedKey(`repo-pulse:agent-workspace-memory:${repoId}`);
 
 function getAgentWorkspaceMemory(repoId: string): AgentWorkspaceMemory | null {
   if (!repoId) return null;
@@ -5811,13 +5813,13 @@ function AgentRunView({
 
   // Project List (Repository IDs)
   const [projectRepoIds, setProjectRepoIds] = useState<string[]>(() => {
-    const stored = localStorage.getItem('repo-pulse:agent-projects');
+    const stored = accountStorage.getItem('repo-pulse:agent-projects');
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) return parsed;
       } catch {
-        localStorage.removeItem('repo-pulse:agent-projects');
+        accountStorage.removeItem('repo-pulse:agent-projects');
       }
     }
     return initialRepository ? [initialRepository.id] : [];
@@ -5894,7 +5896,7 @@ function AgentRunView({
 
   // Sync projects to localStorage
   useEffect(() => {
-    localStorage.setItem('repo-pulse:agent-projects', JSON.stringify(projectRepoIds));
+    accountStorage.setItem('repo-pulse:agent-projects', JSON.stringify(projectRepoIds));
   }, [projectRepoIds]);
 
   // Load configuration
@@ -5941,7 +5943,7 @@ function AgentRunView({
     const newSessionsByRepo: Record<string, AgentSession[]> = {};
     
     projectRepoIds.forEach(repoId => {
-      const storedSessions = localStorage.getItem(`repo-pulse:agent-sessions:${repoId}`);
+      const storedSessions = accountStorage.getItem(`repo-pulse:agent-sessions:${repoId}`);
       let parsedSessions: AgentSession[] = [];
       try {
         parsedSessions = storedSessions ? JSON.parse(storedSessions) : [];
@@ -5954,7 +5956,7 @@ function AgentRunView({
       if (parsedSessions.length === 0) {
         const defaultSession = createDefaultAgentSession();
         parsedSessions = [defaultSession];
-        localStorage.setItem(`repo-pulse:agent-sessions:${repoId}`, JSON.stringify(parsedSessions));
+        accountStorage.setItem(`repo-pulse:agent-sessions:${repoId}`, JSON.stringify(parsedSessions));
       }
       newSessionsByRepo[repoId] = parsedSessions;
     });
@@ -5972,7 +5974,7 @@ function AgentRunView({
       setActiveRepoId(nextRepoId);
 
       const repoSessions = newSessionsByRepo[nextRepoId] || [];
-      const storedActiveId = localStorage.getItem(`repo-pulse:active-agent-session:${nextRepoId}`);
+      const storedActiveId = accountStorage.getItem(`repo-pulse:active-agent-session:${nextRepoId}`);
       const validActiveId = repoSessions.some(s => s.id === storedActiveId)
         ? storedActiveId!
         : (repoSessions[0]?.id || '');
@@ -5986,7 +5988,7 @@ function AgentRunView({
   // Sync activeSessionId back to localStorage per repo
   useEffect(() => {
     if (activeRepoId && activeSessionId) {
-      localStorage.setItem(`repo-pulse:active-agent-session:${activeRepoId}`, activeSessionId);
+      accountStorage.setItem(`repo-pulse:active-agent-session:${activeRepoId}`, activeSessionId);
     }
   }, [activeSessionId, activeRepoId]);
 
@@ -6012,7 +6014,7 @@ function AgentRunView({
     setSessionsByRepo(prev => {
       const current = prev[repoId] || [];
       const updated = updater(current);
-      localStorage.setItem(`repo-pulse:agent-sessions:${repoId}`, JSON.stringify(updated));
+      accountStorage.setItem(`repo-pulse:agent-sessions:${repoId}`, JSON.stringify(updated));
       return {
         ...prev,
         [repoId]: updated,
@@ -6797,7 +6799,7 @@ function AgentRunView({
                       }));
                       if (repoId !== activeRepoId && repoSessions.length > 0) {
                         setActiveRepoId(repoId);
-                        const storedActiveId = localStorage.getItem(`repo-pulse:active-agent-session:${repoId}`);
+                        const storedActiveId = accountStorage.getItem(`repo-pulse:active-agent-session:${repoId}`);
                         const validActiveId = repoSessions.some(s => s.id === storedActiveId)
                           ? storedActiveId!
                           : repoSessions[0].id;
@@ -7408,7 +7410,7 @@ export function DesktopWorkbench() {
   });
   const [favoriteEventIds, setFavoriteEventIds] = useState<Set<string>>(() => {
     try {
-      const stored = localStorage.getItem('repo-pulse:favorite-events');
+      const stored = accountStorage.getItem('repo-pulse:favorite-events');
       return stored ? new Set(JSON.parse(stored) as string[]) : new Set();
     } catch {
       return new Set();
@@ -7423,7 +7425,7 @@ export function DesktopWorkbench() {
       } else {
         next.add(eventId);
       }
-      localStorage.setItem('repo-pulse:favorite-events', JSON.stringify([...next]));
+      accountStorage.setItem('repo-pulse:favorite-events', JSON.stringify([...next]));
       return next;
     });
   };
@@ -7444,7 +7446,7 @@ export function DesktopWorkbench() {
   // Pinned repositories (persisted in localStorage)
   const [pinnedRepoIds, setPinnedRepoIds] = useState<Set<string>>(() => {
     try {
-      const stored = localStorage.getItem('repo-pulse-pinned-repos');
+      const stored = accountStorage.getItem('repo-pulse-pinned-repos');
       return stored ? new Set(JSON.parse(stored) as string[]) : new Set();
     } catch {
       return new Set();
@@ -7455,7 +7457,7 @@ export function DesktopWorkbench() {
     setPinnedRepoIds((current) => {
       const next = new Set(current);
       next.add(repo.id);
-      localStorage.setItem('repo-pulse-pinned-repos', JSON.stringify([...next]));
+      accountStorage.setItem('repo-pulse-pinned-repos', JSON.stringify([...next]));
       return next;
     });
     toast.success(`${repo.fullName} 已置顶`);
@@ -7465,7 +7467,7 @@ export function DesktopWorkbench() {
     setPinnedRepoIds((current) => {
       const next = new Set(current);
       next.delete(repo.id);
-      localStorage.setItem('repo-pulse-pinned-repos', JSON.stringify([...next]));
+      accountStorage.setItem('repo-pulse-pinned-repos', JSON.stringify([...next]));
       return next;
     });
     toast.success(`${repo.fullName} 已取消置顶`);
