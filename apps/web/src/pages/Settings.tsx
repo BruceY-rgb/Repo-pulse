@@ -466,6 +466,9 @@ export function Settings() {
       setGithubIntegration(status);
       setGithubTokenInput('');
       queryClient.invalidateQueries({ queryKey: authQueryKeys.currentUser() });
+      queryClient.invalidateQueries({ queryKey: repositoryQueryKeys.all });
+      queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.all });
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.repositories() });
       toast.success(t('settings.integrations.github.disconnected'));
     } catch {
       toast.error(t('settings.integrations.github.disconnectFailed'));

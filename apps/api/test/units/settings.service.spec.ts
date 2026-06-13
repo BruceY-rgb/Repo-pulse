@@ -4,8 +4,13 @@ import axios from 'axios';
 const mockUserFindUnique = jest.fn();
 const mockUserUpdate = jest.fn();
 const mockRepositoryCount = jest.fn();
+const mockUserRepositoryFindMany = jest.fn();
+const mockUserRepositoryDeleteMany = jest.fn();
+const mockConversationStateDeleteMany = jest.fn();
+const mockTransaction = jest.fn();
 
 jest.mock('@repo-pulse/database', () => ({
+  Prisma: {},
   RepositoryAccessLevel: { OWNER: 'OWNER', ADMIN: 'ADMIN', MAINTAIN: 'MAINTAIN', WRITE: 'WRITE', TRIAGE: 'TRIAGE', READ: 'READ', NONE: 'NONE' },
   RepositoryAccessMode: { EDITABLE: 'EDITABLE', MONITOR: 'MONITOR' },
   NotificationChannel: { EMAIL: 'EMAIL', DINGTALK: 'DINGTALK', FEISHU: 'FEISHU', WEBHOOK: 'WEBHOOK', IN_APP: 'IN_APP', WECOM: 'WECOM', WECHAT: 'WECHAT' },
@@ -20,6 +25,14 @@ jest.mock('@repo-pulse/database', () => ({
     repository: {
       count: (...a: any[]) => mockRepositoryCount(...a),
     },
+    userRepository: {
+      findMany: (...a: any[]) => mockUserRepositoryFindMany(...a),
+      deleteMany: (...a: any[]) => mockUserRepositoryDeleteMany(...a),
+    },
+    userRepositoryConversationState: {
+      deleteMany: (...a: any[]) => mockConversationStateDeleteMany(...a),
+    },
+    $transaction: (...a: any[]) => mockTransaction(...a),
   },
 }));
 
@@ -37,11 +50,33 @@ function makeDbUser(overrides: object = {}) {
   };
 }
 
+function makeTransactionClient() {
+  return {
+    user: {
+      findUnique: (...a: any[]) => mockUserFindUnique(...a),
+      update: (...a: any[]) => mockUserUpdate(...a),
+    },
+    userRepository: {
+      findMany: (...a: any[]) => mockUserRepositoryFindMany(...a),
+      deleteMany: (...a: any[]) => mockUserRepositoryDeleteMany(...a),
+    },
+    userRepositoryConversationState: {
+      deleteMany: (...a: any[]) => mockConversationStateDeleteMany(...a),
+    },
+  };
+}
+
 describe('SettingsService', () => {
   let service: SettingsService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockTransaction.mockImplementation(async (callback: (tx: ReturnType<typeof makeTransactionClient>) => unknown) =>
+      callback(makeTransactionClient()),
+    );
+    mockUserRepositoryFindMany.mockResolvedValue([]);
+    mockUserRepositoryDeleteMany.mockResolvedValue({ count: 0 });
+    mockConversationStateDeleteMany.mockResolvedValue({ count: 0 });
     mockAxios.isAxiosError.mockImplementation((error: unknown) =>
       Boolean((error as { isAxiosError?: boolean } | null)?.isAxiosError),
     );
@@ -123,7 +158,41 @@ describe('SettingsService', () => {
     });
 
     it('disconnects GitHub token and returns disconnected status', async () => {
+      mockUserFindUnique.mockResolvedValue({
+        preferences: {
+          theme: 'dark',
+          monitoringScope: {
+            repositoryIds: ['github-r1', 'gitlab-r1', 'github-r2'],
+            pinned: true,
+          },
+        },
+      });
+      mockUserRepositoryFindMany.mockResolvedValue([
+        { repositoryId: 'github-r1' },
+        { repositoryId: 'github-r2' },
+      ]);
+      mockUserRepositoryDeleteMany.mockResolvedValue({ count: 2 });
+
       await expect(service.disconnectGithub('u1')).resolves.toEqual({ connected: false });
+      expect(mockUserRepositoryFindMany).toHaveBeenCalledWith({
+        where: {
+          userId: 'u1',
+          repository: { platform: 'GITHUB' },
+        },
+        select: { repositoryId: true },
+      });
+      expect(mockConversationStateDeleteMany).toHaveBeenCalledWith({
+        where: {
+          userId: 'u1',
+          repositoryId: { in: ['github-r1', 'github-r2'] },
+        },
+      });
+      expect(mockUserRepositoryDeleteMany).toHaveBeenCalledWith({
+        where: {
+          userId: 'u1',
+          repository: { platform: 'GITHUB' },
+        },
+      });
       expect(mockUserUpdate).toHaveBeenCalledWith(expect.objectContaining({
         where: { id: 'u1' },
         data: expect.objectContaining({
@@ -131,6 +200,13 @@ describe('SettingsService', () => {
           githubLogin: null,
           githubAccessToken: null,
           githubRefreshToken: null,
+          preferences: {
+            theme: 'dark',
+            monitoringScope: {
+              pinned: true,
+              repositoryIds: ['gitlab-r1'],
+            },
+          },
         }),
       }));
     });

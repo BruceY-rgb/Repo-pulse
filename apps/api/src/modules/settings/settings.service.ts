@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { RepositoryAccessMode, prisma } from '@repo-pulse/database';
+import { Platform, Prisma, RepositoryAccessMode, prisma } from '@repo-pulse/database';
 import type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
 import { AppConfigService } from '../app-config/app-config.service';
 import axios from 'axios';
@@ -39,6 +39,35 @@ interface GithubTokenProfile {
   name: string | null;
   email: string | null;
   avatar_url: string | null;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function removeRepositoriesFromMonitoringScope(
+  preferences: unknown,
+  removedRepositoryIds: Set<string>,
+): Prisma.InputJsonObject {
+  const nextPreferences: Record<string, unknown> = isPlainObject(preferences)
+    ? { ...preferences }
+    : {};
+  const currentScope = isPlainObject(nextPreferences.monitoringScope)
+    ? { ...nextPreferences.monitoringScope }
+    : {};
+  const repositoryIds = Array.isArray(currentScope.repositoryIds)
+    ? currentScope.repositoryIds.filter(
+        (repositoryId) =>
+          typeof repositoryId !== 'string' || !removedRepositoryIds.has(repositoryId),
+      )
+    : [];
+
+  nextPreferences.monitoringScope = {
+    ...currentScope,
+    repositoryIds,
+  };
+
+  return nextPreferences as Prisma.InputJsonObject;
 }
 
 @Injectable()
@@ -151,16 +180,61 @@ export class SettingsService {
   }
 
   async disconnectGithub(userId: string): Promise<GithubIntegrationStatus> {
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        githubId: null,
-        githubLogin: null,
-        githubAccessToken: null,
-        githubRefreshToken: null,
-      },
+    const cleanup = await prisma.$transaction(async (tx) => {
+      const [user, githubMemberships] = await Promise.all([
+        tx.user.findUnique({
+          where: { id: userId },
+          select: { preferences: true },
+        }),
+        tx.userRepository.findMany({
+          where: {
+            userId,
+            repository: { platform: Platform.GITHUB },
+          },
+          select: { repositoryId: true },
+        }),
+      ]);
+
+      const repositoryIds = githubMemberships.map((membership) => membership.repositoryId);
+      const repositoryIdSet = new Set(repositoryIds);
+      const preferences = removeRepositoriesFromMonitoringScope(user?.preferences, repositoryIdSet);
+
+      if (repositoryIds.length > 0) {
+        await tx.userRepositoryConversationState.deleteMany({
+          where: {
+            userId,
+            repositoryId: { in: repositoryIds },
+          },
+        });
+      }
+
+      const membershipsDeleted = await tx.userRepository.deleteMany({
+        where: {
+          userId,
+          repository: { platform: Platform.GITHUB },
+        },
+      });
+
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          githubId: null,
+          githubLogin: null,
+          githubAccessToken: null,
+          githubRefreshToken: null,
+          preferences,
+        },
+      });
+
+      return {
+        membershipsDeleted: membershipsDeleted.count,
+        monitoringScopeRemoved: repositoryIds.length,
+      };
     });
-    this.logger.log(`github_token_disconnected userId=${userId}`);
+    this.logger.log(
+      `github_token_disconnected userId=${userId} membershipsDeleted=${cleanup.membershipsDeleted} ` +
+        `monitoringScopeRemoved=${cleanup.monitoringScopeRemoved}`,
+    );
     return { connected: false };
   }
 
