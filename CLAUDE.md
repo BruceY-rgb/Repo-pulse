@@ -62,7 +62,7 @@ Repo-Pulse 是一个 AI 驱动的代码仓库监控与管理平台，采用 Mono
 
 ## 5. 核心参考文档
 在进行任何实际开发前，你**必须**阅读以下文档以获取具体的业务目标和规范：
-1. `/docs/project-plan-v2.md` - **当前最高优先级的迭代计划**。包含了详细的阶段划分、当前架构缺陷的修复方案以及具体的验收标准。**你必须严格按照该文档的 Phase 顺序执行，不可跳跃。**
+1. `/docs/project-plan-book.md` - **项目计划书**。包含范围、过程模型、规模估算、资源配置、交付物定义、任务计划与风险分析。配套交付物：`/docs/requirements/srs.md`（需求规格说明）、`/docs/system-design/system-design-book.md`（系统设计书）。
 2. `/docs/frontend-style-guide.md` - 前端样式红线和交互规范。
 
 ## 6. 项目开发进度
@@ -76,7 +76,7 @@ Repo-Pulse 是一个 AI 驱动的代码仓库监控与管理平台，采用 Mono
 | **Phase 1** 基础设施加固 | ✅ 已完成 | 环境变量分离、HttpOnly Cookie 认证、Webhook 验签、样式基座清理 |
 | **Phase 2** 实时数据流 | ✅ 已完成 | WebSocket Gateway、消息队列联动、React Query 迁移 |
 | **Phase 3** AI 核心引擎 | ✅ 已完成 | AI 抽象层、异步分析工作流、SSE 流式输出 |
-| **桌面端实时推送改造**（Item-4，分支 `feature/IPC-realtime-push`） | ✅ 代码完成（M0–M6），⏳ 待运行时端到端验收 | 桌面端实时从「浏览器 WebSocket」改为「Electron 主进程 socket.io 客户端 → 单一 IPC 通道 `desktop:realtime` → 渲染进程复用 `createRealtimeHandlers`」；主进程从 `session.cookies` 读 HttpOnly `access_token` 鉴权；补齐 `approval.updated`、`analysis.started/failed`、`notification.new`（按 `user:<id>` 房间）广播源 + 「本地优先」`LocalGitWatcher`；M6 补齐广播单元测试（6 spec / 98 测试全绿）。详见 `docs/realtime-push-handoff.md` 与 `docs/electron-ipc-realtime-push-plan.md`。 |
+| **桌面端实时推送改造**（Item-4，分支 `feature/IPC-realtime-push`） | ✅ 代码完成（M0–M6），⏳ 待运行时端到端验收 | 桌面端实时从「浏览器 WebSocket」改为「Electron 主进程 socket.io 客户端 → 单一 IPC 通道 `desktop:realtime` → 渲染进程复用 `createRealtimeHandlers`」；主进程从 `session.cookies` 读 HttpOnly `access_token` 鉴权；补齐 `approval.updated`、`analysis.started/failed`、`notification.new`（按 `user:<id>` 房间）广播源 + 「本地优先」`LocalGitWatcher`；M6 补齐广播单元测试（6 spec / 98 测试全绿）。详见 `docs/archive/realtime-push-handoff.md` 与 `docs/archive/electron-ipc-realtime-push-plan.md`。 |
 | **登录注册改为纯账号密码模式**（分支 `dev-electron`） | ✅ 已完成 | 移除邮箱验证码登录与 GitHub OAuth 登录残留；新增 `POST /auth/register`（首个用户自动 ADMIN，后续 MEMBER）；登录页双模式、首次使用默认注册；access_token 默认 15m→7d、Cookie maxAge 与 JWT 配置对齐（`JWT_EXPIRATION`/`JWT_REFRESH_EXPIRATION`，启动期格式校验）；登录失败提示统一防枚举；注册唯一约束冲突映射 409；前端凭据接口 401 不再触发 refresh 跳转；认证 payload/response 类型收敛到 `@repo-pulse/shared`；GitHub PAT 配置保留在「设置 → 集成」。Prisma 移除 `EmailVerificationCode`（迁移 `20260611000000_drop_email_verification_codes` 待 DB 启动后 `pnpm db:migrate` 应用）。 |
 
 ### 本次实现功能详情
