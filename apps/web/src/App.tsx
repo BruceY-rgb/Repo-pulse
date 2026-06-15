@@ -4,6 +4,7 @@ import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { Landing } from '@/pages/Landing';
 import { Login } from '@/pages/Login';
 import { DesktopWorkbench } from '@/pages/DesktopWorkbench';
+import { GuidePage } from '@/pages/GuidePage';
 import { isDesktopRuntime } from '@/lib/desktop';
 
 function LegacyWorkbenchRedirect({ to }: { to: string }) {
@@ -24,6 +25,7 @@ function App() {
           <Route path="/" element={<Navigate to={defaultRoute} replace />} />
           <Route path="/landing" element={isDesktop ? <Navigate to="/workbench" replace /> : <Landing />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/guide" element={<GuidePage />} />
 
           <Route element={<ProtectedRoute />}>
             <Route path="/workbench" element={<DesktopWorkbench />} />
