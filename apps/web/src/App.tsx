@@ -23,7 +23,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Navigate to={defaultRoute} replace />} />
           <Route path="/landing" element={isDesktop ? <Navigate to="/workbench" replace /> : <Landing />} />
-          <Route path="/login" element={<Login />} />
+          <Route path="/login" element={isDesktop ? <Navigate to="/workbench" replace /> : <Login />} />
 
           <Route element={<ProtectedRoute />}>
             <Route path="/workbench" element={<DesktopWorkbench />} />

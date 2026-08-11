@@ -51,6 +51,11 @@ export const envValidationSchema = Joi.object({
   FRONTEND_URL: Joi.string().uri().default('http://localhost:5173'),
   // API_URL: 后端 API 的公开访问地址，用于生成 Webhook 回调 URL
   API_URL: Joi.string().uri().default('http://localhost:3001'),
+  // 仅允许 Electron 从回环地址建立本地单用户会话。关闭后恢复传统账号密码入口。
+  LOCAL_DESKTOP_AUTH_ENABLED: Joi.boolean()
+    .truthy('true').truthy('1').truthy('yes').truthy('on')
+    .falsy('false').falsy('0').falsy('no').falsy('off')
+    .default(true),
 
   // Rate Limiting
   THROTTLE_TTL: Joi.number().default(60),

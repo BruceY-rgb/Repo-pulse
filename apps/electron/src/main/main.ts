@@ -33,6 +33,8 @@ let lastAppliedTunnelUrl: string | null = null;
 /** 当前正在同步到后端的 tunnel URL 与 Promise，用于合并首次 running 状态和 start()/refresh() 的重复触发。 */
 let applyingTunnelUrl: string | null = null;
 let applyingTunnelPromise: Promise<OrchestratorResult> | null = null;
+/** 每个 Electron 进程只清一次认证 Cookie；关闭并重新打开窗口不等同于重启应用。 */
+let authCookiesResetForLaunch = false;
 /** tunnel:refresh 防抖窗口。 */
 const TUNNEL_REFRESH_DEBOUNCE_MS = 3_000;
 
@@ -410,12 +412,27 @@ function createMainWindow() {
     }
   });
 
-  if (isDev) {
-    void mainWindow.loadURL(devServerUrl);
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
-  } else {
-    void mainWindow.loadFile(getPackagedWebEntry());
-  }
+  // 每次桌面应用启动都清除旧会话。默认模式会立即自动重建；启用应用锁后，
+  // ProtectedRoute 会停在解锁页，从而确保“启动时验证”不被持久 Cookie 绕过。
+  const loadRenderer = async () => {
+    if (!authCookiesResetForLaunch) {
+      for (const origin of new Set([API_BASE_URL, 'http://127.0.0.1:3001', 'http://localhost:3001'])) {
+        await Promise.all([
+          mainWindow?.webContents.session.cookies.remove(origin, 'access_token'),
+          mainWindow?.webContents.session.cookies.remove(origin, 'refresh_token'),
+        ]);
+      }
+      authCookiesResetForLaunch = true;
+    }
+
+    if (isDev) {
+      await mainWindow?.loadURL(devServerUrl);
+      mainWindow?.webContents.openDevTools({ mode: 'detach' });
+    } else {
+      await mainWindow?.loadFile(getPackagedWebEntry());
+    }
+  };
+  void loadRenderer().catch((error) => console.error('[main] renderer startup failed', error));
 }
 
 function registerIpcHandlers() {

@@ -412,7 +412,7 @@ async function bootstrap() {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Repo-Pulse-Desktop'],
   });
 
   // Raw body 捕获中间件 — 仅对 /webhooks 路径保留原始 Buffer，供 HMAC 验签使用

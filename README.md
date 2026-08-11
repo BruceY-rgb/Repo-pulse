@@ -58,6 +58,7 @@
 ## 当前方向
 
 - **桌面端优先**：Electron 承载桌面应用，Web 前端仍作为主要渲染层。
+- **打开即用**：个人桌面模式自动建立本地身份与安全会话，无需先注册或输入账号密码。
 - **会话式工作台**：仓库是会话，Push、PR、Issue、Release、审批、通知和报告摘要都是消息。
 - **权限分层**：有写权限的仓库可以执行审批、PR、Agent 等真实操作；只读监控仓库只展示消息和分析。
 - **关注动态**：接入系统但未加入监控范围的仓库进入 Watch Feed，用信息流方式查看生态动态。
@@ -289,13 +290,18 @@ FRONTEND_URL=http://localhost:5173
 API_URL=http://localhost:3001
 ```
 
-登录与注册使用本地账号密码：首次使用默认进入注册，首个注册账号自动成为本地实例的管理员。GitHub 数据访问在登录后通过「设置 → 集成 → GitHub」配置 Personal Access Token，不再依赖 OAuth 或环境变量登录。
+Electron 个人模式默认免登录：首次启动会自动创建本地 Owner 身份，已有数据库则固定复用最早创建的管理员（没有管理员时复用最早用户），并继续通过 JWT、HttpOnly Cookie 和后端 Guard 保护 API、WebSocket 与仓库写操作。选定身份会写入本地配置，后续不会因新增用户而变化。
+
+GitHub 与 AI 服务分别在「设置 → 集成」和「设置 → AI」中绑定。需要共享电脑保护时，可在「设置 → 安全 → 应用锁」设置密码并开启启动验证；关闭时应用直接进入工作台，原密码哈希不会被删除。
+
+本地自动会话仅在 `LOCAL_DESKTOP_AUTH_ENABLED=true`、API 绑定回环地址且请求来自 Electron 本地入口时可用。若将 API 改为非回环地址，自动会话会拒绝请求；传统 Web 登录接口仍保留在代码和归档分支中，但不再出现在 Electron 启动流程。
 
 同设备会话有效期可通过环境变量调整（默认 access 7 天 / refresh 30 天，活跃使用下自动滑动续期）：
 
 ```env
 JWT_EXPIRATION=7d
 JWT_REFRESH_EXPIRATION=30d
+LOCAL_DESKTOP_AUTH_ENABLED=true
 ```
 
 ## 安装依赖

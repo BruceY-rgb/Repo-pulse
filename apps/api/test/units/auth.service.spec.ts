@@ -4,12 +4,20 @@ jest.mock('@repo-pulse/database', () => ({
   NotificationChannel: { EMAIL: 'EMAIL', DINGTALK: 'DINGTALK', FEISHU: 'FEISHU', WEBHOOK: 'WEBHOOK', IN_APP: 'IN_APP' },
   Role: { ADMIN: 'ADMIN', MANAGER: 'MANAGER', MEMBER: 'MEMBER', VIEWER: 'VIEWER' },
   prisma: {
-    user: { count: jest.fn() },
+    user: {
+      count: jest.fn(),
+      findUnique: jest.fn(),
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    appConfig: { findUnique: jest.fn(), upsert: jest.fn() },
+    $transaction: jest.fn(),
   },
   PrismaClient: jest.fn().mockImplementation(() => ({})),
 }));
 
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { prisma } from '@repo-pulse/database';
 import { AuthService } from '../../src/modules/auth/auth.service';
@@ -17,7 +25,15 @@ import { AuthService } from '../../src/modules/auth/auth.service';
 jest.mock('bcrypt');
 
 const mockBcryptCompare = bcrypt.compare as jest.Mock;
+const mockBcryptHash = bcrypt.hash as jest.Mock;
 const mockUserCount = prisma.user.count as jest.Mock;
+const mockUserFindUnique = prisma.user.findUnique as jest.Mock;
+const mockUserFindFirst = prisma.user.findFirst as jest.Mock;
+const mockUserCreate = prisma.user.create as jest.Mock;
+const mockUserUpdate = prisma.user.update as jest.Mock;
+const mockAppConfigFindUnique = prisma.appConfig.findUnique as jest.Mock;
+const mockAppConfigUpsert = prisma.appConfig.upsert as jest.Mock;
+const mockTransaction = prisma.$transaction as jest.Mock;
 
 function makeUser(overrides: object = {}) {
   return {
@@ -63,7 +79,118 @@ function makeService(overrides: Partial<{
 }
 
 describe('AuthService', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockAppConfigFindUnique.mockResolvedValue(null);
+    mockAppConfigUpsert.mockResolvedValue({});
+    mockUserFindUnique.mockResolvedValue(null);
+    mockUserFindFirst.mockResolvedValue(null);
+    mockUserUpdate.mockResolvedValue({});
+    mockTransaction.mockResolvedValue([]);
+    mockBcryptHash.mockResolvedValue('new-hash');
+  });
+
+  describe('local desktop identity', () => {
+    it('creates an ADMIN local user for an empty database and persists the selection', async () => {
+      const localUser = makeUser({ id: 'local-1', email: 'local@repo-pulse.app', role: 'ADMIN', passwordHash: null });
+      mockUserCreate.mockResolvedValue(localUser);
+      const { service } = makeService();
+
+      await expect(service.resolveLocalDesktopUser()).resolves.toBe(localUser);
+      expect(mockUserCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({ email: 'local@repo-pulse.app', role: 'ADMIN' }),
+      });
+      expect(mockAppConfigUpsert).toHaveBeenCalledWith(expect.objectContaining({
+        create: expect.objectContaining({ value: 'local-1' }),
+      }));
+    });
+
+    it('reuses the configured user and never creates a duplicate on repeated startup', async () => {
+      const existing = makeUser({ id: 'selected-user' });
+      mockAppConfigFindUnique.mockResolvedValue({ value: 'selected-user' });
+      mockUserFindUnique.mockResolvedValue(existing);
+      const { service } = makeService();
+
+      await service.resolveLocalDesktopUser();
+      await service.resolveLocalDesktopUser();
+      expect(mockUserCreate).not.toHaveBeenCalled();
+      expect(mockUserFindUnique).toHaveBeenCalledTimes(2);
+    });
+
+    it('deterministically chooses the earliest ADMIN when legacy users exist', async () => {
+      const admin = makeUser({ id: 'oldest-admin', role: 'ADMIN' });
+      mockUserFindFirst.mockResolvedValueOnce(admin);
+      const { service } = makeService();
+
+      await expect(service.resolveLocalDesktopUser()).resolves.toBe(admin);
+      expect(mockUserFindFirst).toHaveBeenCalledWith({
+        where: { role: 'ADMIN' },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      expect(mockUserCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('desktop session and app lock', () => {
+    it('creates a standard JWT session without a password when the lock is disabled', async () => {
+      const user = makeUser();
+      const { service } = makeService({ signAsync: jest.fn().mockResolvedValue('signed') });
+      jest.spyOn(service, 'resolveLocalDesktopUser').mockResolvedValue(user as any);
+      jest.spyOn(service, 'getAppLockStatus').mockResolvedValue({ enabled: false, hasPassword: true });
+
+      await expect(service.createDesktopSession()).resolves.toMatchObject({
+        status: 'authenticated',
+        lockEnabled: false,
+        tokens: { accessToken: 'signed', refreshToken: 'signed' },
+      });
+    });
+
+    it('requires the password when the app lock is enabled', async () => {
+      const user = makeUser({ passwordHash: 'hash' });
+      const { service } = makeService();
+      jest.spyOn(service, 'resolveLocalDesktopUser').mockResolvedValue(user as any);
+      jest.spyOn(service, 'getAppLockStatus').mockResolvedValue({ enabled: true, hasPassword: true });
+
+      await expect(service.createDesktopSession()).resolves.toEqual({ status: 'locked', lockEnabled: true });
+      mockBcryptCompare.mockResolvedValue(false);
+      await expect(service.createDesktopSession('wrong-password')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('unlocks with the correct password and issues the existing JWT cookies payload', async () => {
+      const user = makeUser({ passwordHash: 'hash' });
+      const { service } = makeService({ signAsync: jest.fn().mockResolvedValue('signed') });
+      jest.spyOn(service, 'resolveLocalDesktopUser').mockResolvedValue(user as any);
+      jest.spyOn(service, 'getAppLockStatus').mockResolvedValue({ enabled: true, hasPassword: true });
+      mockBcryptCompare.mockResolvedValue(true);
+
+      await expect(service.createDesktopSession('correct-password')).resolves.toMatchObject({
+        status: 'authenticated',
+        lockEnabled: true,
+      });
+    });
+
+    it('enables, changes and disables startup verification without deleting the password hash', async () => {
+      const { service } = makeService();
+      jest.spyOn(service, 'resolveLocalDesktopUser').mockResolvedValue(makeUser({ id: 'u1' }) as any);
+      await expect(service.enableAppLock('u1', 'new-password')).resolves.toEqual({ enabled: true, hasPassword: true });
+      expect(mockTransaction).toHaveBeenCalled();
+
+      mockUserFindUnique.mockResolvedValue({ passwordHash: 'hash' });
+      mockBcryptCompare.mockResolvedValue(true);
+      await expect(service.changeAppLockPassword('u1', 'old-password', 'new-password')).resolves.toEqual({ enabled: true, hasPassword: true });
+      await expect(service.disableAppLock('u1', 'new-password')).resolves.toEqual({ enabled: false, hasPassword: true });
+      expect(mockAppConfigUpsert).toHaveBeenLastCalledWith(expect.objectContaining({
+        update: expect.objectContaining({ value: 'false' }),
+      }));
+      expect(mockUserUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ data: { passwordHash: null } }));
+    });
+
+    it('prevents a non-selected legacy user from changing the global desktop lock', async () => {
+      const { service } = makeService();
+      jest.spyOn(service, 'resolveLocalDesktopUser').mockResolvedValue(makeUser({ id: 'selected-user' }) as any);
+      await expect(service.enableAppLock('other-user', 'new-password')).rejects.toThrow(ForbiddenException);
+    });
+  });
 
   // ── validateUser ───────────────────────────────────────────────────────────
   describe('validateUser', () => {

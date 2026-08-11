@@ -1379,23 +1379,25 @@ function PrimaryRail({
           </Tooltip>
         )}
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size={collapsed ? 'icon' : 'default'}
-              className={cn('gap-2 rounded-xl', collapsed ? 'h-10 w-10' : 'h-10 w-full justify-start')}
-              onClick={handleLogout}
-              disabled={logoutMutation.isPending}
-              aria-label="退出登录"
-            >
-              <LogOut className="h-4 w-4" />
-              {!collapsed ? <span>退出登录</span> : null}
-            </Button>
-          </TooltipTrigger>
-          {collapsed ? <TooltipContent side="right">退出登录</TooltipContent> : null}
-        </Tooltip>
+        {!isDesktopRuntime() ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size={collapsed ? 'icon' : 'default'}
+                className={cn('gap-2 rounded-xl', collapsed ? 'h-10 w-10' : 'h-10 w-full justify-start')}
+                onClick={handleLogout}
+                disabled={logoutMutation.isPending}
+                aria-label="退出登录"
+              >
+                <LogOut className="h-4 w-4" />
+                {!collapsed ? <span>退出登录</span> : null}
+              </Button>
+            </TooltipTrigger>
+            {collapsed ? <TooltipContent side="right">退出登录</TooltipContent> : null}
+          </Tooltip>
+        ) : null}
       </div>
 
       <Tooltip>

@@ -7,7 +7,7 @@ jest.mock('@repo-pulse/database', () => ({
   PrismaClient: jest.fn().mockImplementation(() => ({})),
 }));
 
-import { UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { AuthController } from '../../src/modules/auth/auth.controller';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -21,6 +21,16 @@ function makeAuthService(overrides: Partial<Record<string, jest.Mock>> = {}) {
     getBootstrapStatus: jest.fn().mockResolvedValue({ required: false }),
     refreshTokens: jest.fn().mockResolvedValue({ accessToken: 'acc2', refreshToken: 'ref2' }),
     verifyToken: jest.fn().mockResolvedValue(null),
+    createDesktopSession: jest.fn().mockResolvedValue({
+      status: 'authenticated',
+      lockEnabled: false,
+      user: { id: 'u1' },
+      tokens: { accessToken: 'acc', refreshToken: 'ref' },
+    }),
+    getAppLockStatus: jest.fn().mockResolvedValue({ enabled: false, hasPassword: false }),
+    enableAppLock: jest.fn().mockResolvedValue({ enabled: true, hasPassword: true }),
+    changeAppLockPassword: jest.fn().mockResolvedValue({ enabled: true, hasPassword: true }),
+    disableAppLock: jest.fn().mockResolvedValue({ enabled: false, hasPassword: true }),
     ...overrides,
   } as any;
 }
@@ -32,9 +42,9 @@ function makeUserService(overrides: Partial<Record<string, jest.Mock>> = {}) {
   } as any;
 }
 
-function makeConfigService(values: Record<string, string> = {}) {
+function makeConfigService(values: Record<string, unknown> = {}) {
   return {
-    get: jest.fn((key: string) => values[key] ?? ''),
+    get: jest.fn((key: string, fallback?: unknown) => values[key] ?? fallback ?? ''),
   } as any;
 }
 
@@ -50,6 +60,8 @@ function makeReq(overrides: Partial<Record<string, any>> = {}) {
     cookies: {},
     user: null,
     query: {},
+    socket: { remoteAddress: '127.0.0.1' },
+    header: jest.fn((name: string) => name.toLowerCase() === 'x-repo-pulse-desktop' ? 'electron' : undefined),
     ...overrides,
   } as any;
 }
@@ -105,6 +117,59 @@ describe('AuthController', () => {
   describe('bootstrapStatus', () => {
     it('returns bootstrap status', async () => {
       await expect(controller.bootstrapStatus()).resolves.toMatchObject({ required: false });
+    });
+  });
+
+  describe('desktopSession', () => {
+    it('establishes the standard cookie session for a loopback Electron request', async () => {
+      const res = makeRes();
+      const result = await controller.desktopSession({}, makeReq(), res);
+      expect(authService.createDesktopSession).toHaveBeenCalledWith(undefined);
+      expect(res.cookie).toHaveBeenCalledTimes(2);
+      expect(result).toEqual({ status: 'authenticated', lockEnabled: false, userId: 'u1' });
+    });
+
+    it('returns locked without cookies when startup verification is enabled', async () => {
+      authService.createDesktopSession.mockResolvedValue({ status: 'locked', lockEnabled: true });
+      const res = makeRes();
+      await expect(controller.desktopSession({}, makeReq(), res)).resolves.toEqual({ status: 'locked', lockEnabled: true });
+      expect(res.cookie).not.toHaveBeenCalled();
+      expect(res.clearCookie).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects non-loopback, non-Electron, and explicitly disabled auto-session requests', async () => {
+      await expect(controller.desktopSession({}, makeReq({ socket: { remoteAddress: '10.0.0.4' } }), makeRes()))
+        .rejects.toThrow(ForbiddenException);
+      await expect(controller.desktopSession({}, makeReq({ header: jest.fn() }), makeRes()))
+        .rejects.toThrow(ForbiddenException);
+
+      const disabled = new AuthController(
+        authService,
+        userService,
+        makeConfigService({ LOCAL_DESKTOP_AUTH_ENABLED: false }),
+      );
+      await expect(disabled.desktopSession({}, makeReq(), makeRes())).rejects.toThrow(ForbiddenException);
+
+      const remotelyBound = new AuthController(
+        authService,
+        userService,
+        makeConfigService({ APP_HOST: '0.0.0.0' }),
+      );
+      await expect(remotelyBound.desktopSession({}, makeReq(), makeRes())).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('app lock settings', () => {
+    it('delegates enable, change and disable operations for the authenticated user', async () => {
+      await controller.enableAppLock({ sub: 'u1' }, { password: 'new-password' });
+      await controller.changeAppLockPassword(
+        { sub: 'u1' },
+        { currentPassword: 'old-password', newPassword: 'new-password' },
+      );
+      await controller.disableAppLock({ sub: 'u1' }, { password: 'new-password' });
+      expect(authService.enableAppLock).toHaveBeenCalledWith('u1', 'new-password');
+      expect(authService.changeAppLockPassword).toHaveBeenCalledWith('u1', 'old-password', 'new-password');
+      expect(authService.disableAppLock).toHaveBeenCalledWith('u1', 'new-password');
     });
   });
 

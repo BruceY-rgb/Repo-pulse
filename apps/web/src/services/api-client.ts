@@ -33,7 +33,7 @@ function notifySubscribers(success: boolean) {
 
 // 凭据类接口的 401 表示「账号或密码错误」，而不是会话过期：
 // 不能触发 refresh（登录页通常没有 refresh_token，会导致整页跳转、错误提示丢失）
-const CREDENTIAL_ENDPOINTS = ['/auth/login', '/auth/register'];
+const CREDENTIAL_ENDPOINTS = ['/auth/login', '/auth/register', '/auth/desktop-session'];
 
 // Response interceptor: 处理 401 自动刷新
 apiClient.interceptors.response.use(
@@ -79,8 +79,10 @@ apiClient.interceptors.response.use(
       } catch {
         isRefreshing = false;
         notifySubscribers(false);
-        // 刷新失败，重定向到登录页
-        window.location.href = getLoginRoute();
+        // 桌面端由 ProtectedRoute 重新建立本地会话或展示应用锁；Web 端仍回登录页。
+        if (!window.repoPulseDesktop?.isDesktop) {
+          window.location.href = getLoginRoute();
+        }
         return Promise.reject(error);
       }
     }

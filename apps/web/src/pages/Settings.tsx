@@ -18,7 +18,6 @@ import {
   Eye,
   EyeOff,
   GitPullRequest,
-  MessageSquare,
   FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -173,6 +172,14 @@ export function Settings() {
   const [aiSaved, setAiSaved] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
 
+  // 本地应用锁（个人桌面模式默认关闭）
+  const [appLock, setAppLock] = useState({ enabled: false, hasPassword: false });
+  const [appLockLoading, setAppLockLoading] = useState(true);
+  const [appLockSaving, setAppLockSaving] = useState(false);
+  const [currentLockPassword, setCurrentLockPassword] = useState('');
+  const [newLockPassword, setNewLockPassword] = useState('');
+  const [confirmLockPassword, setConfirmLockPassword] = useState('');
+
   // Webhook API_URL 配置状态
   const [apiUrlConfig, setApiUrlConfig] = useState<ApiUrlConfig>({ value: '', source: 'default' });
   const [apiUrlInput, setApiUrlInput] = useState('');
@@ -242,6 +249,13 @@ export function Settings() {
       }
     };
     loadUser();
+  }, []);
+
+  useEffect(() => {
+    void authService.getAppLockStatus()
+      .then(setAppLock)
+      .catch((error) => console.error('Failed to load app lock status:', error))
+      .finally(() => setAppLockLoading(false));
   }, []);
 
   useEffect(() => {
@@ -350,6 +364,67 @@ export function Settings() {
       toast.error(t('settings.profile.saveFailed') || 'Failed');
     } finally {
       setProfileSaving(false);
+    }
+  };
+
+  const resetAppLockFields = () => {
+    setCurrentLockPassword('');
+    setNewLockPassword('');
+    setConfirmLockPassword('');
+  };
+
+  const handleEnableAppLock = async () => {
+    if (newLockPassword.length < 6) {
+      toast.error(t('settings.security.passwordTooShort'));
+      return;
+    }
+    if (newLockPassword !== confirmLockPassword) {
+      toast.error(t('settings.security.passwordMismatch'));
+      return;
+    }
+    setAppLockSaving(true);
+    try {
+      setAppLock(await authService.enableAppLock(newLockPassword));
+      resetAppLockFields();
+      toast.success(t('settings.security.enabledSuccess'));
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('settings.security.operationFailed')));
+    } finally {
+      setAppLockSaving(false);
+    }
+  };
+
+  const handleChangeAppLockPassword = async () => {
+    if (newLockPassword.length < 6) {
+      toast.error(t('settings.security.passwordTooShort'));
+      return;
+    }
+    if (newLockPassword !== confirmLockPassword) {
+      toast.error(t('settings.security.passwordMismatch'));
+      return;
+    }
+    setAppLockSaving(true);
+    try {
+      setAppLock(await authService.changeAppLockPassword(currentLockPassword, newLockPassword));
+      resetAppLockFields();
+      toast.success(t('settings.security.changedSuccess'));
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('settings.security.invalidPassword')));
+    } finally {
+      setAppLockSaving(false);
+    }
+  };
+
+  const handleDisableAppLock = async () => {
+    setAppLockSaving(true);
+    try {
+      setAppLock(await authService.disableAppLock(currentLockPassword));
+      resetAppLockFields();
+      toast.success(t('settings.security.disabledSuccess'));
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('settings.security.invalidPassword')));
+    } finally {
+      setAppLockSaving(false);
     }
   };
 
@@ -1681,56 +1756,80 @@ export function Settings() {
         <TabsContent value="security" className="mt-4 space-y-4">
           <Card className="card-github">
             <CardHeader>
-              <CardTitle className="text-base font-semibold text-white">{t('settings.security.password')}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="current" className="text-sm text-white">{t('settings.security.currentPassword')}</Label>
-                <Input
-                  id="current"
-                  type="password"
-                  className="bg-[var(--github-surface)] border-[var(--github-border)]"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="new" className="text-sm text-white">{t('settings.security.newPassword')}</Label>
-                <Input
-                  id="new"
-                  type="password"
-                  className="bg-[var(--github-surface)] border-[var(--github-border)]"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirm" className="text-sm text-white">{t('settings.security.confirmPassword')}</Label>
-                <Input
-                  id="confirm"
-                  type="password"
-                  className="bg-[var(--github-surface)] border-[var(--github-border)]"
-                />
-              </div>
-              <Button className="btn-x-primary">{t('settings.security.updatePassword')}</Button>
-            </CardContent>
-          </Card>
-
-          <Card className="card-github border-red-400/30">
-            <CardHeader>
-              <CardTitle className="text-base font-semibold text-white flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-red-400" />
-                {t('settings.security.dangerZone')}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between p-4 rounded-lg bg-red-400/5 border border-red-400/20">
+              <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm font-medium text-white">{t('settings.security.deleteAccount')}</p>
-                  <p className="text-xs text-[var(--github-text-secondary)]">
-                    {t('settings.security.deleteDescription')}
-                  </p>
+                  <CardTitle className="text-base font-semibold text-white">{t('settings.security.appLock')}</CardTitle>
+                  <CardDescription className="mt-1">{t('settings.security.appLockDescription')}</CardDescription>
                 </div>
-                <Button variant="outline" className="border-red-400 text-red-400 hover:bg-red-400/10">
-                  {t('settings.security.deleteButton')}
-                </Button>
+                <Badge variant={appLock.enabled ? 'default' : 'secondary'}>
+                  {appLock.enabled ? t('settings.security.enabled') : t('settings.security.disabled')}
+                </Badge>
               </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {appLockLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t('settings.security.loading')}
+                </div>
+              ) : (
+                <>
+                  {appLock.enabled ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="current-lock-password" className="text-sm text-white">{t('settings.security.currentPassword')}</Label>
+                      <Input
+                        id="current-lock-password"
+                        type="password"
+                        value={currentLockPassword}
+                        onChange={(event) => setCurrentLockPassword(event.target.value)}
+                        className="bg-[var(--github-surface)] border-[var(--github-border)]"
+                      />
+                    </div>
+                  ) : null}
+                  <div className="space-y-2">
+                    <Label htmlFor="new-lock-password" className="text-sm text-white">
+                      {appLock.enabled ? t('settings.security.newPassword') : t('settings.security.setPassword')}
+                    </Label>
+                    <Input
+                      id="new-lock-password"
+                      type="password"
+                      value={newLockPassword}
+                      onChange={(event) => setNewLockPassword(event.target.value)}
+                      className="bg-[var(--github-surface)] border-[var(--github-border)]"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="confirm-lock-password" className="text-sm text-white">{t('settings.security.confirmPassword')}</Label>
+                    <Input
+                      id="confirm-lock-password"
+                      type="password"
+                      value={confirmLockPassword}
+                      onChange={(event) => setConfirmLockPassword(event.target.value)}
+                      className="bg-[var(--github-surface)] border-[var(--github-border)]"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <Button
+                      className="btn-x-primary"
+                      disabled={appLockSaving}
+                      onClick={() => void (appLock.enabled ? handleChangeAppLockPassword() : handleEnableAppLock())}
+                    >
+                      {appLockSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      {appLock.enabled ? t('settings.security.updatePassword') : t('settings.security.enableLock')}
+                    </Button>
+                    {appLock.enabled ? (
+                      <Button
+                        variant="outline"
+                        disabled={appLockSaving || currentLockPassword.length < 6}
+                        onClick={() => void handleDisableAppLock()}
+                      >
+                        {t('settings.security.disableLock')}
+                      </Button>
+                    ) : null}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{t('settings.security.restartHint')}</p>
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   UnauthorizedException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiCookieAuth } from '@nestjs/swagger';
@@ -21,6 +22,12 @@ import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { UserService } from '../user/user.service';
 import { ConfigService } from '@nestjs/config';
+import { DesktopSessionDto } from './dto/desktop-session.dto';
+import {
+  ChangeAppLockPasswordDto,
+  DisableAppLockDto,
+  EnableAppLockDto,
+} from './dto/app-lock.dto';
 
 // Cookie 配置常量
 const COOKIE_OPTIONS = {
@@ -82,6 +89,69 @@ export class AuthController {
   @ApiOperation({ summary: '是否还没有任何账号（首次使用）' })
   async bootstrapStatus() {
     return this.authService.getBootstrapStatus();
+  }
+
+  /**
+   * Electron 个人模式的本地会话入口。仍签发标准 JWT/HttpOnly Cookie，后续所有
+   * API 与 WebSocket 继续走既有鉴权。只有显式启用且来自回环地址的桌面请求可用。
+   */
+  @Post('desktop-session')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '建立本地桌面会话，应用锁开启时验证密码' })
+  async desktopSession(
+    @Body() dto: DesktopSessionDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    this.assertLocalDesktopRequest(req);
+    const result = await this.authService.createDesktopSession(dto.password);
+    if (result.status === 'locked' || !result.tokens || !result.user) {
+      this.clearTokenCookies(res);
+      return { status: 'locked', lockEnabled: true };
+    }
+
+    this.setTokenCookies(res, result.tokens.accessToken, result.tokens.refreshToken);
+    return {
+      status: 'authenticated',
+      lockEnabled: result.lockEnabled,
+      userId: result.user.id,
+    };
+  }
+
+  @Get('app-lock')
+  @UseGuards(JwtAuthGuard)
+  @ApiCookieAuth('access_token')
+  @ApiOperation({ summary: '读取本地应用锁状态' })
+  async appLockStatus(@CurrentUser() user: { sub: string }) {
+    return this.authService.getAppLockStatus(user.sub);
+  }
+
+  @Post('app-lock/enable')
+  @UseGuards(JwtAuthGuard)
+  @ApiCookieAuth('access_token')
+  @ApiOperation({ summary: '设置密码并启用启动验证' })
+  async enableAppLock(@CurrentUser() user: { sub: string }, @Body() dto: EnableAppLockDto) {
+    return this.authService.enableAppLock(user.sub, dto.password);
+  }
+
+  @Post('app-lock/change-password')
+  @UseGuards(JwtAuthGuard)
+  @ApiCookieAuth('access_token')
+  @ApiOperation({ summary: '修改应用锁密码' })
+  async changeAppLockPassword(
+    @CurrentUser() user: { sub: string },
+    @Body() dto: ChangeAppLockPasswordDto,
+  ) {
+    return this.authService.changeAppLockPassword(user.sub, dto.currentPassword, dto.newPassword);
+  }
+
+  @Post('app-lock/disable')
+  @UseGuards(JwtAuthGuard)
+  @ApiCookieAuth('access_token')
+  @ApiOperation({ summary: '关闭启动验证' })
+  async disableAppLock(@CurrentUser() user: { sub: string }, @Body() dto: DisableAppLockDto) {
+    return this.authService.disableAppLock(user.sub, dto.password);
   }
 
   /**
@@ -220,5 +290,21 @@ export class AuthController {
   private clearTokenCookies(res: Response) {
     res.clearCookie('access_token', { path: '/' });
     res.clearCookie('refresh_token', { path: '/' });
+  }
+
+  private assertLocalDesktopRequest(req: Request) {
+    const enabled = this.configService.get<boolean>('LOCAL_DESKTOP_AUTH_ENABLED', true);
+    const appHost = this.configService.get<string>('APP_HOST', '127.0.0.1');
+    const isLoopbackHost = appHost === '127.0.0.1' || appHost === 'localhost' || appHost === '::1';
+    const desktopHeader = req.header('x-repo-pulse-desktop');
+    const remoteAddress = req.socket.remoteAddress ?? req.ip ?? '';
+    const isLoopback =
+      remoteAddress === '127.0.0.1' ||
+      remoteAddress === '::1' ||
+      remoteAddress === '::ffff:127.0.0.1';
+
+    if (!enabled || !isLoopbackHost || desktopHeader !== 'electron' || !isLoopback) {
+      throw new ForbiddenException('本地桌面自动会话不可用');
+    }
   }
 }
