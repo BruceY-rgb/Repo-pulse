@@ -1,5 +1,2 @@
 -- AlterEnum
 ALTER TYPE "AnalysisStatus" ADD VALUE IF NOT EXISTS 'SKIPPED';
-
--- DropIndex
-DROP INDEX IF EXISTS "Event_branches_idx";

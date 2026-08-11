@@ -6,8 +6,8 @@
 -- the enum.
 
 
-ALTER TYPE "NotificationChannel" ADD VALUE 'WECOM';
-ALTER TYPE "NotificationChannel" ADD VALUE 'WECHAT';
+ALTER TYPE "NotificationChannel" ADD VALUE IF NOT EXISTS 'WECOM';
+ALTER TYPE "NotificationChannel" ADD VALUE IF NOT EXISTS 'WECHAT';
 
 -- AlterTable
 ALTER TABLE "Event" ADD COLUMN     "seq" BIGSERIAL NOT NULL;
