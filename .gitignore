@@ -64,3 +64,5 @@ coverage/
 # claude
 .claude/
 CLAUDE.md
+
+*.pptx
