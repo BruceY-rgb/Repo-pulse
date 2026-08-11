@@ -91,9 +91,12 @@ export class SyncService {
       const userRepos = await this.githubService.getUserRepositories(
         user.githubAccessToken,
         user.githubRefreshToken || undefined,
-        { throwOnError: options?.throwOnFetchError },
+        // 仓库清单是权限对账的唯一权威来源。拉取失败时必须中止，
+        // 不能把临时网络故障误当成“用户已失去全部仓库权限”。
+        { throwOnError: true },
       );
       this.logger.log(`GitHub API returned ${userRepos.length} user repositories`);
+      const userRepositoryExternalIds = new Set(userRepos.map((repo) => String(repo.id)));
 
       for (const repo of userRepos) {
         try {
@@ -240,7 +243,9 @@ export class SyncService {
               });
               this.logger.log(`Linked existing starred repository ${repo.full_name} to user`);
               trackStarredHistorySync(existing.id);
-            } else if (userRepo.accessMode === RepositoryAccessMode.EDITABLE) {
+            } else if (userRepositoryExternalIds.has(String(repo.id))) {
+              // 已在 /user/repos 中确认的仓库，权限已在前一轮按 GitHub
+              // 返回的 permissions 写入；这里只补充收藏状态。
               await prisma.userRepository.update({
                 where: {
                   userId_repositoryId: {
@@ -274,6 +279,38 @@ export class SyncService {
         } catch (error) {
           this.logger.error(`Failed to sync starred repository ${repo.full_name}`, error);
         }
+      }
+
+      // 历史版本曾把旧 UserRepository 记录默认迁移为 EDITABLE/WRITE。
+      // 只要它不在 GitHub 当前的 /user/repos 权威清单中，就不应继续拥有
+      // 可操作权限；保留记录和历史事件，仅降为只读监控。
+      const staleEditableMemberships = await prisma.userRepository.findMany({
+        where: {
+          userId,
+          accessMode: RepositoryAccessMode.EDITABLE,
+          repository: {
+            platform: Platform.GITHUB,
+            externalId: { notIn: Array.from(userRepositoryExternalIds) },
+          },
+        },
+        select: { repositoryId: true },
+      });
+
+      if (staleEditableMemberships.length > 0) {
+        await prisma.userRepository.updateMany({
+          where: {
+            userId,
+            repositoryId: { in: staleEditableMemberships.map((membership) => membership.repositoryId) },
+          },
+          data: {
+            role: 'VIEWER',
+            accessMode: RepositoryAccessMode.MONITOR,
+            accessLevel: RepositoryAccessLevel.READ,
+          },
+        });
+        this.logger.warn(
+          `Demoted ${staleEditableMemberships.length} stale editable GitHub memberships to monitor access for user ${userId}`,
+        );
       }
 
       if (shouldReconcileStarredState) {
