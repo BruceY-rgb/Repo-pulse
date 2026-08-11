@@ -23,7 +23,8 @@ const EVENTS_NAMESPACE = `${API_BASE_URL}/events`;
  *   1. 鉴权：从渲染进程所在会话的 HttpOnly Cookie 读取 access_token，以
  *      { auth: { token } } 握手（网关 extractToken 优先读 handshake.auth.token）。
  *      因为是 Node 客户端，不受浏览器跨域/跨端口 Cookie 限制；auth 用函数形式，
- *      每次（重）连接前重读 Cookie，从而自然适配 15 分钟 access_token 轮换。
+ *      每次（重）连接前重读 Cookie，从而自然适配任意 access_token 轮换节奏
+ *      （当前默认 7 天，由 JWT_EXPIRATION 配置）。
  *   2. 房间：按 repositoryId 引用计数 join/leave，与 web 端语义一致。
  *   3. 补发：自身按 seq 跟踪每个房间最新进度，重连时带 sinceSeq 重新 join，
  *      触发网关 replayMissedEvents 补发断连期间漏掉的事件。

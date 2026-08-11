@@ -252,7 +252,7 @@ function isRepositoryMonitoredInScope(monitoredRepositoryIds: string[], reposito
   if (!repositoryId) {
     return false;
   }
-  return monitoredRepositoryIds.length === 0 || monitoredRepositoryIds.includes(repositoryId);
+  return monitoredRepositoryIds.includes(repositoryId);
 }
 
 const markdownComponents: Components = {
@@ -1051,7 +1051,7 @@ function doesMessageMatchMonitoringScope(
     return true;
   }
 
-  if (monitoredRepositoryIds.length > 0 && !monitoredRepositoryIds.includes(repositoryId)) {
+  if (!monitoredRepositoryIds.includes(repositoryId)) {
     return false;
   }
 
@@ -3316,6 +3316,33 @@ function getWebhookStatusMeta(status: WebhookStatus) {
   }
 }
 
+function getWebhookDeliveryMeta(lastResponse: {
+  code: number | null;
+  status: string | null;
+  message: string | null;
+} | null) {
+  if (!lastResponse) {
+    return {
+      label: '暂无投递记录',
+      className: 'text-muted-foreground',
+    };
+  }
+
+  const status = lastResponse.status?.trim();
+  const message = lastResponse.message?.trim();
+  const code = lastResponse.code;
+  const ok =
+    status?.toLowerCase() === 'ok' ||
+    (typeof code === 'number' && code >= 200 && code < 300);
+  const prefix = typeof code === 'number' ? `${code}` : (status || 'unknown');
+  const detail = message && message !== status ? ` · ${message}` : '';
+
+  return {
+    label: `${ok ? '成功' : '异常'}：${prefix}${detail}`,
+    className: ok ? 'text-success-foreground' : 'text-destructive',
+  };
+}
+
 function RepositoryWebhookSection({
   repository,
   canManageWebhook,
@@ -3324,6 +3351,7 @@ function RepositoryWebhookSection({
   canManageWebhook?: boolean;
 }) {
   const [secretVisible, setSecretVisible] = useState(false);
+  const [isRefreshingTunnel, setIsRefreshingTunnel] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const autoRetryTriggeredRef = useRef(false);
   const canUseWebhookControls =
@@ -3332,6 +3360,7 @@ function RepositoryWebhookSection({
   const retryMutation = useRetryWebhookMutation();
   const testMutation = useTestWebhookMutation();
   const data = statusQuery.data;
+  const isRetryingWebhook = retryMutation.isPending || isRefreshingTunnel;
 
   const handleCopy = (text: string, label: string) => {
     void navigator.clipboard.writeText(text).then(
@@ -3342,9 +3371,23 @@ function RepositoryWebhookSection({
 
   const handleRetry = async () => {
     try {
+      let refreshedTunnel = false;
+      const tunnelBridge = isDesktopRuntime() ? window.repoPulseDesktop?.tunnel : undefined;
+      if (tunnelBridge) {
+        setIsRefreshingTunnel(true);
+        const status = await tunnelBridge.refresh();
+        refreshedTunnel = true;
+        if (status.state === 'error') {
+          throw new Error(status.error ?? '隧道刷新失败');
+        }
+        if (!status.publicUrl) {
+          throw new Error('隧道刷新后未返回公网 URL');
+        }
+      }
+
       const result = await retryMutation.mutateAsync(repository.id);
       if (result.webhookStatus === WebhookStatus.ACTIVE) {
-        toast.success('Webhook 重建成功');
+        toast.success(refreshedTunnel ? '隧道已刷新，Webhook 重建成功' : 'Webhook 重建成功');
       } else {
         toast.warning(
           `Webhook 仍未配置成功：${result.webhookError ?? result.webhookStatus}`,
@@ -3352,6 +3395,8 @@ function RepositoryWebhookSection({
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '重建失败');
+    } finally {
+      setIsRefreshingTunnel(false);
     }
   };
 
@@ -3433,6 +3478,7 @@ function RepositoryWebhookSection({
 
   const meta = getWebhookStatusMeta(data.status);
   const StatusIcon = meta.Icon;
+  const deliveryMeta = getWebhookDeliveryMeta(data.lastResponse);
   const secretDisplay = data.secret
     ? secretVisible
       ? data.secret
@@ -3507,6 +3553,13 @@ function RepositoryWebhookSection({
             <span className="min-w-0 flex-1 text-destructive">{data.lastError}</span>
           </div>
         ) : null}
+
+        <div className="flex items-start gap-2">
+          <span className="w-14 shrink-0 text-muted-foreground">最近投递</span>
+          <span className={cn('min-w-0 flex-1', deliveryMeta.className)}>
+            {deliveryMeta.label}
+          </span>
+        </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -3517,14 +3570,8 @@ function RepositoryWebhookSection({
             variant="default"
             className="gap-1.5"
             onClick={() => {
-              const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-              const authUrl = authService.getGithubAuthUrl(returnPath);
-              if (isDesktopRuntime()) {
-                void window.repoPulseDesktop?.openExternal(authUrl);
-                toast.info('已在浏览器打开 GitHub 授权页，授权完成后请回应用点 "重新创建"');
-              } else {
-                window.location.href = authUrl;
-              }
+              window.location.href = isDesktopRuntime() ? '#/workbench/settings' : '/workbench/settings';
+              toast.info('请在设置的集成页更新 GitHub token 后再重新创建 webhook');
             }}
           >
             <ShieldAlert className="h-3.5 w-3.5" />
@@ -3537,9 +3584,9 @@ function RepositoryWebhookSection({
           variant="outline"
           className="gap-1.5"
           onClick={handleRetry}
-          disabled={retryMutation.isPending}
+          disabled={isRetryingWebhook}
         >
-          {retryMutation.isPending ? (
+          {isRetryingWebhook ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
             <RotateCcw className="h-3.5 w-3.5" />
@@ -6437,11 +6484,7 @@ function AgentRunView({
       });
     });
 
-    const token = currentUser?.githubAccessToken;
     let gitUrl = repo.url;
-    if (token && gitUrl.startsWith('https://')) {
-      gitUrl = gitUrl.replace('https://', `https://${token}@`);
-    }
 
     try {
       console.log('[AgentRunView] startSessionOnSession: invoking agent.startSession via desktop IPC.');
@@ -7743,8 +7786,8 @@ export function DesktopWorkbench() {
   } = useMonitoringScopePreferences();
   const monitoredRepositoryIds = monitoringScope.repositoryIds ?? [];
   const effectiveMonitoredRepositoryIds = useMemo(
-    () => (monitoredRepositoryIds.length === 0 ? repositoryIds : monitoredRepositoryIds),
-    [monitoredRepositoryIds, repositoryIds],
+    () => monitoredRepositoryIds,
+    [monitoredRepositoryIds],
   );
   const realtimeRepositoryIds = useMemo(
     () =>
@@ -8146,11 +8189,9 @@ export function DesktopWorkbench() {
     }
 
     const nextRepositoryIds =
-      monitoredRepositoryIds.length === 0
-        ? repositoryIds.filter((repositoryId) => repositoryId !== selectedRepository.id)
-        : monitoredRepositoryIds.includes(selectedRepository.id)
-          ? monitoredRepositoryIds.filter((repositoryId) => repositoryId !== selectedRepository.id)
-          : [...monitoredRepositoryIds, selectedRepository.id];
+      monitoredRepositoryIds.includes(selectedRepository.id)
+        ? monitoredRepositoryIds.filter((repositoryId) => repositoryId !== selectedRepository.id)
+        : [...monitoredRepositoryIds, selectedRepository.id];
     const nextBranchScopes = { ...(monitoringScope.repositoryBranchScopes ?? {}) };
     if (!nextRepositoryIds.includes(selectedRepository.id)) {
       delete nextBranchScopes[selectedRepository.id];
@@ -8165,9 +8206,7 @@ export function DesktopWorkbench() {
       return;
     }
 
-    const currentRepositoryIds = monitoredRepositoryIds.length === 0
-      ? monitoredRepositoryIds
-      : monitoredRepositoryIds.includes(selectedRepository.id)
+    const currentRepositoryIds = monitoredRepositoryIds.includes(selectedRepository.id)
       ? monitoredRepositoryIds
       : [...monitoredRepositoryIds, selectedRepository.id];
     const currentBranches = monitoringScope.repositoryBranchScopes?.[selectedRepository.id] ?? [];
@@ -8189,9 +8228,7 @@ export function DesktopWorkbench() {
 
     const nextBranchScopes = { ...(monitoringScope.repositoryBranchScopes ?? {}) };
     delete nextBranchScopes[selectedRepository.id];
-    const currentRepositoryIds = monitoredRepositoryIds.length === 0
-      ? monitoredRepositoryIds
-      : monitoredRepositoryIds.includes(selectedRepository.id)
+    const currentRepositoryIds = monitoredRepositoryIds.includes(selectedRepository.id)
       ? monitoredRepositoryIds
       : [...monitoredRepositoryIds, selectedRepository.id];
 
@@ -8200,9 +8237,7 @@ export function DesktopWorkbench() {
   };
 
   const removeRepositoryFromMonitoring = async (repository: Repository) => {
-    const nextRepositoryIds = monitoredRepositoryIds.length === 0
-      ? repositoryIds.filter((repositoryId) => repositoryId !== repository.id)
-      : monitoredRepositoryIds.filter((repositoryId) => repositoryId !== repository.id);
+    const nextRepositoryIds = monitoredRepositoryIds.filter((repositoryId) => repositoryId !== repository.id);
     const nextBranchScopes = { ...(monitoringScope.repositoryBranchScopes ?? {}) };
     delete nextBranchScopes[repository.id];
 

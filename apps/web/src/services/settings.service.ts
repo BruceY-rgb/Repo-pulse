@@ -1,6 +1,12 @@
 import { apiClient } from './api-client';
 import type { ApiResponse } from '@/types/api';
-import type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
+import type {
+  AIProvider,
+  AIConfig,
+  ConnectionTestResult,
+  ModelInfo,
+  GithubTokenSyncSummary,
+} from '@repo-pulse/shared';
 import {
   PROVIDER_LABELS,
   PROVIDER_DEFAULT_MODELS,
@@ -35,6 +41,19 @@ export interface BatchRetryWebhooksResult {
     status: string;
     error?: string;
   }>;
+}
+
+export interface GithubIntegrationStatus {
+  connected: boolean;
+  githubLogin?: string;
+  githubId?: string;
+  tokenMasked?: string;
+}
+
+export interface GithubIntegrationTestResult {
+  ok: boolean;
+  login?: string;
+  message: string;
 }
 
 /**
@@ -106,7 +125,7 @@ export const settingsService = {
   },
 
   /**
-   * 更新 webhook API_URL（需要 ADMIN role）
+   * 更新 webhook API_URL（拥有可编辑仓库）
    */
   async updateApiUrlConfig(value: string): Promise<ApiUrlConfig> {
     const { data } = await apiClient.post<ApiResponse<ApiUrlConfig>>(
@@ -117,11 +136,43 @@ export const settingsService = {
   },
 
   /**
-   * 批量重建用户作为 ADMIN 的所有 active 仓库 webhook
+   * 批量重建用户可编辑的所有 active 仓库 webhook
    */
   async batchRetryWebhooks(): Promise<BatchRetryWebhooksResult> {
     const { data } = await apiClient.post<ApiResponse<BatchRetryWebhooksResult>>(
       '/repositories/batch-retry-webhooks',
+      undefined,
+      { timeout: 180_000 },
+    );
+    return data.data;
+  },
+
+  async getGithubIntegration(): Promise<GithubIntegrationStatus> {
+    const { data } = await apiClient.get<ApiResponse<GithubIntegrationStatus>>(
+      '/settings/integrations/github',
+    );
+    return data.data;
+  },
+
+  async updateGithubToken(
+    token: string,
+  ): Promise<GithubIntegrationStatus & { sync: GithubTokenSyncSummary }> {
+    const { data } = await apiClient.put<
+      ApiResponse<GithubIntegrationStatus & { sync: GithubTokenSyncSummary }>
+    >('/settings/integrations/github-token', { token });
+    return data.data;
+  },
+
+  async testGithubIntegration(): Promise<GithubIntegrationTestResult> {
+    const { data } = await apiClient.post<ApiResponse<GithubIntegrationTestResult>>(
+      '/settings/integrations/github/test',
+    );
+    return data.data;
+  },
+
+  async disconnectGithub(): Promise<GithubIntegrationStatus> {
+    const { data } = await apiClient.delete<ApiResponse<GithubIntegrationStatus>>(
+      '/settings/integrations/github-token',
     );
     return data.data;
   },

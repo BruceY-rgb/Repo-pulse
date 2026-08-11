@@ -31,6 +31,10 @@ function notifySubscribers(success: boolean) {
   refreshSubscribers = [];
 }
 
+// 凭据类接口的 401 表示「账号或密码错误」，而不是会话过期：
+// 不能触发 refresh（登录页通常没有 refresh_token，会导致整页跳转、错误提示丢失）
+const CREDENTIAL_ENDPOINTS = ['/auth/login', '/auth/register'];
+
 // Response interceptor: 处理 401 自动刷新
 apiClient.interceptors.response.use(
   (response) => response,
@@ -41,7 +45,8 @@ apiClient.interceptors.response.use(
     if (
       error.response?.status === 401 &&
       !originalRequest?._retry &&
-      !requestUrl.includes('/auth/refresh')
+      !requestUrl.includes('/auth/refresh') &&
+      !CREDENTIAL_ENDPOINTS.some((endpoint) => requestUrl.includes(endpoint))
     ) {
       if (isRefreshing) {
         // 如果正在刷新，等待刷新完成后重试

@@ -15,12 +15,11 @@ import { ApiTags, ApiOperation, ApiBearerAuth, ApiCookieAuth } from '@nestjs/swa
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
+import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { GithubAuthGuard } from './guards/github-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { UserService } from '../user/user.service';
-import { GithubStrategy } from './strategies/github.strategy';
 import { ConfigService } from '@nestjs/config';
 
 // Cookie 配置常量
@@ -31,20 +30,72 @@ const COOKIE_OPTIONS = {
   path: '/',
 };
 
-const ACCESS_TOKEN_MAX_AGE = 15 * 60 * 1000;        // 15 分钟
-const REFRESH_TOKEN_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 天
+const DEFAULT_ACCESS_TOKEN_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 天
+const DEFAULT_REFRESH_TOKEN_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 天
+
+/**
+ * 解析 '15m' / '12h' / '7d' / '30s' 形式的时长为毫秒。
+ * Cookie 的 maxAge 必须与 JWT 的有效期一致，否则会出现
+ * 「Cookie 还在但 Token 已过期」或反过来的不一致状态。
+ * 合法格式由 env.validation.ts 在启动时强制（^[1-9]\d*[smhd]$），这里的回退只兜底缺省值。
+ */
+function parseDurationMs(value: string | undefined, fallbackMs: number): number {
+  if (!value) {
+    return fallbackMs;
+  }
+  const match = /^([1-9]\d*)([smhd])$/.exec(value.trim());
+  if (!match) {
+    return fallbackMs;
+  }
+  const amount = Number(match[1]);
+  const unitMs = { s: 1000, m: 60 * 1000, h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000 }[
+    match[2] as 's' | 'm' | 'h' | 'd'
+  ];
+  return amount * unitMs;
+}
 
 @ApiTags('认证')
 @Controller('auth')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
+  private readonly accessTokenMaxAge: number;
+  private readonly refreshTokenMaxAge: number;
 
   constructor(
     private readonly authService: AuthService,
     private readonly userService: UserService,
-    private readonly githubStrategy: GithubStrategy,
     private readonly configService: ConfigService,
-  ) { }
+  ) {
+    this.accessTokenMaxAge = parseDurationMs(
+      this.configService.get<string>('JWT_EXPIRATION'),
+      DEFAULT_ACCESS_TOKEN_MAX_AGE,
+    );
+    this.refreshTokenMaxAge = parseDurationMs(
+      this.configService.get<string>('JWT_REFRESH_EXPIRATION'),
+      DEFAULT_REFRESH_TOKEN_MAX_AGE,
+    );
+  }
+
+  @Get('bootstrap-status')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '是否还没有任何账号（首次使用）' })
+  async bootstrapStatus() {
+    return this.authService.getBootstrapStatus();
+  }
+
+  /**
+   * 账号密码注册 — 首个用户成为 ADMIN，注册成功后直接登录
+   */
+  @Post('register')
+  @Public()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: '账号密码注册' })
+  async register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.register(dto);
+    this.setTokenCookies(res, result.accessToken, result.refreshToken);
+    return { userId: result.userId, email: result.email, name: result.name, role: result.role };
+  }
 
   /**
    * 邮箱密码登录 — Token 写入 HttpOnly Cookie
@@ -65,16 +116,6 @@ export class AuthController {
 
     // 返回用户基本信息（不含 Token，Token 已在 Cookie 中）
     return { userId: user.id, email: user.email, name: user.name };
-  }
-
-  @Post('desktop/github')
-  @Public()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '桌面端使用环境变量 GITHUB_TOKEN 登录' })
-  async desktopGithubLogin(@Res({ passthrough: true }) res: Response) {
-    const tokens = await this.authService.handleGithubEnvTokenAuth();
-    this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
-    return { message: 'Desktop GitHub login successful' };
   }
 
   /**
@@ -106,105 +147,6 @@ export class AuthController {
   async logout(@Res({ passthrough: true }) res: Response) {
     this.clearTokenCookies(res);
     return { message: '已成功登出' };
-  }
-
-  /**
-   * GitHub OAuth 入口
-   */
-  @Get('github')
-  @Public()
-  @UseGuards(GithubAuthGuard)
-  @ApiOperation({ summary: 'GitHub OAuth 跳转' })
-  githubAuth() {
-    this.logger.log('github_oauth_authorize_redirect_started');
-    // Passport 会自动重定向到 GitHub，无需实现
-  }
-
-  /**
-   * 获取当前运行时 OAuth 配置（仅暴露安全的公共信息）
-   */
-  @Get('github/config')
-  @Public()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '获取 GitHub OAuth 运行时配置' })
-  getGithubOAuthRuntimeConfig() {
-    return {
-      callbackUrl: this.configService.get<string>('GITHUB_CALLBACK_URL') || '',
-    };
-  }
-
-  /**
-   * 运行时配置 GitHub OAuth 客户端参数（仅内存生效，重启后失效）
-   */
-  @Post('github/config')
-  @Public()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '配置 GitHub OAuth 客户端参数（运行时）' })
-  configureGithubOAuth(
-    @Body() body: { clientId?: string; clientSecret?: string },
-  ) {
-    const clientId = body.clientId?.trim();
-    const clientSecret = body.clientSecret?.trim();
-
-    if (!clientId || !clientSecret) {
-      throw new UnauthorizedException('GitHub Client ID / Client Secret 不能为空');
-    }
-
-    this.githubStrategy.updateCredentials(clientId, clientSecret);
-    this.logger.log(`github_oauth_config_updated clientIdSuffix=${clientId.slice(-6)}`);
-
-    return { message: 'GitHub OAuth 配置已更新（重启后需重新配置）' };
-  }
-
-  /**
-   * GitHub OAuth 回调 — 将 Token 写入 Cookie 后重定向到前端
-   */
-  @Get('github/callback')
-  @Public()
-  @UseGuards(GithubAuthGuard)
-  @ApiOperation({ summary: 'GitHub OAuth 回调' })
-  async githubCallback(
-    @Req() req: Request,
-    @Res() res: Response
-  ) {
-    this.logger.log(
-      `github_oauth_callback_entered codePresent=${req.query?.code ? 'true' : 'false'} error=${typeof req.query?.error === 'string' ? req.query.error : 'none'}`,
-    );
-
-    // 拿到 GitHub 登录后的用户信息
-    const profile = req.user as {
-      id: string;
-      email: string;
-      displayName: string;
-      avatar: string;
-      githubAccessToken: string;
-      githubRefreshToken: string;
-    };
-
-    // 生成 token
-    const tokens = await this.authService.handleGithubAuth(profile);
-    this.logger.log(
-      `github_oauth_tokens_generated githubId=${profile.id} accessTokenPresent=${tokens.accessToken ? 'true' : 'false'} refreshTokenPresent=${tokens.refreshToken ? 'true' : 'false'}`,
-    );
-
-    // 写入 cookie
-    this.setTokenCookies(res, tokens.accessToken, tokens.refreshToken);
-    this.logger.log(`github_oauth_cookies_set githubId=${profile.id}`);
-
-    // 跳转到前端回调页（如果有 return cookie 则按 return 路径跳，附 webhook_recheck=1 让前端自动重试）
-    const frontendUrl =
-      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
-    const returnPath = req.cookies?.oauth_return_url as string | undefined;
-    res.clearCookie('oauth_return_url', { path: '/' });
-
-    const target = returnPath
-      ? `${frontendUrl}${returnPath}${returnPath.includes('?') ? '&' : '?'}webhook_recheck=1`
-      : `${frontendUrl}/auth/callback`;
-
-    this.logger.log(
-      `github_oauth_callback_success email=${profile.email} githubId=${profile.id} redirect=${target}`,
-    );
-    res.redirect(target);
   }
 
   /**
@@ -267,11 +209,11 @@ export class AuthController {
   private setTokenCookies(res: Response, accessToken: string, refreshToken: string) {
     res.cookie('access_token', accessToken, {
       ...COOKIE_OPTIONS,
-      maxAge: ACCESS_TOKEN_MAX_AGE,
+      maxAge: this.accessTokenMaxAge,
     });
     res.cookie('refresh_token', refreshToken, {
       ...COOKIE_OPTIONS,
-      maxAge: REFRESH_TOKEN_MAX_AGE,
+      maxAge: this.refreshTokenMaxAge,
     });
   }
 

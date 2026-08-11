@@ -10,6 +10,7 @@ import {
 import { GithubService } from '../repository/services/github.service';
 import { RepositoryService } from '../repository/repository.service';
 import { BranchSyncService } from './branch-sync.service';
+import { getUserMonitoredRepositoryIds } from '../../common/utils/repository-access';
 
 @Injectable()
 export class SyncService {
@@ -67,7 +68,10 @@ export class SyncService {
       : RepositoryAccessMode.MONITOR;
   }
 
-  async syncUserRepositories(userId: string): Promise<{ synced: number; starred: number }> {
+  async syncUserRepositories(
+    userId: string,
+    options?: { throwOnFetchError?: boolean },
+  ): Promise<{ synced: number; starred: number }> {
     this.logger.log(`Starting to sync repositories for user: ${userId}`);
 
     const user = await prisma.user.findUnique({
@@ -87,6 +91,7 @@ export class SyncService {
       const userRepos = await this.githubService.getUserRepositories(
         user.githubAccessToken,
         user.githubRefreshToken || undefined,
+        { throwOnError: options?.throwOnFetchError },
       );
       this.logger.log(`GitHub API returned ${userRepos.length} user repositories`);
 
@@ -177,7 +182,13 @@ export class SyncService {
       }
       this.logger.log(`GitHub API returned ${starredRepos.length} starred repositories`);
       const starredExternalIds = starredRepos.map((repo) => String(repo.id));
-      const starredRepositoryIds: string[] = [];
+      const monitoredRepositoryIdSet = new Set(await getUserMonitoredRepositoryIds(userId));
+      const monitoredStarredRepositoryIds = new Set<string>();
+      const trackStarredHistorySync = (repositoryId: string) => {
+        if (monitoredRepositoryIdSet.has(repositoryId)) {
+          monitoredStarredRepositoryIds.add(repositoryId);
+        }
+      };
 
       for (const repo of starredRepos) {
         try {
@@ -205,7 +216,7 @@ export class SyncService {
             );
             starred++;
             this.logger.log(`Created starred repository: ${repo.full_name}`);
-            starredRepositoryIds.push(existing.id);
+            trackStarredHistorySync(existing.id);
           } else {
             const userRepo = await prisma.userRepository.findUnique({
               where: {
@@ -228,7 +239,7 @@ export class SyncService {
                 },
               });
               this.logger.log(`Linked existing starred repository ${repo.full_name} to user`);
-              starredRepositoryIds.push(existing.id);
+              trackStarredHistorySync(existing.id);
             } else if (userRepo.accessMode === RepositoryAccessMode.EDITABLE) {
               await prisma.userRepository.update({
                 where: {
@@ -241,7 +252,7 @@ export class SyncService {
                   isStarred: true,
                 },
               });
-              starredRepositoryIds.push(existing.id);
+              trackStarredHistorySync(existing.id);
             } else {
               await prisma.userRepository.update({
                 where: {
@@ -257,7 +268,7 @@ export class SyncService {
                   isStarred: true,
                 },
               });
-              starredRepositoryIds.push(existing.id);
+              trackStarredHistorySync(existing.id);
             }
           }
         } catch (error) {
@@ -282,9 +293,11 @@ export class SyncService {
       this.logger.log(`Sync completed: ${synced} new repos, ${starred} new starred repos`);
 
       setTimeout(() => {
-        this.syncAllUserRepositoriesHistory(userId, starredRepositoryIds).catch((err) => {
-          this.logger.error(`Failed to sync repository history for user ${userId}`, err);
-        });
+        if (monitoredRepositoryIdSet.size > 0) {
+          this.syncAllUserRepositoriesHistory(userId, Array.from(monitoredStarredRepositoryIds)).catch((err) => {
+            this.logger.error(`Failed to sync repository history for user ${userId}`, err);
+          });
+        }
         this.branchSyncService.syncBranchesForUser(userId).catch((err) => {
           this.logger.error(`Failed to sync branches for user ${userId}`, err);
         });
@@ -293,6 +306,10 @@ export class SyncService {
       return { synced, starred };
     } catch (error) {
       this.logger.error(`Failed to sync user repositories`, error);
+      // throwOnFetchError：调用方（如 token 保存接口）需要把同步失败如实上报，而不是伪装成 0 个成功
+      if (options?.throwOnFetchError) {
+        throw error;
+      }
       return { synced: 0, starred: 0 };
     }
   }
@@ -488,18 +505,26 @@ export class SyncService {
     userId: string,
     priorityRepositoryIds: string[] = [],
   ): Promise<void> {
+    const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
+    const requestedRepositoryIds = Array.from(
+      new Set([...priorityRepositoryIds, ...monitoredRepositoryIds]),
+    );
+
+    if (requestedRepositoryIds.length === 0) {
+      return;
+    }
+
     const repositories = await prisma.repository.findMany({
       where: {
+        id: { in: requestedRepositoryIds },
         users: { some: { userId } },
       },
       select: { id: true },
     });
 
-    const repositoryIds = Array.from(
-      new Set([
-        ...priorityRepositoryIds,
-        ...repositories.map((repository) => repository.id),
-      ]),
+    const accessibleRepositoryIds = new Set(repositories.map((repository) => repository.id));
+    const repositoryIds = requestedRepositoryIds.filter((repositoryId) =>
+      accessibleRepositoryIds.has(repositoryId),
     );
 
     for (const repositoryId of repositoryIds) {

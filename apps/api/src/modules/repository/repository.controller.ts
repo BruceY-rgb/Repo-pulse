@@ -27,6 +27,7 @@ import type { RepositorySyncJob } from './repository-sync.processor';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
+import { RequestTimeoutMs } from '../../common/interceptors';
 
 @ApiTags('Repository Management')
 @ApiBearerAuth()
@@ -45,7 +46,7 @@ export class RepositoryController {
   @ApiOperation({ summary: 'Create repository' })
   async create(@Req() req: Request, @Body() dto: CreateRepositoryDto) {
     const userId = (req.user as { sub: string }).sub;
-    const user = await this.userService.findById(userId);
+    const user = await this.userService.findGithubCredentials(userId);
     const repository = await this.repositoryService.create(userId, dto, {
       userOAuthToken: user?.githubAccessToken || undefined,
     });
@@ -80,15 +81,15 @@ export class RepositoryController {
   @ApiOperation({ summary: 'List my contributor repositories' })
   async getMyRepos(@Req() req: Request) {
     const userId = (req.user as { sub: string }).sub;
-    const user = await this.userService.findById(userId);
+    const user = await this.userService.findGithubCredentials(userId);
     if (!user?.githubAccessToken) {
-      return { error: 'GitHub account not connected, please log in again' };
+      return { error: 'GitHub account is not connected. Configure a GitHub token in Settings > Integrations.' };
     }
     return this.repositoryService.searchUserRepositories(
       userId,
       user.githubAccessToken,
-      user.githubRefreshToken,
-      user.githubLogin,
+      user.githubRefreshToken || undefined,
+      user.githubLogin || undefined,
     );
   }
 
@@ -96,14 +97,14 @@ export class RepositoryController {
   @ApiOperation({ summary: 'List my starred repositories' })
   async getStarred(@Req() req: Request) {
     const userId = (req.user as { sub: string }).sub;
-    const user = await this.userService.findById(userId);
+    const user = await this.userService.findGithubCredentials(userId);
     if (!user?.githubAccessToken) {
-      return { error: 'GitHub account not connected, please log in again' };
+      return { error: 'GitHub account is not connected. Configure a GitHub token in Settings > Integrations.' };
     }
     return this.repositoryService.searchStarredRepositories(
       userId,
       user.githubAccessToken,
-      user.githubRefreshToken,
+      user.githubRefreshToken || undefined,
     );
   }
 
@@ -126,7 +127,7 @@ export class RepositoryController {
   @ApiOperation({ summary: 'Get repository contributors' })
   async getContributors(@Req() req: Request, @Param('id') id: string) {
     const userId = (req.user as { sub: string }).sub;
-    const user = await this.userService.findById(userId);
+    const user = await this.userService.findGithubCredentials(userId);
     return this.repositoryService.getContributors(id, user?.githubAccessToken || undefined);
   }
 
@@ -176,7 +177,8 @@ export class RepositoryController {
   }
 
   @Post('batch-retry-webhooks')
-  @ApiOperation({ summary: 'Re-register webhook for every active repo where caller is ADMIN' })
+  @RequestTimeoutMs(180_000)
+  @ApiOperation({ summary: 'Re-register webhook for every editable active repo' })
   async batchRetryWebhooks(@Req() req: Request) {
     const userId = (req.user as { sub: string }).sub;
     return this.repositoryService.batchRetryWebhooks(userId);

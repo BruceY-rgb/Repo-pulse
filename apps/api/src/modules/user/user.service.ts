@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { prisma, Prisma, User } from '@repo-pulse/database';
+import { prisma, Prisma, Role, User } from '@repo-pulse/database';
 import * as bcrypt from 'bcrypt';
 import * as https from 'https';
 
@@ -18,7 +18,7 @@ export class UserService {
   }
 
   async findByGithubId(githubId: string): Promise<User | null> {
-    return prisma.user.findUnique({ where: { githubId } });
+    return prisma.user.findFirst({ where: { githubId } });
   }
 
   async create(data: {
@@ -30,6 +30,8 @@ export class UserService {
     githubAccessToken?: string;
     githubRefreshToken?: string;
     password?: string;
+    role?: Role;
+    username?: string;
   }): Promise<User> {
     const createData: any = {
       email: data.email,
@@ -39,6 +41,8 @@ export class UserService {
       githubLogin: data.githubLogin,
       githubAccessToken: data.githubAccessToken,
       githubRefreshToken: data.githubRefreshToken,
+      role: data.role,
+      username: data.username,
     };
 
     if (data.password) {
@@ -96,6 +100,19 @@ export class UserService {
 
     const user = await prisma.user.update({ where: { id: userId }, data: d });
     return this.excludePassword(user);
+  }
+
+  async findGithubCredentials(userId: string) {
+    return prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        githubId: true,
+        githubLogin: true,
+        githubAccessToken: true,
+        githubRefreshToken: true,
+      },
+    });
   }
 
   async fetchGithubAvatar(userId: string): Promise<string | null> {
@@ -160,7 +177,7 @@ export class UserService {
   }
 
   private excludePassword(user: any) {
-    const { passwordHash, ...rest } = user;
+    const { passwordHash, githubAccessToken, githubRefreshToken, ...rest } = user;
     return rest;
   }
 }

@@ -1,11 +1,10 @@
-import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import axios from 'axios';
 import * as bcrypt from 'bcrypt';
+import type { RegisterPayload, RegisterResult } from '@repo-pulse/shared';
 import { UserService } from '../user/user.service';
-import { SyncService } from '../sync/sync.service';
-import { prisma, User } from '@repo-pulse/database';
+import { prisma, Role, User } from '@repo-pulse/database';
 
 export interface JwtPayload {
   sub: string;
@@ -18,21 +17,6 @@ export interface TokenPair {
   refreshToken: string;
 }
 
-interface GithubEnvProfile {
-  id: number;
-  login: string;
-  name: string | null;
-  email: string | null;
-  avatar_url: string;
-}
-
-interface GithubEmail {
-  email: string;
-  primary: boolean;
-  verified: boolean;
-  visibility: string | null;
-}
-
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -41,25 +25,74 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly userService: UserService,
-    private readonly syncService: SyncService,
   ) {}
 
   async validateUser(email: string, password: string): Promise<User> {
-    const user = await this.userService.findByEmail(email);
-    if (!user) {
-      throw new UnauthorizedException('User not found');
-    }
-
-    if (!user.passwordHash) {
-      throw new UnauthorizedException('Please sign in with OAuth');
+    const user = await this.userService.findByEmail(this.normalizeEmail(email));
+    // 统一错误信息，避免暴露邮箱是否已注册
+    if (!user || !user.passwordHash) {
+      throw new UnauthorizedException('Invalid email or password');
     }
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isMatch) {
-      throw new UnauthorizedException('Invalid password');
+      throw new UnauthorizedException('Invalid email or password');
     }
 
     return user;
+  }
+
+  async getBootstrapStatus() {
+    const userCount = await prisma.user.count();
+    return { required: userCount === 0 };
+  }
+
+  /**
+   * 账号密码注册。首个注册的用户成为本地实例的 ADMIN，后续用户为 MEMBER。
+   */
+  async register(dto: RegisterPayload): Promise<TokenPair & RegisterResult> {
+    const email = this.normalizeEmail(dto.email);
+
+    const existing = await this.userService.findByEmail(email);
+    if (existing) {
+      throw new ConflictException('Email is already registered');
+    }
+
+    const userCount = await prisma.user.count();
+    const role = userCount === 0 ? Role.ADMIN : Role.MEMBER;
+
+    let user: User;
+    try {
+      user = await this.userService.create({
+        email,
+        name: dto.name.trim() || email,
+        username: dto.username?.trim() || undefined,
+        password: dto.password,
+        role,
+      });
+    } catch (error) {
+      // 并发注册/重复提交可能绕过上面的 findByEmail 预检，
+      // 唯一约束冲突（email/username）统一映射为 409 而不是 500
+      if ((error as { code?: string })?.code === 'P2002') {
+        throw new ConflictException('Email or username is already registered');
+      }
+      throw error;
+    }
+    this.logger.log(`user_registered userId=${user.id} role=${role}`);
+
+    const tokens = await this.generateTokens({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    return {
+      ...tokens,
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+    };
   }
 
   async generateTokens(payload: JwtPayload): Promise<TokenPair> {
@@ -96,207 +129,7 @@ export class AuthService {
     }
   }
 
-  async handleGithubAuth(profile: {
-    id: string;
-    email: string | undefined;
-    displayName: string;
-    githubLogin?: string;
-    avatar: string;
-    githubAccessToken: string;
-    githubRefreshToken: string;
-  }) {
-    this.logger.log(
-      `github_oauth_handle_start githubId=${profile.id} email=${profile.email ?? 'missing'} displayName=${profile.displayName || 'unknown'}`,
-    );
-
-    if (!profile.email) {
-      this.logger.error('GitHub OAuth failed: email not available');
-      throw new UnauthorizedException(
-        'Unable to read GitHub email, please make sure your email is available',
-      );
-    }
-
-    let user = await this.userService.findByGithubId(profile.id);
-
-    if (!user) {
-      this.logger.log(`github_oauth_lookup_by_github_id_miss githubId=${profile.id}`);
-      const existingUserByEmail = await this.userService.findByEmail(profile.email);
-
-      if (existingUserByEmail) {
-        user = await this.userService.update(existingUserByEmail.id, {
-          githubId: profile.id,
-          githubLogin: profile.githubLogin,
-          githubAccessToken: profile.githubAccessToken,
-          githubRefreshToken: profile.githubRefreshToken,
-          name: profile.displayName || existingUserByEmail.name,
-          avatar: profile.avatar || existingUserByEmail.avatar || undefined,
-        });
-        this.logger.log(`Existing user linked via GitHub OAuth: ${profile.email}`);
-      } else {
-        user = await this.userService.create({
-          email: profile.email,
-          name: profile.displayName || 'GitHub User',
-          avatar: profile.avatar,
-          githubId: profile.id,
-          githubLogin: profile.githubLogin,
-          githubAccessToken: profile.githubAccessToken,
-          githubRefreshToken: profile.githubRefreshToken,
-        });
-        this.logger.log(`New user created via GitHub OAuth: ${profile.email}`);
-      }
-    } else {
-      this.logger.log(`github_oauth_lookup_by_github_id_hit githubId=${profile.id} userId=${user.id}`);
-        user = await this.userService.update(user.id, {
-          githubId: profile.id,
-          githubLogin: profile.githubLogin,
-          githubAccessToken: profile.githubAccessToken,
-          githubRefreshToken: profile.githubRefreshToken,
-        });
-    }
-
-    this.logger.log(`github_oauth_handle_success userId=${user.id} email=${user.email}`);
-
-    setTimeout(() => {
-      this.syncService.syncUserRepositories(user.id).catch((err) => {
-        this.logger.error(`Failed to sync user repositories for ${user.id}`, err);
-      });
-    }, 100);
-
-    return this.generateTokens({
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-    });
-  }
-
-  async handleGithubEnvTokenAuth() {
-    if (this.configService.get<string>('DESKTOP_AUTH_MODE') !== 'env') {
-      throw new UnauthorizedException('Desktop env login is not enabled');
-    }
-
-    const githubToken = this.configService.get<string>('GITHUB_TOKEN')?.trim();
-    if (!githubToken) {
-      throw new UnauthorizedException('GITHUB_TOKEN is not configured');
-    }
-
-    const profile = await this.fetchGithubEnvProfile(githubToken);
-    const email =
-      profile.email ||
-      (await this.fetchPrimaryGithubEmail(githubToken)) ||
-      `${profile.login}@users.noreply.github.com`;
-    const githubId = String(profile.id);
-    const displayName = profile.name || profile.login || 'GitHub User';
-
-    let user = await this.userService.findByGithubId(githubId);
-
-    if (!user) {
-      const existingUserByEmail = await this.userService.findByEmail(email);
-
-      if (existingUserByEmail) {
-        user = await this.userService.update(existingUserByEmail.id, {
-          githubId,
-          githubLogin: profile.login,
-          githubAccessToken: githubToken,
-          name: displayName,
-          avatar: profile.avatar_url,
-        });
-      } else {
-        user = await this.userService.create({
-          email,
-          name: displayName,
-          avatar: profile.avatar_url,
-          githubId,
-          githubLogin: profile.login,
-          githubAccessToken: githubToken,
-        });
-      }
-    } else {
-      user = await this.userService.update(user.id, {
-        githubLogin: profile.login,
-        githubAccessToken: githubToken,
-        name: displayName,
-        avatar: profile.avatar_url,
-      });
-    }
-
-    // Desktop env login = 本机开发者 = 这个本地实例的 owner，强制升 ADMIN
-    if (user.role !== 'ADMIN') {
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: { role: 'ADMIN' },
-      });
-      this.logger.log(`desktop_github_env_login_role_promoted userId=${user.id} role=ADMIN`);
-    }
-
-    this.logger.log(`desktop_github_env_login_success userId=${user.id} login=${profile.login}`);
-
-    setTimeout(() => {
-      this.syncService.syncUserRepositories(user.id).catch((err) => {
-        this.logger.error(`Failed to sync user repositories for ${user.id}`, err);
-      });
-    }, 100);
-
-    return this.generateTokens({
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-    });
-  }
-
-  private async fetchGithubEnvProfile(githubToken: string): Promise<GithubEnvProfile> {
-    try {
-      const response = await axios.get<GithubEnvProfile>('https://api.github.com/user', {
-        headers: this.getGithubTokenHeaders(githubToken),
-      });
-      return response.data;
-    } catch (error) {
-      this.logger.error('desktop_github_env_profile_fetch_failed', this.formatErrorForLog(error));
-      throw new UnauthorizedException('Unable to read GitHub profile from GITHUB_TOKEN');
-    }
-  }
-
-  private async fetchPrimaryGithubEmail(githubToken: string): Promise<string | null> {
-    try {
-      const response = await axios.get<GithubEmail[]>('https://api.github.com/user/emails', {
-        headers: this.getGithubTokenHeaders(githubToken),
-      });
-      const primaryEmail = response.data.find((item) => item.primary && item.verified);
-      const verifiedEmail = response.data.find((item) => item.verified);
-      return primaryEmail?.email || verifiedEmail?.email || null;
-    } catch (error) {
-      this.logger.warn('desktop_github_env_email_fetch_failed', this.formatErrorForLog(error));
-      return null;
-    }
-  }
-
-  private formatErrorForLog(error: unknown): string {
-    if (axios.isAxiosError(error)) {
-      const status = error.response?.status;
-      const method = error.config?.method?.toUpperCase();
-      const url = error.config?.url;
-      const data = error.response?.data as { message?: unknown } | undefined;
-      const providerMessage = typeof data?.message === 'string' ? data.message : undefined;
-      return [
-        `AxiosError: ${error.message}`,
-        status ? `status=${status}` : undefined,
-        method ? `method=${method}` : undefined,
-        url ? `url=${url}` : undefined,
-        providerMessage ? `providerMessage=${providerMessage}` : undefined,
-      ].filter(Boolean).join(' ');
-    }
-
-    if (error instanceof Error) {
-      return `${error.name}: ${error.message}`;
-    }
-
-    return String(error);
-  }
-
-  private getGithubTokenHeaders(githubToken: string) {
-    return {
-      Accept: 'application/vnd.github.v3+json',
-      Authorization: `Bearer ${githubToken}`,
-      'User-Agent': 'Repo-Pulse-Desktop',
-    };
+  private normalizeEmail(email: string) {
+    return email.trim().toLowerCase();
   }
 }

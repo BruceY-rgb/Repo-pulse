@@ -6,6 +6,7 @@ jest.mock('bcrypt');
 const mockBcryptHash = bcrypt.hash as jest.Mock;
 
 const mockFindUnique = jest.fn();
+const mockFindFirst = jest.fn();
 const mockCreate = jest.fn();
 const mockUpdate = jest.fn();
 
@@ -13,6 +14,7 @@ jest.mock('@repo-pulse/database', () => ({
   prisma: {
     user: {
       findUnique: (...a: any[]) => mockFindUnique(...a),
+      findFirst: (...a: any[]) => mockFindFirst(...a),
       create: (...a: any[]) => mockCreate(...a),
       update: (...a: any[]) => mockUpdate(...a),
     },
@@ -81,8 +83,9 @@ describe('UserService', () => {
 
   describe('findByGithubId', () => {
     it('returns null when not found', async () => {
-      mockFindUnique.mockResolvedValue(null);
+      mockFindFirst.mockResolvedValue(null);
       expect(await service.findByGithubId('gh-1')).toBeNull();
+      expect(mockFindFirst).toHaveBeenCalledWith({ where: { githubId: 'gh-1' } });
     });
   });
 

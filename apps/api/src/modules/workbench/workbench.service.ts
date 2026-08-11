@@ -657,11 +657,6 @@ export class WorkbenchService {
     limit = 20,
   ) {
     const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
-    const defaultMonitorAllRepositories = monitoredRepositoryIds.length === 0;
-    if (defaultMonitorAllRepositories) {
-      return { items: [], nextCursor: null };
-    }
-
     const editableAccessLevels = [
       RepositoryAccessLevel.OWNER,
       RepositoryAccessLevel.ADMIN,
@@ -674,7 +669,9 @@ export class WorkbenchService {
         isStarred: true,
         accessLevel: { notIn: editableAccessLevels },
         repository: { platform: Platform.GITHUB },
-        repositoryId: { notIn: monitoredRepositoryIds },
+        ...(monitoredRepositoryIds.length > 0
+          ? { repositoryId: { notIn: monitoredRepositoryIds } }
+          : {}),
       },
       select: { repositoryId: true },
     });
@@ -688,7 +685,9 @@ export class WorkbenchService {
             isStarred: true,
             accessLevel: { notIn: editableAccessLevels },
             repository: { platform: Platform.GITHUB },
-            repositoryId: { notIn: monitoredRepositoryIds },
+            ...(monitoredRepositoryIds.length > 0
+              ? { repositoryId: { notIn: monitoredRepositoryIds } }
+              : {}),
           },
           select: { repositoryId: true },
         });
@@ -761,7 +760,6 @@ export class WorkbenchService {
   async getWatchRepositories(userId: string) {
     console.log(`[getWatchRepositories] START - userId=${userId}`);
     const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
-    const defaultMonitorAllRepositories = monitoredRepositoryIds.length === 0;
 
     let memberships = await prisma.userRepository.findMany({
       where: {
@@ -815,7 +813,7 @@ export class WorkbenchService {
     const result = memberships.map(({ repository }) =>
       this.toWatchRepositoryItem(
         repository,
-        new Set(defaultMonitorAllRepositories ? [repository.id] : monitoredRepositoryIds),
+        new Set(monitoredRepositoryIds),
       ),
     );
     console.log(`[getWatchRepositories] END - Returning ${result.length} repositories for user ${userId}`);
@@ -959,7 +957,7 @@ export class WorkbenchService {
   }
 
   private isRepositoryInMonitoringScope(monitoredRepositoryIds: string[], repositoryId: string): boolean {
-    return monitoredRepositoryIds.length === 0 || monitoredRepositoryIds.includes(repositoryId);
+    return monitoredRepositoryIds.includes(repositoryId);
   }
 
   private getBranchSyncAlertTypes(): EventType[] {

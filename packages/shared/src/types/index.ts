@@ -377,3 +377,50 @@ export interface TestFilterResult {
   matched: boolean;
   action: FilterActionValue | null;
 }
+
+// ===== Auth =====
+
+/** POST /auth/login 请求体 */
+export interface LoginPayload {
+  email: string;
+  password: string;
+}
+
+/** POST /auth/register 请求体 */
+export interface RegisterPayload {
+  email: string;
+  name: string;
+  password: string;
+  username?: string;
+}
+
+/** POST /auth/login 响应体（Token 在 HttpOnly Cookie 中，不在响应体） */
+export interface LoginResult {
+  userId: string;
+  email: string;
+  name: string;
+}
+
+/** POST /auth/register 响应体 */
+export interface RegisterResult extends LoginResult {
+  role: string;
+}
+
+/** GET /auth/bootstrap-status 响应体：是否还没有任何账号（首次使用） */
+export interface BootstrapStatus {
+  required: boolean;
+}
+
+// ============ GitHub 集成 ============
+
+/**
+ * PUT /settings/integrations/github-token 响应中的仓库同步摘要。
+ * completed：同步已结束，synced/starred 为本次新增数；
+ * pending：同步已在后台启动，仓库列表稍后刷新；
+ * failed：同步出错（token 本身已保存成功）。
+ */
+export interface GithubTokenSyncSummary {
+  status: 'completed' | 'pending' | 'failed';
+  synced?: number;
+  starred?: number;
+}

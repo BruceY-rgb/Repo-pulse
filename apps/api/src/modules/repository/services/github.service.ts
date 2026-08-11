@@ -556,6 +556,7 @@ export class GithubService {
   async getUserRepositories(
     userToken: string,
     refreshToken?: string,
+    options?: { throwOnError?: boolean },
   ): Promise<GithubRepoResponse[]> {
     const maxRetries = 3;
     let currentUserToken = userToken;
@@ -599,6 +600,9 @@ export class GithubService {
         this.logger.warn(`Attempt ${attempt}/${maxRetries} failed: getUserRepositories`);
         if (attempt === maxRetries) {
           this.logger.error('Failed to fetch user repositories after max retries', this.formatErrorForLog(error));
+          if (options?.throwOnError) {
+            throw error;
+          }
           return [];
         }
         await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));

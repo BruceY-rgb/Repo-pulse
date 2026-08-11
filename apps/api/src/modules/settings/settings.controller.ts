@@ -1,14 +1,30 @@
-import { Controller, Get, Post, Body, UseGuards, ForbiddenException } from '@nestjs/common';
+import {
+  Controller,
+  Delete,
+  Get,
+  Post,
+  Put,
+  Body,
+  UseGuards,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { SettingsService, AIProvider } from './settings.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { SyncService } from '../sync/sync.service';
 
 @ApiTags('设置')
 @Controller('settings')
 export class SettingsController {
-  constructor(private readonly settingsService: SettingsService) {}
+  private readonly logger = new Logger(SettingsController.name);
+
+  constructor(
+    private readonly settingsService: SettingsService,
+    private readonly syncService: SyncService,
+  ) {}
 
   /**
    * 获取当前用户的 AI 配置
@@ -108,24 +124,88 @@ export class SettingsController {
   }
 
   /**
-   * 更新 webhook API_URL（仅 ADMIN）
+   * 更新 webhook API_URL（拥有可编辑仓库的用户）
    */
   @Post('app-config/api-url')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @Roles('ADMIN')
-  @ApiOperation({ summary: '更新 webhook API_URL（ADMIN）' })
+  @ApiOperation({ summary: '更新 webhook API_URL' })
   async updateApiUrlConfig(
-    @CurrentUser() user: { sub: string; role?: string },
+    @CurrentUser() user: { sub: string },
     @Body() body: { value: string },
   ) {
-    if (user.role !== 'ADMIN') {
-      throw new ForbiddenException('Admin role required');
+    const canManageWebhooks = await this.settingsService.canUpdateApiUrlConfig(user.sub);
+    if (!canManageWebhooks) {
+      throw new ForbiddenException('Editable repository required to update webhook API_URL');
     }
     const value = body?.value?.trim();
     if (!value || !/^https?:\/\//i.test(value)) {
       throw new ForbiddenException('API_URL must start with http:// or https://');
     }
     return this.settingsService.updateApiUrlConfig(user.sub, value);
+  }
+
+  @Get('integrations/github')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '读取 GitHub token 集成状态' })
+  async getGithubIntegration(@CurrentUser() user: { sub: string }) {
+    return this.settingsService.getGithubIntegrationStatus(user.sub);
+  }
+
+  @Put('integrations/github-token')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '配置 GitHub Personal Access Token' })
+  async updateGithubToken(
+    @CurrentUser() user: { sub: string },
+    @Body() body: { token?: string },
+  ) {
+    const token = body.token?.trim();
+    if (!token) {
+      throw new BadRequestException('GitHub token is required');
+    }
+    const result = await this.settingsService.updateGithubToken(user.sub, token);
+    this.startGithubSync(user.sub);
+    return { ...result, sync: { status: 'pending' as const } };
+  }
+
+  /**
+   * Token 保存后后台同步仓库。
+   * 同步可能触发 GitHub 多页拉取、webhook 创建和分支同步，不能阻塞保存请求；
+   * 否则仓库多或网络慢时容易撞上前端/API 30s 超时，被误报为 token 保存失败。
+   */
+  private startGithubSync(userId: string): void {
+    const syncPromise = this.syncService.syncUserRepositories(userId, { throwOnFetchError: true });
+    syncPromise.then(
+      ({ synced, starred }) => {
+        this.logger.log(
+          `github_token_background_sync_completed userId=${userId} synced=${synced} starred=${starred}`,
+        );
+      },
+      (error) => {
+        this.logger.warn(
+          `github_token_background_sync_failed userId=${userId} ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      },
+    );
+  }
+
+  @Post('integrations/github/test')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '测试当前 GitHub token' })
+  async testGithubIntegration(@CurrentUser() user: { sub: string }) {
+    return this.settingsService.testGithubIntegration(user.sub);
+  }
+
+  @Delete('integrations/github-token')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '断开 GitHub token 集成' })
+  async disconnectGithub(@CurrentUser() user: { sub: string }) {
+    return this.settingsService.disconnectGithub(user.sub);
   }
 }

@@ -216,7 +216,7 @@ model User {
   email         String   @unique
   name          String
   avatar        String?
-  githubId      String?  @unique
+  githubId      String?
   gitlabId      String?  @unique
   role          Role     @default(MEMBER)
   preferences   Json     @default("{}")

@@ -126,7 +126,7 @@ socket.io 分支与 IPC 分支都调用它，行为字节级一致。这是一�
    io(baseUrl + '/events', { auth: { token: c?.value }, transports: ['websocket'], reconnection: true });
    ```
    （HttpOnly 只阻止 `document.cookie` 的 JS 访问，**不阻止** 主进程 `session.cookies` API；gateway `extractToken` 优先读 `handshake.auth.token`，`event.gateway.ts:391`。）
-3. **Token 刷新**：`access_token` 15 分钟过期（`auth.controller.ts:34`）。renderer 的 axios 刷新流会滚动更新该 Cookie，因此 **Main 不缓存 token，每次（重）连接时即时重读 Cookie**；并监听 `session.cookies.on('changed')` 或在 `connect_error`/`disconnect` 时延迟重连（重读最新 Cookie）。已建立的 socket 在 token 过期后仍存活（gateway 仅握手时校验），只有重连才需新 token——重读策略覆盖之。
+3. **Token 刷新**：`access_token` 现默认 7 天过期（由 `JWT_EXPIRATION` 配置；撰写本计划时为 15 分钟）。renderer 的 axios 刷新流会滚动更新该 Cookie，因此 **Main 不缓存 token，每次（重）连接时即时重读 Cookie**；并监听 `session.cookies.on('changed')` 或在 `connect_error`/`disconnect` 时延迟重连（重读最新 Cookie）。已建立的 socket 在 token 过期后仍存活（gateway 仅握手时校验），只有重连才需新 token——重读策略覆盖之。
 
 > 上线前需验证：dev 下（http、127.0.0.1）该 Cookie 确实存入 defaultSession（既有 web socket 的 `withCredentials` 已能工作，说明 Cookie 正常下发）。
 
@@ -313,7 +313,7 @@ reconnect 时 gateway 会 unicast 补发至多 `REPLAY_BATCH_LIMIT=200`（`event
 ### 风险
 1. **forwardRef 环（最高）**：`EventModule` 已 import `ApprovalModule`/`NotificationModule`（`event.module.ts:26`），反向 import 必须**双向 `forwardRef`**。每个相关 commit 后用 `pnpm --filter api dev`（**非** `start`，后者跑 stale dist）实启动，断言无 `circular dependency ... cannot resolve`。
 2. **穷尽 handler 类型**：新增事件名必与其 web handler 同 commit（§2.2/§4），否则 `web typecheck` 失败。
-3. **Cookie 鉴权可用性**：验证 dev 下 `session.cookies.get` 能取到 `access_token`；token 15 分钟过期，靠重读 Cookie + 重连覆盖（§2.3）。
+3. **Cookie 鉴权可用性**：验证 dev 下 `session.cookies.get` 能取到 `access_token`；token 过期（现默认 7 天）靠重读 Cookie + 重连覆盖（§2.3）。
 4. **electron 解析 shared**：dev 裸 `concurrently` 绕过 turbo，须在 `build:main` 前预构建 shared（§3 Layer C）；从 clean（无 dist）状态验证 `pnpm dev:electron`。
 5. **`any` 红线**：新 realtime 桥两侧（preload + desktop.ts）一律用 shared 类型；既有 agent.* 的 `any` 列为范围外技术债，不复制。
 6. **replay 风暴**：§2.6 合并失效，验证 200 条 replay 在 50ms 预算内。

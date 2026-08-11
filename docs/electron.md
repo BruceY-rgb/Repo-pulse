@@ -16,13 +16,9 @@ This starts:
 
 The API still needs the same local services and environment variables as the web app, especially `DATABASE_URL`, `JWT_SECRET`, and Redis if queues are enabled.
 
-Desktop sign-in does not use the browser OAuth redirect flow. Add a GitHub token to the root `.env`:
+Desktop sign-in uses a local email + password account. On first launch the login page defaults to registration; the first registered account becomes the admin of the local instance. Sessions persist on the same device (access token defaults to 7 days, refresh token to 30 days, tunable via `JWT_EXPIRATION` / `JWT_REFRESH_EXPIRATION`).
 
-```bash
-GITHUB_TOKEN=github_pat_xxx
-```
-
-The token should be able to read the account and repositories you want Repo Pulse to monitor. For classic tokens, use `repo` for private repositories. For fine-grained tokens, grant repository metadata/content access for the selected repositories.
+To let Repo Pulse read GitHub data, configure a personal access token after signing in via **Settings → Integrations → GitHub**. The token should be able to read the account and repositories you want Repo Pulse to monitor. For classic tokens, use `repo` for private repositories. For fine-grained tokens, grant repository metadata/content access for the selected repositories.
 
 If Electron reports `Electron failed to install correctly`, the npm package was installed but the platform binary was not downloaded. Run:
 

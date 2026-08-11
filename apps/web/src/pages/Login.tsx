@@ -1,8 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { CircleHelp, Github } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { ShieldCheck, UserPlus } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,139 +22,110 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import {
-  useGithubOAuthConfigMutation,
-  useGithubOAuthRuntimeConfigQuery,
-  useGithubOAuthLogin,
-  useDesktopGithubLoginMutation,
+  useBootstrapStatusQuery,
   useLoginMutation,
+  useRegisterMutation,
 } from '@/hooks/queries/use-auth-queries';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { ApiClientError } from '@/lib/query-hooks';
-import { isDesktopRuntime } from '@/lib/desktop';
 
-interface LoginFormValues {
+type AuthMode = 'login' | 'register';
+
+interface AuthFormValues {
+  name: string;
   email: string;
   password: string;
+  confirmPassword: string;
 }
 
 export function Login() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { t } = useLanguage();
-  const loginWithGithub = useGithubOAuthLogin();
   const loginMutation = useLoginMutation();
-  const desktopGithubLoginMutation = useDesktopGithubLoginMutation();
-  const oauthConfigMutation = useGithubOAuthConfigMutation();
-  const oauthRuntimeConfigQuery = useGithubOAuthRuntimeConfigQuery();
-  const isDesktop = isDesktopRuntime();
-  const didAttemptDesktopLoginRef = useRef(false);
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
-  const [githubConfigHint, setGithubConfigHint] = useState<string | null>(null);
-  const callbackUrl =
-    oauthRuntimeConfigQuery.data?.callbackUrl ||
-    'http://localhost:3001/auth/github/callback';
+  const registerMutation = useRegisterMutation();
+  const bootstrapStatusQuery = useBootstrapStatusQuery();
+  const bootstrapRequired = bootstrapStatusQuery.data?.required ?? false;
 
-  const loginSchema = useMemo(
+  // 首次使用（本地实例还没有任何账号）默认进入注册模式
+  const [modeOverride, setModeOverride] = useState<AuthMode | null>(null);
+  const mode: AuthMode = modeOverride ?? (bootstrapRequired ? 'register' : 'login');
+  const isRegister = mode === 'register';
+
+  const formSchema = useMemo(
     () =>
-      z.object({
-        email: z.email(t('auth.login.form.error.invalidEmail')),
-        password: z.string().min(6, t('auth.login.form.error.passwordMin')),
-      }),
-    [t],
+      z
+        .object({
+          name: z.string(),
+          email: z.email(t('auth.login.form.error.invalidEmail')),
+          password: z.string().min(6, t('auth.login.form.error.passwordMin')),
+          confirmPassword: z.string(),
+        })
+        .superRefine((values, ctx) => {
+          // 姓名与确认密码仅在注册模式下校验
+          if (!isRegister) {
+            return;
+          }
+          if (!values.name.trim()) {
+            ctx.addIssue({
+              code: 'custom',
+              path: ['name'],
+              message: t('auth.login.form.error.nameRequired'),
+            });
+          }
+          if (values.password !== values.confirmPassword) {
+            ctx.addIssue({
+              code: 'custom',
+              path: ['confirmPassword'],
+              message: t('auth.login.form.error.confirmPasswordMismatch'),
+            });
+          }
+        }),
+    [isRegister, t],
   );
 
-  const form = useForm<LoginFormValues>({
-    resolver: zodResolver(loginSchema),
+  const form = useForm<AuthFormValues>({
+    resolver: zodResolver(formSchema),
     defaultValues: {
+      name: '',
       email: '',
       password: '',
+      confirmPassword: '',
     },
   });
 
-  const oauthError = searchParams.get('error') === 'oauth_failed';
-  const oauthErrorReason = searchParams.get('reason');
-
-  const onSubmit = async (values: LoginFormValues) => {
+  const onSubmit = async (values: AuthFormValues) => {
     try {
-      await loginMutation.mutateAsync(values);
+      if (isRegister) {
+        await registerMutation.mutateAsync({
+          email: values.email,
+          name: values.name,
+          password: values.password,
+        });
+      } else {
+        await loginMutation.mutateAsync({
+          email: values.email,
+          password: values.password,
+        });
+      }
       navigate('/workbench', { replace: true });
     } catch {
       // Form-level error is rendered below.
     }
   };
 
-  const onSaveGithubOAuthConfig = async () => {
-    const nextClientId = clientId.trim();
-    const nextClientSecret = clientSecret.trim();
-    if (!nextClientId || !nextClientSecret) {
-      setGithubConfigHint(t('auth.login.oauthConfig.error.invalidInput'));
-      return;
-    }
-
-    setGithubConfigHint(null);
-    await oauthConfigMutation.mutateAsync({
-      clientId: nextClientId,
-      clientSecret: nextClientSecret,
-    });
+  const switchMode = (next: AuthMode) => {
+    setModeOverride(next);
+    loginMutation.reset();
+    registerMutation.reset();
+    form.clearErrors();
+    form.resetField('password');
+    form.resetField('confirmPassword');
   };
 
-  const onGithubLogin = async () => {
-    const nextClientId = clientId.trim();
-    const nextClientSecret = clientSecret.trim();
-
-    setGithubConfigHint(null);
-
-    if (nextClientId || nextClientSecret) {
-      if (!nextClientId || !nextClientSecret) {
-        setGithubConfigHint(t('auth.login.oauthConfig.error.invalidInput'));
-        return;
-      }
-
-      await oauthConfigMutation.mutateAsync({
-        clientId: nextClientId,
-        clientSecret: nextClientSecret,
-      });
-    }
-
-    loginWithGithub();
-  };
-
-  const onDesktopGithubLogin = async () => {
-    try {
-      await desktopGithubLoginMutation.mutateAsync(undefined);
-      navigate('/workbench', { replace: true });
-    } catch {
-      // Error is rendered below.
-    }
-  };
-
-  useEffect(() => {
-    if (!isDesktop || didAttemptDesktopLoginRef.current) {
-      return;
-    }
-
-    didAttemptDesktopLoginRef.current = true;
-    void onDesktopGithubLogin();
-  }, [isDesktop]);
-
-  const loginErrorMessage = getLoginErrorMessage(loginMutation.error, t);
-  const desktopLoginErrorMessage = getDesktopGithubLoginErrorMessage(desktopGithubLoginMutation.error, t);
-  const oauthConfigErrorMessage = getOAuthConfigErrorMessage(oauthConfigMutation.error, t);
-  const oauthConfigSuccessMessage = oauthConfigMutation.isSuccess
-    ? t('auth.login.oauthConfig.success')
-    : null;
-  const oauthRuntimeConfigError = oauthRuntimeConfigQuery.isError
-    ? t('auth.login.oauthConfig.error.network')
-    : null;
+  const submitErrorMessage = isRegister
+    ? getRegisterErrorMessage(registerMutation.error, t)
+    : getLoginErrorMessage(loginMutation.error, t);
+  const submitting = loginMutation.isPending || registerMutation.isPending;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
@@ -165,129 +136,37 @@ export function Login() {
           </div>
           <div className="space-y-2">
             <CardTitle className="text-2xl font-bold tracking-tight text-foreground">
-              {t('auth.login.title')}
+              {isRegister ? t('auth.login.registerTitle') : t('auth.login.title')}
             </CardTitle>
             <CardDescription className="text-sm text-muted-foreground">
-              {t('auth.login.description')}
+              {isRegister ? t('auth.login.registerDescription') : t('auth.login.description')}
             </CardDescription>
           </div>
         </CardHeader>
 
         <CardContent className="space-y-4">
-          {isDesktop && (
-            <div className="space-y-3 rounded-lg border border-border/80 bg-muted/30 p-3">
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-foreground">{t('auth.login.desktop.title')}</p>
-                <p className="text-xs text-muted-foreground">{t('auth.login.desktop.description')}</p>
-              </div>
-              <Button
-                type="button"
-                onClick={onDesktopGithubLogin}
-                className="w-full gap-2"
-                size="lg"
-                disabled={desktopGithubLoginMutation.isPending}
-              >
-                <Github className="h-4 w-4" />
-                {desktopGithubLoginMutation.isPending
-                  ? t('auth.login.desktop.submitting')
-                  : t('auth.login.desktop.submit')}
-              </Button>
-              {desktopLoginErrorMessage && (
-                <p className="text-xs text-destructive">{desktopLoginErrorMessage}</p>
-              )}
-            </div>
-          )}
-
-          {!isDesktop && (
-          <div className="space-y-3 rounded-lg border border-border/80 bg-muted/30 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium text-foreground">{t('auth.login.oauthConfig.title')}</p>
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button type="button" variant="ghost" size="sm" className="h-8 gap-1 px-2 text-xs">
-                    <CircleHelp className="h-4 w-4" />
-                    {t('auth.login.oauthConfig.helpButton')}
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle>{t('auth.login.oauthConfig.helpTitle')}</DialogTitle>
-                    <DialogDescription>{t('auth.login.oauthConfig.helpDescription')}</DialogDescription>
-                  </DialogHeader>
-                  <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
-                    <li>{t('auth.login.oauthConfig.step1')}</li>
-                    <li>{t('auth.login.oauthConfig.step2')}</li>
-                    <li>{t('auth.login.oauthConfig.step3')}</li>
-                    <li>{t('auth.login.oauthConfig.step4')}</li>
-                  </ol>
-                  <p className="text-xs text-muted-foreground">
-                    {t('auth.login.oauthConfig.callbackHint')}
-                    <span className="ml-1 font-mono text-foreground">{callbackUrl}</span>
-                  </p>
-                  <a
-                    href="https://github.com/settings/apps/new"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-                  >
-                    {t('auth.login.oauthConfig.openGithub')}
-                  </a>
-                </DialogContent>
-              </Dialog>
-            </div>
-
-            <div className="grid gap-2">
-              <Input
-                value={clientId}
-                onChange={(event) => {
-                  setGithubConfigHint(null);
-                  setClientId(event.target.value);
-                }}
-                placeholder={t('auth.login.oauthConfig.clientIdPlaceholder')}
-                autoComplete="off"
-              />
-              <Input
-                value={clientSecret}
-                onChange={(event) => {
-                  setGithubConfigHint(null);
-                  setClientSecret(event.target.value);
-                }}
-                placeholder={t('auth.login.oauthConfig.clientSecretPlaceholder')}
-                type="password"
-                autoComplete="off"
-              />
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={onSaveGithubOAuthConfig}
-                disabled={
-                  oauthConfigMutation.isPending || !clientId.trim() || !clientSecret.trim()
-                }
-              >
-                {oauthConfigMutation.isPending
-                  ? t('auth.login.oauthConfig.saving')
-                  : t('auth.login.oauthConfig.save')}
-              </Button>
-            </div>
-
-            <p className="text-xs text-muted-foreground">
-              {t('auth.login.oauthConfig.callbackHint')}
-              <span className="ml-1 font-mono text-foreground">{callbackUrl}</span>
-            </p>
-            {(githubConfigHint || oauthConfigErrorMessage || oauthConfigSuccessMessage) && (
-              <p className="text-xs text-muted-foreground">
-                {githubConfigHint || oauthConfigErrorMessage || oauthConfigSuccessMessage}
-              </p>
-            )}
-            {oauthRuntimeConfigError && (
-              <p className="text-xs text-muted-foreground">{oauthRuntimeConfigError}</p>
-            )}
-          </div>
-          )}
-
-          {!isDesktop && (
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              {isRegister && (
+                <FormField
+                  control={form.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('auth.login.form.name')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          autoComplete="name"
+                          placeholder={t('auth.login.form.namePlaceholder')}
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
               <FormField
                 control={form.control}
                 name="email"
@@ -316,7 +195,7 @@ export function Login() {
                     <FormControl>
                       <Input
                         type="password"
-                        autoComplete="current-password"
+                        autoComplete={isRegister ? 'new-password' : 'current-password'}
                         placeholder={t('auth.login.form.passwordPlaceholder')}
                         {...field}
                       />
@@ -326,79 +205,72 @@ export function Login() {
                 )}
               />
 
-              {(oauthError || loginErrorMessage) && (
-                <p className="text-sm text-destructive">
-                  {oauthError
-                    ? getOAuthFailureMessage(oauthErrorReason, t)
-                    : loginErrorMessage}
+              {isRegister && (
+                <FormField
+                  control={form.control}
+                  name="confirmPassword"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('auth.login.form.confirmPassword')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="password"
+                          autoComplete="new-password"
+                          placeholder={t('auth.login.form.confirmPasswordPlaceholder')}
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              {isRegister && bootstrapRequired && (
+                <p className="text-xs text-muted-foreground">
+                  {t('auth.login.bootstrapHint')}
                 </p>
+              )}
+
+              {submitErrorMessage && (
+                <p className="text-sm text-destructive">{submitErrorMessage}</p>
               )}
 
               <Button
                 type="submit"
                 className="w-full"
                 size="lg"
-                disabled={loginMutation.isPending}
+                disabled={submitting || bootstrapStatusQuery.isLoading}
               >
-                {loginMutation.isPending
-                  ? t('auth.login.form.submitting')
-                  : t('auth.login.form.submit')}
+                {isRegister ? <UserPlus className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                {submitting
+                  ? isRegister
+                    ? t('auth.login.form.registerSubmitting')
+                    : t('auth.login.form.submitting')
+                  : isRegister
+                    ? t('auth.login.form.registerSubmit')
+                    : t('auth.login.form.submit')}
               </Button>
             </form>
           </Form>
-          )}
 
-          {!isDesktop && (
-          <div className="flex items-center gap-3">
-            <div className="h-px flex-1 bg-border" />
-            <span className="text-xs text-muted-foreground">{t('auth.login.form.or')}</span>
-            <div className="h-px flex-1 bg-border" />
-          </div>
-          )}
-
-          {!isDesktop && (
-          <Button
-            type="button"
-            onClick={onGithubLogin}
-            className="w-full gap-2"
-            size="lg"
-            disabled={oauthConfigMutation.isPending}
-          >
-            <Github className="h-4 w-4" />
-            {t('auth.login.github')}
-          </Button>
+          {!bootstrapRequired && (
+            <button
+              type="button"
+              className="w-full text-center text-sm text-primary hover:underline"
+              onClick={() => switchMode(isRegister ? 'login' : 'register')}
+            >
+              {isRegister ? t('auth.login.switchToLogin') : t('auth.login.switchToRegister')}
+            </button>
           )}
 
           <p className="text-center text-xs text-muted-foreground">
-            {isDesktop ? t('auth.login.desktop.notice') : t('auth.login.notice')}
+            {t('auth.login.notice')}
           </p>
         </CardContent>
       </Card>
     </div>
   );
-}
-
-function getDesktopGithubLoginErrorMessage(
-  error: ApiClientError | null,
-  t: (key: string) => string,
-): string | null {
-  if (!error) {
-    return null;
-  }
-
-  if (error.statusCode === 401) {
-    return t('auth.login.desktop.error.token');
-  }
-
-  if (typeof error.statusCode === 'number' && error.statusCode >= 500) {
-    return t('auth.login.form.error.server');
-  }
-
-  if (error.statusCode === undefined) {
-    return t('auth.login.form.error.network');
-  }
-
-  return error.message || t('auth.login.form.error.generic');
 }
 
 function getLoginErrorMessage(
@@ -413,6 +285,28 @@ function getLoginErrorMessage(
     return t('auth.login.form.error.invalidCredentials');
   }
 
+  return getCommonErrorMessage(error, t);
+}
+
+function getRegisterErrorMessage(
+  error: ApiClientError | null,
+  t: (key: string) => string,
+): string | null {
+  if (!error) {
+    return null;
+  }
+
+  if (error.statusCode === 409) {
+    return t('auth.login.form.error.emailTaken');
+  }
+
+  return getCommonErrorMessage(error, t);
+}
+
+function getCommonErrorMessage(
+  error: ApiClientError,
+  t: (key: string) => string,
+): string {
   if (typeof error.statusCode === 'number' && error.statusCode >= 500) {
     return t('auth.login.form.error.server');
   }
@@ -422,44 +316,4 @@ function getLoginErrorMessage(
   }
 
   return error.message || t('auth.login.form.error.generic');
-}
-
-function getOAuthFailureMessage(
-  reason: string | null,
-  t: (key: string) => string,
-): string {
-  switch (reason) {
-    case 'incorrect_client_credentials':
-    case 'invalid_client':
-      return 'GitHub Client ID 或 Client Secret 不正确，请检查是否填写的是 GitHub OAuth App 凭据。';
-    case 'bad_verification_code':
-      return 'GitHub 授权码已失效，请重新发起一次登录。';
-    case 'redirect_uri_mismatch':
-      return 'GitHub OAuth 回调地址不匹配，请确认 GitHub App 中的 callback URL 与页面提示一致。';
-    default:
-      return t('auth.login.form.error.oauthFailed');
-  }
-}
-
-function getOAuthConfigErrorMessage(
-  error: ApiClientError | null,
-  t: (key: string) => string,
-): string | null {
-  if (!error) {
-    return null;
-  }
-
-  if (error.statusCode === 401 || error.statusCode === 400) {
-    return t('auth.login.oauthConfig.error.invalidInput');
-  }
-
-  if (typeof error.statusCode === 'number' && error.statusCode >= 500) {
-    return t('auth.login.oauthConfig.error.server');
-  }
-
-  if (error.statusCode === undefined) {
-    return t('auth.login.oauthConfig.error.network');
-  }
-
-  return error.message || t('auth.login.oauthConfig.error.generic');
 }

@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { prisma } from '@repo-pulse/database';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Platform, Prisma, RepositoryAccessMode, prisma } from '@repo-pulse/database';
 import type { AIProvider, AIConfig, ConnectionTestResult, ModelInfo } from '@repo-pulse/shared';
 import { AppConfigService } from '../app-config/app-config.service';
+import axios from 'axios';
 
 const API_URL_FALLBACK = 'http://localhost:3001';
 
@@ -25,11 +26,57 @@ export interface FetchModelsResult {
   models: ModelInfo[];
 }
 
+export interface GithubIntegrationStatus {
+  connected: boolean;
+  githubLogin?: string;
+  githubId?: string;
+  tokenMasked?: string;
+}
+
+interface GithubTokenProfile {
+  id: number;
+  login: string;
+  name: string | null;
+  email: string | null;
+  avatar_url: string | null;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function removeRepositoriesFromMonitoringScope(
+  preferences: unknown,
+  removedRepositoryIds: Set<string>,
+): Prisma.InputJsonObject {
+  const nextPreferences: Record<string, unknown> = isPlainObject(preferences)
+    ? { ...preferences }
+    : {};
+  const currentScope = isPlainObject(nextPreferences.monitoringScope)
+    ? { ...nextPreferences.monitoringScope }
+    : {};
+  const repositoryIds = Array.isArray(currentScope.repositoryIds)
+    ? currentScope.repositoryIds.filter(
+        (repositoryId) =>
+          typeof repositoryId !== 'string' || !removedRepositoryIds.has(repositoryId),
+      )
+    : [];
+
+  nextPreferences.monitoringScope = {
+    ...currentScope,
+    repositoryIds,
+  };
+
+  return nextPreferences as Prisma.InputJsonObject;
+}
+
 @Injectable()
 export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
 
-  constructor(private readonly appConfigService: AppConfigService = createFallbackAppConfigService()) {}
+  constructor(
+    private readonly appConfigService: AppConfigService = createFallbackAppConfigService(),
+  ) {}
 
   /**
    * 读取当前 webhook API_URL，附带来源标识
@@ -48,6 +95,147 @@ export class SettingsService {
   ): Promise<{ value: string; source: 'db' }> {
     await this.appConfigService.set('API_URL', value, userId);
     return { value, source: 'db' };
+  }
+
+  async canUpdateApiUrlConfig(userId: string): Promise<boolean> {
+    const editableRepoCount = await prisma.repository.count({
+      where: {
+        isActive: true,
+        users: {
+          some: {
+            userId,
+            accessMode: RepositoryAccessMode.EDITABLE,
+          },
+        },
+      },
+    });
+    return editableRepoCount > 0;
+  }
+
+  async getGithubIntegrationStatus(userId: string): Promise<GithubIntegrationStatus> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        githubId: true,
+        githubLogin: true,
+        githubAccessToken: true,
+      },
+    });
+
+    return this.toGithubIntegrationStatus(user);
+  }
+
+  async updateGithubToken(userId: string, token: string): Promise<GithubIntegrationStatus> {
+    const trimmedToken = token.trim();
+    if (!trimmedToken) {
+      throw new BadRequestException('GitHub token is required');
+    }
+
+    const profile = await this.fetchGithubProfile(trimmedToken, {
+      allowTransientFailure: true,
+    });
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        githubAccessToken: trimmedToken,
+        githubRefreshToken: null,
+        ...(profile
+          ? {
+              githubId: String(profile.id),
+              githubLogin: profile.login,
+              avatar: profile.avatar_url || undefined,
+            }
+          : {}),
+      },
+      select: {
+        githubId: true,
+        githubLogin: true,
+        githubAccessToken: true,
+      },
+    });
+
+    this.logger.log(
+      `github_token_configured userId=${userId} login=${profile?.login ?? 'unverified'}`,
+    );
+
+    return this.toGithubIntegrationStatus(user);
+  }
+
+  async testGithubIntegration(userId: string): Promise<{ ok: boolean; login?: string; message: string }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { githubAccessToken: true },
+    });
+
+    if (!user?.githubAccessToken) {
+      return { ok: false, message: 'GitHub token is not configured' };
+    }
+
+    const profile = await this.fetchGithubProfile(user.githubAccessToken);
+    if (!profile) {
+      return { ok: false, message: 'Unable to read GitHub account with this token' };
+    }
+    return { ok: true, login: profile.login, message: 'GitHub token is valid' };
+  }
+
+  async disconnectGithub(userId: string): Promise<GithubIntegrationStatus> {
+    const cleanup = await prisma.$transaction(async (tx) => {
+      const [user, githubMemberships] = await Promise.all([
+        tx.user.findUnique({
+          where: { id: userId },
+          select: { preferences: true },
+        }),
+        tx.userRepository.findMany({
+          where: {
+            userId,
+            repository: { platform: Platform.GITHUB },
+          },
+          select: { repositoryId: true },
+        }),
+      ]);
+
+      const repositoryIds = githubMemberships.map((membership) => membership.repositoryId);
+      const repositoryIdSet = new Set(repositoryIds);
+      const preferences = removeRepositoriesFromMonitoringScope(user?.preferences, repositoryIdSet);
+
+      if (repositoryIds.length > 0) {
+        await tx.userRepositoryConversationState.deleteMany({
+          where: {
+            userId,
+            repositoryId: { in: repositoryIds },
+          },
+        });
+      }
+
+      const membershipsDeleted = await tx.userRepository.deleteMany({
+        where: {
+          userId,
+          repository: { platform: Platform.GITHUB },
+        },
+      });
+
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          githubId: null,
+          githubLogin: null,
+          githubAccessToken: null,
+          githubRefreshToken: null,
+          preferences,
+        },
+      });
+
+      return {
+        membershipsDeleted: membershipsDeleted.count,
+        monitoringScopeRemoved: repositoryIds.length,
+      };
+    });
+    this.logger.log(
+      `github_token_disconnected userId=${userId} membershipsDeleted=${cleanup.membershipsDeleted} ` +
+        `monitoringScopeRemoved=${cleanup.monitoringScopeRemoved}`,
+    );
+    return { connected: false };
   }
 
   async getAIConfig(userId: string): Promise<AIConfig> {
@@ -72,6 +260,81 @@ export class SettingsService {
       aiBaseUrl: user.aiBaseUrl || undefined,
       aiModel: user.aiModel || undefined,
     };
+  }
+
+  private async fetchGithubProfile(
+    token: string,
+    options?: { allowTransientFailure?: boolean },
+  ): Promise<GithubTokenProfile | null> {
+    try {
+      const response = await axios.get<GithubTokenProfile>('https://api.github.com/user', {
+        headers: {
+          Accept: 'application/vnd.github.v3+json',
+          Authorization: `Bearer ${token}`,
+          'User-Agent': 'Repo-Pulse',
+        },
+        // token 保存接口还要在响应内等待仓库同步，必须给 profile 校验设上限，
+        // 否则会挤占全局 TimeoutInterceptor 的 30s 预算
+        timeout: 10_000,
+      });
+      return response.data;
+    } catch (error) {
+      const formattedError = this.formatGithubError(error);
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        this.logger.warn('github_token_profile_auth_failed', formattedError);
+        throw new BadRequestException('Invalid GitHub token');
+      }
+
+      if (options?.allowTransientFailure) {
+        this.logger.warn('github_token_profile_fetch_deferred', formattedError);
+        return null;
+      }
+
+      this.logger.warn('github_token_profile_fetch_failed', formattedError);
+      throw new BadRequestException('Unable to read GitHub account with this token');
+    }
+  }
+
+  private toGithubIntegrationStatus(user: {
+    githubId: string | null;
+    githubLogin: string | null;
+    githubAccessToken: string | null;
+  } | null): GithubIntegrationStatus {
+    if (!user?.githubAccessToken) {
+      return { connected: false };
+    }
+
+    return {
+      connected: true,
+      githubId: user.githubId || undefined,
+      githubLogin: user.githubLogin || undefined,
+      tokenMasked: this.maskToken(user.githubAccessToken),
+    };
+  }
+
+  private maskToken(token: string) {
+    if (token.length <= 8) {
+      return '********';
+    }
+    return `${token.slice(0, 4)}...${token.slice(-4)}`;
+  }
+
+  private formatGithubError(error: unknown) {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const message = (error.response?.data as { message?: unknown } | undefined)?.message;
+      return [
+        error.message,
+        status ? `status=${status}` : undefined,
+        typeof message === 'string' ? `githubMessage=${message}` : undefined,
+      ].filter(Boolean).join(' ');
+    }
+
+    if (error instanceof Error) {
+      return `${error.name}: ${error.message}`;
+    }
+
+    return String(error);
   }
 
   async updateAIConfig(

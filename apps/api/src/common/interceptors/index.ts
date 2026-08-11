@@ -1,2 +1,2 @@
 export { TransformInterceptor } from './transform.interceptor';
-export { TimeoutInterceptor } from './timeout.interceptor';
+export { RequestTimeoutMs, TimeoutInterceptor } from './timeout.interceptor';

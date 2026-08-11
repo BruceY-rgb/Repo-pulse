@@ -192,6 +192,37 @@ describe('EventService - 后置编排韧性 (unit)', () => {
     expect(aiService.triggerAnalysis).toHaveBeenCalledWith('evt-1', false, { source: 'auto' });
   });
 
+  it('空监控范围不会默认触发通知或自动 AI', async () => {
+    process.env.AI_AUTO_ANALYSIS_ENABLED = 'true';
+    prismaMock.user.findMany.mockResolvedValue([
+      {
+        id: USER_ID,
+        preferences: {
+          monitoringScope: {
+            repositoryIds: [],
+            branchNames: [],
+            repositoryBranchScopes: {},
+          },
+        },
+      },
+    ]);
+
+    await service.create({
+      repositoryId: REPO_ID,
+      type: EventType.PUSH,
+      action: 'push',
+      title: 'empty scope',
+      author: 'orch-bot',
+      externalId: 'orch-evt-empty-scope',
+    });
+
+    await flushAsync();
+
+    expect(notificationService.send).not.toHaveBeenCalled();
+    expect(imService.sendRepositoryEventNotification).not.toHaveBeenCalled();
+    expect(aiService.triggerAnalysis).not.toHaveBeenCalled();
+  });
+
   it('自动从 branch/sourceBranch/targetBranch 推导多分支归属', async () => {
     await service.create({
       repositoryId: REPO_ID,

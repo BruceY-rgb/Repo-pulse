@@ -37,6 +37,11 @@ export function useTestWebhookMutation() {
     mutationFn: (repositoryId: string) => repositoryService.testWebhook(repositoryId),
     onSuccess: (_data, repositoryId) => {
       void queryClient.invalidateQueries({ queryKey: webhookQueryKeys.byRepo(repositoryId) });
+      [3_000, 8_000, 15_000].forEach((delay) => {
+        window.setTimeout(() => {
+          void queryClient.invalidateQueries({ queryKey: webhookQueryKeys.byRepo(repositoryId) });
+        }, delay);
+      });
     },
   });
 }

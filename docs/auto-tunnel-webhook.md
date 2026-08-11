@@ -26,7 +26,7 @@ TunnelManager.start()          # spawn cloudflared quick tunnel（--url 指向�
    │  抓 *.trycloudflare.com → 轮询边缘就绪 → publicUrl
    ▼
 TunnelOrchestrator.applyPublicUrl(publicUrl)
-   │  1) POST /settings/app-config/api-url { value: publicUrl }   （写后端 API_URL，需 ADMIN）
+   │  1) POST /settings/app-config/api-url { value: publicUrl }   （写后端 API_URL，需可编辑仓库权限）
    │  2) POST /repositories/batch-retry-webhooks                  （受限并发逐仓库删旧建新 webhook）
    ▼
 GitHub 仓库 webhook 回调 = ${publicUrl}/webhooks/github
@@ -55,7 +55,7 @@ cloudflared 边缘 → 本机反代（仅 /webhooks 放行）→ 本地 API /web
 - **Settings 可见状态**：在 Settings →「集成」Tab 的「实时连接（隧道）」状态卡，能看到隧道状态徽标
   （未启动 / 连接中 / 已连接 / 错误）与当前公网 URL。
 - **一键刷新**：点「刷新隧道」即可重连拿新 URL 并自动同步到所有仓库；状态实时更新。
-- **失败有提示**：若隧道起来了但自动配 webhook 失败（如当前用户非 ADMIN），状态卡会给出可读的降级提示，
+- **失败有提示**：若隧道起来了但自动配 webhook 失败（如当前用户没有可编辑仓库权限），状态卡会给出可读的降级提示，
   隧道本身仍可用。
 
 ## 4. 运行 / 验收方式
@@ -76,7 +76,7 @@ cloudflared 边缘 → 本机反代（仅 /webhooks 放行）→ 本地 API /web
   重写 API_URL + 重注册全部 webhook（quick tunnel 固有特性）。固定域名需改用命名隧道（需 CF 账号/配置）。
   重注册遗留的旧 URL webhook 会在下次 provision 时被自动清理（见第 8.1 节），不会在 GitHub 上累积成孤儿。
 - **trycloudflare 无 SLA**：免费临时隧道，best-effort，不保证可用性 / 稳定性；生产应换命名隧道或自有公网入口。
-- **写 API_URL 需 ADMIN**：非 ADMIN 用户写 API_URL 被 403（`needsAdmin`），无法自动配 webhook，UI 给降级提示。
+- **写 API_URL 权限**：只看当前用户是否拥有至少一个 active 可编辑仓库，不看 `ADMIN` / `MEMBER` 等全局角色。没有可编辑仓库时返回 403（`needsWebhookPermission`），UI 给降级提示。
 - **受限网络 DNS**：部分网络系统解析器对 `*.trycloudflare.com` 返回 NXDOMAIN；已用公共 DNS（1.1.1.1/8.8.8.8）
   解 IP 后按 IP 直连兜底。但网络连 cloudflare 边缘本身受阻则无解。
 - **跨平台二进制**：`fetch-cloudflared` 只拉当前平台二进制；要为其它平台出包，须在对应平台各自构建。
@@ -100,7 +100,7 @@ cloudflared 边缘 → 本机反代（仅 /webhooks 放行）→ 本地 API /web
 | M1 | `c0c95bb` feat(electron) | `tunnel-manager` / `webhook-proxy` / `types`：隧道管理器 + 仅暴露 `/webhooks` 的安全反代 |
 | M2 | `99149f5` feat(electron) | `tunnel-orchestrator` + `main.ts` 在 `realtime:connect` 时幂等启动编排：隧道就绪后写 api-url + 重建 webhook |
 | M3 | `8c34718` feat(electron/api) | 隧道刷新 IPC/UI（`tunnel:refresh` 防抖 + `tunnel:status` 回推 + Settings 状态卡）+ 后端 webhook 批量限速（并发 4 + 块间 300ms）+ 孤儿修复 |
-| M4 | `8dbec5d` build(electron) | 打包 cloudflared 进 app（`extraResources` + `package` 先 fetch + `resolveCloudflaredPath`）+ `needsAdmin` / 失败降级提示 |
+| M4 | `8dbec5d` build(electron) | 打包 cloudflared 进 app（`extraResources` + `package` 先 fetch + `resolveCloudflaredPath`）+ 失败降级提示 |
 
 ## 8. webhook 生命周期补强
 

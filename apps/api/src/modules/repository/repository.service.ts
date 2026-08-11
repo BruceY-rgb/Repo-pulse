@@ -53,6 +53,12 @@ export interface WebhookProvisionResult {
 
 export type RepositoryWithWebhookStatus = Repository & WebhookProvisionResult;
 
+interface WebhookLastResponseLike {
+  code?: number | null;
+  status?: string | null;
+  message?: string | null;
+}
+
 function createFallbackAppConfigService(configService: ConfigService): AppConfigService {
   return {
     get: async (key: string, fallback?: string) =>
@@ -68,6 +74,40 @@ function createFallbackAppConfigService(configService: ConfigService): AppConfig
     },
     set: async () => undefined,
   } as unknown as AppConfigService;
+}
+
+function resolveGithubWebhookDeliveryStatus(
+  active: boolean,
+  lastResponse?: WebhookLastResponseLike | null,
+): { status: WebhookStatus; lastError: string | null } {
+  if (!active) {
+    return { status: WebhookStatus.FAILED, lastError: null };
+  }
+
+  if (!lastResponse) {
+    return { status: WebhookStatus.ACTIVE, lastError: null };
+  }
+
+  const code = lastResponse.code;
+  const responseStatus = lastResponse.status?.trim() ?? '';
+  const message = lastResponse.message?.trim() ?? '';
+  const statusText = responseStatus.toLowerCase();
+  const errorMessage = message || responseStatus || null;
+
+  if (typeof code === 'number' && (code < 200 || code >= 300)) {
+    return { status: WebhookStatus.FAILED, lastError: errorMessage };
+  }
+
+  if (
+    code === null &&
+    errorMessage &&
+    statusText !== 'ok' &&
+    statusText !== 'unused'
+  ) {
+    return { status: WebhookStatus.FAILED, lastError: errorMessage };
+  }
+
+  return { status: WebhookStatus.ACTIVE, lastError: null };
 }
 
 interface SyncSummary {
@@ -888,13 +928,14 @@ export class RepositoryService {
         repository.webhookId,
         accessToken,
       );
+      const delivery = resolveGithubWebhookDeliveryStatus(detail.active, detail.last_response);
       return {
         repositoryId: repository.id,
         url: webhookUrl,
         secret: repository.webhookSecret,
         webhookId: repository.webhookId,
-        status: detail.active ? WebhookStatus.ACTIVE : WebhookStatus.FAILED,
-        lastError: detail.last_response?.message ?? null,
+        status: delivery.status,
+        lastError: delivery.lastError,
         active: detail.active,
         lastResponse: detail.last_response ?? null,
       };
@@ -1128,7 +1169,7 @@ export class RepositoryService {
   }
 
   /**
-   * 加载仓库 + 权限校验（必须为 ADMIN）+ 解析 owner/repo + 找到一个可用的 githubAccessToken
+   * 加载仓库 + 权限校验（必须可编辑）+ 解析 owner/repo + 找到一个可用的 githubAccessToken
    */
   private async loadRepositoryForWebhookOps(userId: string, repositoryId: string) {
     const repository = await this.prisma.repository.findUnique({
@@ -1531,7 +1572,6 @@ export class RepositoryService {
     }
 
     const monitoredExternalIds = await this.getMonitoredGithubExternalIds(userId);
-    const defaultMonitorAllRepositories = monitoredExternalIds === null;
     const repos = await this.githubService.getUserRepositories(
       userOAuthToken,
       userRefreshToken,
@@ -1555,7 +1595,7 @@ export class RepositoryService {
         accessLevel: this.mapAccessLevelToApi(accessLevel),
         canOperate: isEditable,
         isEditable,
-        isMonitored: defaultMonitorAllRepositories || monitoredExternalIds.has(String(repo.id)),
+        isMonitored: monitoredExternalIds.has(String(repo.id)),
       };
     });
   }
@@ -1571,7 +1611,6 @@ export class RepositoryService {
     }
 
     const monitoredExternalIds = await this.getMonitoredGithubExternalIds(userId);
-    const defaultMonitorAllRepositories = monitoredExternalIds === null;
     const repos = await this.githubService.getStarredRepos(
       userOAuthToken,
       userRefreshToken,
@@ -1592,14 +1631,14 @@ export class RepositoryService {
       accessLevel: this.mapAccessLevelToApi(RepositoryAccessLevel.READ),
       canOperate: false,
       isEditable: false,
-      isMonitored: defaultMonitorAllRepositories || monitoredExternalIds.has(String(repo.id)),
+      isMonitored: monitoredExternalIds.has(String(repo.id)),
     }));
   }
 
-  private async getMonitoredGithubExternalIds(userId: string): Promise<Set<string> | null> {
+  private async getMonitoredGithubExternalIds(userId: string): Promise<Set<string>> {
     const monitoredRepositoryIds = await getUserMonitoredRepositoryIds(userId);
     if (monitoredRepositoryIds.length === 0) {
-      return null;
+      return new Set();
     }
 
     const repositories = await this.prisma.repository.findMany({
@@ -1614,7 +1653,7 @@ export class RepositoryService {
   }
 
   private isRepositoryInMonitoringScope(monitoredRepositoryIds: string[], repositoryId: string): boolean {
-    return monitoredRepositoryIds.length === 0 || monitoredRepositoryIds.includes(repositoryId);
+    return monitoredRepositoryIds.includes(repositoryId);
   }
 
   async syncForUser(

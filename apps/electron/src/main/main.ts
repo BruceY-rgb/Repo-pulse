@@ -28,6 +28,11 @@ let tunnelOrchestrator: TunnelOrchestrator | null = null;
 let tunnelStarted = false;
 /** 最近一次 tunnel:refresh 的时间戳（ms），用于防抖（< 3s 内重复点击直接忽略）。 */
 let lastTunnelRefreshAt = 0;
+/** 最近一次已成功同步到后端的 tunnel URL，避免重复批量重建 webhook。 */
+let lastAppliedTunnelUrl: string | null = null;
+/** 当前正在同步到后端的 tunnel URL 与 Promise，用于合并首次 running 状态和 start()/refresh() 的重复触发。 */
+let applyingTunnelUrl: string | null = null;
+let applyingTunnelPromise: Promise<OrchestratorResult> | null = null;
 /** tunnel:refresh 防抖窗口。 */
 const TUNNEL_REFRESH_DEBOUNCE_MS = 3_000;
 
@@ -161,15 +166,15 @@ function buildTunnelStatus(): DesktopTunnelStatus {
 /**
  * 把 orchestrator.applyPublicUrl() 的结果转成给渲染层 M3 状态卡的「降级提示」并主动推送。
  * 隧道本身已 running（publicUrl 已就绪），但「让后端 webhook 指向它」这一步出问题时：
- *   - needsAdmin（写 API_URL 被 403）：推 error，文案「需要管理员权限，无法自动配置 webhook」。
+ *   - needsWebhookPermission（写 API_URL 被 403）：推 error，文案「需要可编辑仓库权限，无法自动配置 webhook」。
  *   - 其它失败（如 webhook 批量重建部分失败）：推 error，透出 orchestrator 给的可读 error。
  * 隧道仍可用（公网 URL 有效），只是 webhook 自动配置未成功；UI 据此提示用户手动处理。
  * 成功（apiUrlSet && !error）则不额外推送，沿用 TunnelManager 已推的 running 状态。
  */
 function reportOrchestrationOutcome(result: OrchestratorResult, publicUrl: string): void {
   let error: string | null = null;
-  if (!result.apiUrlSet && result.needsAdmin) {
-    error = '需要管理员权限，无法自动配置 webhook';
+  if (!result.apiUrlSet && result.needsWebhookPermission) {
+    error = '需要至少一个可编辑仓库权限，无法自动配置 webhook';
   } else if (result.error) {
     // apiUrlSet=false 的其它失败，或 apiUrlSet=true 但 webhook 重建失败，均透出可读原因。
     error = `隧道已就绪，但 webhook 自动配置失败：${result.error}`;
@@ -184,6 +189,60 @@ function reportOrchestrationOutcome(result: OrchestratorResult, publicUrl: strin
       error,
     } satisfies DesktopTunnelStatus);
   }
+}
+
+/**
+ * 把当前 tunnel URL 应用到后端并重建 GitHub webhook。
+ * 这个函数会被三类路径调用：首次启动、手动刷新、TunnelManager 自动重连后的 running 回调。
+ * 对同一个 URL 的并发调用会复用同一个 Promise；只有成功完成 API_URL 写入和 webhook 重建后才记录为已应用。
+ */
+async function applyTunnelPublicUrl(
+  publicUrl: string,
+  source: 'initial' | 'refresh' | 'auto-retry',
+): Promise<OrchestratorResult> {
+  if (!tunnelOrchestrator) {
+    console.warn(`[main] tunnel apply skipped (${source}): orchestrator not initialized`);
+    return { apiUrlSet: false, error: 'tunnel orchestrator not initialized' };
+  }
+
+  if (lastAppliedTunnelUrl === publicUrl) {
+    console.log(`[main] tunnel apply skipped (${source}): url already applied`);
+    return { apiUrlSet: true };
+  }
+
+  if (applyingTunnelUrl === publicUrl && applyingTunnelPromise) {
+    console.log(`[main] tunnel apply joined (${source}): url already applying`);
+    return applyingTunnelPromise;
+  }
+
+  applyingTunnelUrl = publicUrl;
+  applyingTunnelPromise = (async () => {
+    console.log(`[main] tunnel ${source} applying ${publicUrl} to backend...`);
+    const result = await tunnelOrchestrator.applyPublicUrl(publicUrl);
+    if (!result.apiUrlSet) {
+      console.warn(`[main] tunnel ${source}: api-url not set:`, result.error);
+    } else if (result.error) {
+      console.warn(`[main] tunnel ${source}: webhook rebuild issue:`, result.error);
+    } else {
+      lastAppliedTunnelUrl = publicUrl;
+      console.log(`[main] tunnel ${source} apply complete:`, JSON.stringify(result.rebuild));
+    }
+    reportOrchestrationOutcome(result, publicUrl);
+    return result;
+  })().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[main] tunnel ${source} apply failed:`, message);
+    const result: OrchestratorResult = { apiUrlSet: false, error: message };
+    reportOrchestrationOutcome(result, publicUrl);
+    return result;
+  }).finally(() => {
+    if (applyingTunnelUrl === publicUrl) {
+      applyingTunnelUrl = null;
+      applyingTunnelPromise = null;
+    }
+  });
+
+  return applyingTunnelPromise;
 }
 
 /**
@@ -209,19 +268,12 @@ async function startTunnelOrchestrationOnce(): Promise<void> {
       cloudflaredPath: resolveCloudflaredPath(),
       targetPort: port,
       onStatus: onTunnelStatus,
+      onPublicUrl: (url) => {
+        void applyTunnelPublicUrl(url, 'auto-retry');
+      },
     });
     const publicUrl = await tunnelManager.start();
-    console.log(`[main] tunnel running at ${publicUrl}, applying to backend...`);
-    const result = await tunnelOrchestrator.applyPublicUrl(publicUrl);
-    if (!result.apiUrlSet) {
-      console.warn('[main] tunnel orchestration: api-url not set:', result.error);
-    } else if (result.error) {
-      console.warn('[main] tunnel orchestration: webhook rebuild issue:', result.error);
-    } else {
-      console.log('[main] tunnel orchestration complete:', JSON.stringify(result.rebuild));
-    }
-    // 隧道 running 但 webhook 配置失败时，主动推降级提示给渲染层（needsAdmin / 重建失败）。
-    reportOrchestrationOutcome(result, publicUrl);
+    await applyTunnelPublicUrl(publicUrl, 'initial');
   } catch (error) {
     // 失败不可崩主流程：允许下次 realtime:connect 重试。
     tunnelStarted = false;
@@ -256,17 +308,21 @@ async function refreshTunnel(): Promise<DesktopTunnelStatus> {
     }
     // 已有隧道：重启拿新 URL 后重新应用到后端。
     const newUrl = await tunnelManager.restart();
-    console.log(`[main] tunnel refreshed at ${newUrl}, re-applying to backend...`);
-    const result = await tunnelOrchestrator.applyPublicUrl(newUrl);
+    const result = await applyTunnelPublicUrl(newUrl, 'refresh');
     if (!result.apiUrlSet) {
-      console.warn('[main] tunnel:refresh api-url not set:', result.error);
-    } else if (result.error) {
-      console.warn('[main] tunnel:refresh webhook rebuild issue:', result.error);
-    } else {
-      console.log('[main] tunnel:refresh complete:', JSON.stringify(result.rebuild));
+      return {
+        state: 'error',
+        publicUrl: newUrl,
+        error: result.error ?? 'webhook 自动配置失败',
+      };
     }
-    // 同首启：webhook 配置失败时推降级提示。隧道已就绪（newUrl 有效），仅自动配 webhook 失败。
-    reportOrchestrationOutcome(result, newUrl);
+    if (result.error) {
+      return {
+        state: 'error',
+        publicUrl: newUrl,
+        error: `隧道已就绪，但 webhook 自动配置失败：${result.error}`,
+      };
+    }
     return buildTunnelStatus();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -283,6 +339,9 @@ function disposeTunnel(): void {
   webhookProxy = null;
   tunnelOrchestrator = null;
   tunnelStarted = false;
+  lastAppliedTunnelUrl = null;
+  applyingTunnelUrl = null;
+  applyingTunnelPromise = null;
 }
 
 function isTrustedAppUrl(url: string) {
@@ -507,6 +566,12 @@ app.whenReady().then(() => {
       createMainWindow();
     }
   });
+});
+
+app.on('before-quit', () => {
+  realtimeBridge?.dispose();
+  realtimeBridge = null;
+  disposeTunnel();
 });
 
 app.on('window-all-closed', () => {
