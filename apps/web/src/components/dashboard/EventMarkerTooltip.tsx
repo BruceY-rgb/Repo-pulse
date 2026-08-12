@@ -1,5 +1,4 @@
 import { createPortal } from 'react-dom';
-import { useLanguage } from '@/contexts/LanguageContext';
 import { cn } from '@/lib/utils';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -28,7 +27,6 @@ export function EventMarkerTooltip({
   event,
   className,
 }: EventMarkerTooltipProps) {
-  const { t } = useLanguage();
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [adjustedPos, setAdjustedPos] = useState({ left: x + 12, top: y + 12 });
 

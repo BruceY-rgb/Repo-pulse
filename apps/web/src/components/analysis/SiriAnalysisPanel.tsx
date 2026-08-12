@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { X, Sparkles, Brain, AlertCircle, RefreshCw, Command } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { RiskBadge } from './RiskBadge';
 import { CategoryBadge } from './CategoryBadge';
 import { analysisService } from '@/services/analysis.service';
+import type { Suggestion } from '@/types/api';
 
 interface SiriAnalysisPanelProps {
   eventId: string;
@@ -20,7 +21,7 @@ interface SiriAnalysisResult {
   category: string;
   riskScore: number;
   confidence: number;
-  suggestions: any[];
+  suggestions: Array<Suggestion | string>;
   riskReasons: string[];
   model?: string;
 }
@@ -90,7 +91,7 @@ export function SiriAnalysisPanel({
     };
   };
 
-  const triggerAndPoll = async () => {
+  const triggerAndPoll = useCallback(async () => {
     setStatus('loading');
     setResult(null);
     setErrorMsg('');
@@ -141,17 +142,20 @@ export function SiriAnalysisPanel({
       }, 1500);
 
       return () => clearInterval(poll);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setStatus('error');
-      setErrorMsg(err?.response?.data?.message || err?.message || '无法发起分析请求。');
+      const responseMessage = err && typeof err === 'object' && 'response' in err
+        ? (err as { response?: { data?: { message?: string } } }).response?.data?.message
+        : undefined;
+      setErrorMsg(responseMessage || (err instanceof Error ? err.message : '无法发起分析请求。'));
     }
-  };
+  }, [eventId]);
 
   useEffect(() => {
     if (isOpen && eventId) {
       void triggerAndPoll();
     }
-  }, [isOpen, eventId]);
+  }, [isOpen, eventId, triggerAndPoll]);
 
   // 打字机流式输出效果
   useEffect(() => {
@@ -328,13 +332,17 @@ export function SiriAnalysisPanel({
                     优化建议
                   </span>
                   <ul className="mt-1.5 space-y-2">
-                    {result.suggestions.map((suggestion: any, i) => (
+                    {result.suggestions.map((suggestion, i) => (
                       <li
                         key={i}
                         className="text-xs text-slate-300 flex flex-col gap-0.5 pl-3 border-l-2 border-purple-500/30"
                       >
-                        <span className="font-semibold text-purple-300">{suggestion.title || suggestion}</span>
-                        {suggestion.description && <span className="text-slate-400 mt-0.5">{suggestion.description}</span>}
+                        <span className="font-semibold text-purple-300">
+                          {typeof suggestion === 'string' ? suggestion : suggestion.title}
+                        </span>
+                        {typeof suggestion !== 'string' && suggestion.description ? (
+                          <span className="text-slate-400 mt-0.5">{suggestion.description}</span>
+                        ) : null}
                       </li>
                     ))}
                   </ul>

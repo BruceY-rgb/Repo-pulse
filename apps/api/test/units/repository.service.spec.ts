@@ -439,7 +439,7 @@ describe('RepositoryService', () => {
       mockEventService.findByExternalId.mockResolvedValue({ id: 'existing', branches: [] });
       mockRepoUpdate.mockResolvedValue({});
 
-      const result = await service.sync('r1');
+      await service.sync('r1');
       expect(mockEventService.create).not.toHaveBeenCalled();
     });
 

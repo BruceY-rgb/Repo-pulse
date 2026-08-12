@@ -177,7 +177,12 @@ export class UserService {
   }
 
   private excludePassword(user: any) {
-    const { passwordHash, githubAccessToken, githubRefreshToken, ...rest } = user;
+    const {
+      passwordHash: _passwordHash,
+      githubAccessToken: _githubAccessToken,
+      githubRefreshToken: _githubRefreshToken,
+      ...rest
+    } = user;
     return rest;
   }
 }

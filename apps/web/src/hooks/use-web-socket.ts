@@ -14,8 +14,10 @@ import { dashboardQueryKeys } from '@/hooks/queries/use-dashboard-queries';
 import { notificationQueryKeys } from '@/hooks/queries/use-notification-queries';
 import { repositoryQueryKeys } from '@/hooks/queries/use-repository-queries';
 import { workbenchQueryKeys } from '@/hooks/queries/use-workbench-queries';
-import { analysisQueryKeys } from '@/hooks/use-analysis';
-import { approvalKeys } from '@/hooks/use-approvals';
+import {
+  analysisQueryKeys,
+  approvalQueryKeys,
+} from '@/hooks/queries/realtime-query-keys';
 import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
 import { useSyncProgressStore } from '@/stores/sync-progress.store';
 import { getSocketUrl, isDesktopRuntime } from '@/lib/desktop';
@@ -195,7 +197,7 @@ export function createRealtimeHandlers(
       queryClient.invalidateQueries({ queryKey: analysisQueryKeys.detail(eventId) });
       queryClient.invalidateQueries({ queryKey: analysisQueryKeys.list() });
       // 分析完成时后端可能据此自动创建审批；失效审批列表/待办计数，让旁观者审批页实时出现新审批
-      queryClient.invalidateQueries({ queryKey: approvalKeys.all });
+      queryClient.invalidateQueries({ queryKey: approvalQueryKeys.all });
     },
     [REALTIME_EVENTS.ANALYSIS_STARTED]: ({ eventId }) => {
       // 分析开始：刷新分析详情/列表以反映“进行中”状态。
@@ -220,7 +222,7 @@ export function createRealtimeHandlers(
       queryClient.invalidateQueries({ queryKey: notificationQueryKeys.unreadCount() });
       // 他人 approve/reject/edit 后失效审批列表/待办计数，让旁观者审批页实时刷新
       // （原仅 window.dispatchEvent('approval-updated')，但全仓库无监听者，等于空操作）
-      queryClient.invalidateQueries({ queryKey: approvalKeys.all });
+      queryClient.invalidateQueries({ queryKey: approvalQueryKeys.all });
       window.dispatchEvent(new Event('approval-updated'));
     },
     [REALTIME_EVENTS.REPOSITORY_SYNC_PROGRESS]: ({ repositoryId, jobId, progress, stage }) => {

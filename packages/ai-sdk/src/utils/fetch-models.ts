@@ -6,10 +6,6 @@
 
 import type { ProviderType } from '../interfaces/ai-provider';
 import { PROVIDER_DEFAULT_URLS } from '../interfaces/ai-provider';
-import { OpenAICompatibleProvider } from '../providers/openai-compatible';
-import { AnthropicProvider } from '../providers/anthropic';
-import { GeminiProvider } from '../providers/gemini';
-
 export interface ModelInfo {
   id: string;
   name: string;

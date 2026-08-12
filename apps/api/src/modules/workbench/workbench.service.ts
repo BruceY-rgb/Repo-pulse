@@ -691,7 +691,7 @@ export class WorkbenchService {
           },
           select: { repositoryId: true },
         });
-      } catch (error) {
+      } catch {
         // sync failed, ignore and continue
       }
     }

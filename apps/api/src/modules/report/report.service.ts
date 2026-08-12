@@ -194,8 +194,8 @@ export class ReportService {
     issues: number,
     resolved: number,
   ): string {
-    var total = commits + prs + issues;
-    var rate = issues + prs > 0 ? Math.round((resolved / (issues + prs)) * 100) : 0;
+    const total = commits + prs + issues;
+    const rate = issues + prs > 0 ? Math.round((resolved / (issues + prs)) * 100) : 0;
     return `${total} total activities, ${commits} commits, ${prs} PRs, ${issues} issues. ${resolved} resolved (${rate}% resolution rate).`;
   }
 
@@ -210,7 +210,7 @@ export class ReportService {
     if (prs === 0) {
       return 'No significant team activity detected this period.';
     }
-    var avg = prs > 0 ? Math.round(commits / prs) : 0;
+    const avg = prs > 0 ? Math.round(commits / prs) : 0;
     return `Team processed ${prs} pull requests, ${commits} commits across all repositories (avg ${avg} commits per PR).`;
   }
 

@@ -41,7 +41,6 @@ import {
   Github,
   LayoutDashboard,
   Loader2,
-  LogOut,
   MessageSquare,
   MoreHorizontal,
   PauseCircle,
@@ -64,7 +63,6 @@ import {
   TestTube2,
   Trash2,
   Users,
-  VolumeX,
   X,
   Webhook,
   XCircle,
@@ -130,10 +128,7 @@ import {
   useWebhookStatusQuery,
 } from '@/hooks/queries/use-webhook-queries';
 import { WebhookStatus } from '@repo-pulse/shared';
-import {
-  useCurrentUserQuery,
-  useLogoutMutation,
-} from '@/hooks/queries/use-auth-queries';
+import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
 import { useRepositoryRealtimeSubscription } from '@/hooks/use-web-socket';
 import { eventService } from '@/services/event.service';
 import { approvalService, type Approval } from '@/services/approval.service';
@@ -141,14 +136,13 @@ import { apiClient } from '@/services/api-client';
 import { repositoryService } from '@/services/repository.service';
 import { workbenchService } from '@/services/workbench.service';
 import { settingsService, PROVIDER_LABELS, type AIProvider } from '@/services/settings.service';
-import { getApiBaseUrl, isDesktopRuntime } from '@/lib/desktop';
+import { isDesktopRuntime } from '@/lib/desktop';
 import { getProviderLogo } from '@/lib/provider-logo';
 import { GitTreePanel } from '@/components/shared/GitTreePanel';
 import {
   useWorkbenchUnreadStore,
   type WorkbenchUnreadBoundary,
 } from '@/stores/workbench-unread.store';
-import { authService } from '@/services/auth.service';
 import type { Notification } from '@/services/notification.service';
 import { Dashboard } from '@/pages/Dashboard';
 import { Repositories } from '@/pages/Repositories';
@@ -162,7 +156,6 @@ import type {
   ChatRepositoryItem,
   BranchSyncStatus,
   WorkbenchConversationMessage,
-  WorkbenchConversationState,
   MessageAction,
   RiskLevel,
   WatchFeedItem,
@@ -957,7 +950,6 @@ function riskLevelToRisk(riskLevel?: RiskLevel): ConversationMessage['risk'] {
 
 function workbenchMessageToConversationMessage(
   msg: WorkbenchConversationMessage,
-  conversationState?: WorkbenchConversationState,
 ): ConversationMessage {
   const createdAtMs = new Date(msg.createdAt).getTime();
   const risk = riskLevelToRisk(msg.riskLevel);
@@ -1020,19 +1012,6 @@ function workbenchMessageToConversationMessage(
   };
 }
 
-function getLatestRepoMessage(repo: Repository, messages: ConversationMessage[]) {
-  const message = messages
-    .filter((item) => item.sourceRepositoryId === repo.id)
-    .sort((left, right) => right.createdAtMs - left.createdAtMs)[0];
-  if (message) {
-    return message.title;
-  }
-  if (repo.lastSyncAt) {
-    return `上次同步 ${formatRelativeTime(repo.lastSyncAt)}`;
-  }
-  return '等待新的仓库事件';
-}
-
 function getRepoMessages(repositoryId: string | undefined, messages: ConversationMessage[]) {
   if (!repositoryId) {
     return [];
@@ -1077,32 +1056,6 @@ function doesMessageMatchMonitoringScope(
   }
 
   return messageBranches.some((branch) => scopedBranches.includes(branch));
-}
-
-function getRepositorySortTime(repo: Repository, messages: ConversationMessage[]) {
-  const latestMessageTime = Math.max(
-    ...messages
-      .filter((item) => item.sourceRepositoryId === repo.id)
-      .map((item) => item.createdAtMs)
-      .filter(Number.isFinite),
-  );
-  if (Number.isFinite(latestMessageTime)) {
-    return latestMessageTime;
-  }
-
-  if (repo.lastSyncAt) {
-    const lastSyncAt = new Date(repo.lastSyncAt).getTime();
-    if (Number.isFinite(lastSyncAt)) {
-      return lastSyncAt;
-    }
-  }
-
-  const fallbackTime = new Date(repo.updatedAt || repo.createdAt).getTime();
-  return Number.isFinite(fallbackTime) ? fallbackTime : 0;
-}
-
-function hasRepositoryMessages(repo: Repository, messages: ConversationMessage[]) {
-  return messages.some((item) => item.sourceRepositoryId === repo.id);
 }
 
 function getRepositoryContextMenuItems({
@@ -1253,9 +1206,7 @@ function PrimaryRail({
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
-  const navigate = useNavigate();
   const { data: user, isLoading: isUserLoading } = useCurrentUserQuery();
-  const logoutMutation = useLogoutMutation();
   const railItems = [
     { view: 'inbox' as const, label: '仓库会话', icon: MessageSquare },
     { view: 'watch' as const, label: '关注动态', icon: Star },
@@ -1266,11 +1217,6 @@ function PrimaryRail({
   const userName = user?.name ?? '未知用户';
   const userEmail = user?.email ?? '暂无邮箱';
   const userInitial = userName.slice(0, 1).toUpperCase() || 'U';
-
-  const handleLogout = async () => {
-    await logoutMutation.mutateAsync(undefined);
-    navigate('/login', { replace: true });
-  };
 
   return (
     <aside
@@ -1379,25 +1325,6 @@ function PrimaryRail({
           </Tooltip>
         )}
 
-        {!isDesktopRuntime() ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                size={collapsed ? 'icon' : 'default'}
-                className={cn('gap-2 rounded-xl', collapsed ? 'h-10 w-10' : 'h-10 w-full justify-start')}
-                onClick={handleLogout}
-                disabled={logoutMutation.isPending}
-                aria-label="退出登录"
-              >
-                <LogOut className="h-4 w-4" />
-                {!collapsed ? <span>退出登录</span> : null}
-              </Button>
-            </TooltipTrigger>
-            {collapsed ? <TooltipContent side="right">退出登录</TooltipContent> : null}
-          </Tooltip>
-        ) : null}
       </div>
 
       <Tooltip>
@@ -5983,7 +5910,7 @@ function AgentRunView({
       setActiveRepoId('');
       setActiveSessionId('');
     }
-  }, [projectRepoIds]);
+  }, [activeRepoId, initialRepository?.id, projectRepoIds]);
 
   // Sync activeSessionId back to localStorage per repo
   useEffect(() => {
@@ -6079,6 +6006,8 @@ function AgentRunView({
       updatedParams.delete('prompt');
       navigate(`${window.location.pathname}?${updatedParams.toString()}`, { replace: true });
     }
+    // The prompt token is intentionally the trigger; the ref guard makes this a one-shot handoff.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPrompt, initialRepository?.id, activeRepository?.id]);
 
   // Set up electron agent listeners
@@ -6486,7 +6415,7 @@ function AgentRunView({
       });
     });
 
-    let gitUrl = repo.url;
+    const gitUrl = repo.url;
 
     try {
       console.log('[AgentRunView] startSessionOnSession: invoking agent.startSession via desktop IPC.');
@@ -7786,22 +7715,24 @@ export function DesktopWorkbench() {
     persistMonitoringScope,
     updatePreferencesMutation,
   } = useMonitoringScopePreferences();
-  const monitoredRepositoryIds = monitoringScope.repositoryIds ?? [];
-  const effectiveMonitoredRepositoryIds = useMemo(
-    () => monitoredRepositoryIds,
-    [monitoredRepositoryIds],
+  const monitoredRepositoryIds = useMemo(
+    () => monitoringScope.repositoryIds ?? [],
+    [monitoringScope.repositoryIds],
   );
   const realtimeRepositoryIds = useMemo(
     () =>
       Array.from(
         new Set([
-          ...effectiveMonitoredRepositoryIds,
+          ...monitoredRepositoryIds,
           ...watchRepositories.map((repository) => repository.id),
         ]),
       ),
-    [effectiveMonitoredRepositoryIds, watchRepositories],
+    [monitoredRepositoryIds, watchRepositories],
   );
-  const repositoryBranchScopes = monitoringScope.repositoryBranchScopes ?? {};
+  const repositoryBranchScopes = useMemo(
+    () => monitoringScope.repositoryBranchScopes ?? {},
+    [monitoringScope.repositoryBranchScopes],
+  );
   const repositoryBranchScopesKey = useMemo(
     () => JSON.stringify(repositoryBranchScopes),
     [repositoryBranchScopes],
@@ -7810,14 +7741,14 @@ export function DesktopWorkbench() {
   useRepositoryRealtimeSubscription(realtimeRepositoryIds);
 
   const eventsQuery = useApiQuery({
-    queryKey: ['workbench', 'events', effectiveMonitoredRepositoryIds.join(','), repositoryBranchScopesKey],
-    queryFn: () => eventService.getAll(effectiveMonitoredRepositoryIds, repositoryBranchScopes, {
+    queryKey: ['workbench', 'events', monitoredRepositoryIds.join(','), repositoryBranchScopesKey],
+    queryFn: () => eventService.getAll(monitoredRepositoryIds, repositoryBranchScopes, {
       page: 1,
       pageSize: 80,
       sortBy: 'occurredAt',
       sortOrder: 'desc',
     }),
-    enabled: effectiveMonitoredRepositoryIds.length > 0,
+    enabled: monitoredRepositoryIds.length > 0,
     staleTime: 30 * 1000,
   });
 
@@ -7838,8 +7769,6 @@ export function DesktopWorkbench() {
     setOlderConversationMessages([]);
     setConversationNextCursor(conversationMessagesQuery.data?.pagination?.nextCursor ?? null);
   }, [conversationMessagesQuery.data, selectedRepository?.id]);
-
-  const conversationState = conversationMessagesQuery.data?.conversation ?? null;
 
   const allMessages = useMemo(() => {
     const eventMessages = (eventsQuery.data?.items ?? []).map(toConversationMessage);
@@ -7914,7 +7843,7 @@ export function DesktopWorkbench() {
           return true;
         })
         .map((msg) =>
-        workbenchMessageToConversationMessage(msg, conversationMessagesQuery.data.conversation),
+        workbenchMessageToConversationMessage(msg),
       );
     }
     // 降级：使用前端拼接的消息

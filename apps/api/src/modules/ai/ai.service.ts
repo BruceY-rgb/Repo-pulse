@@ -9,7 +9,6 @@ import {
 } from '@repo-pulse/database';
 import {
   createProvider,
-  type AnalysisInput,
   type AnalysisOutput,
 } from '@repo-pulse/ai-sdk';
 import type { AIProvider as ProviderType } from '@repo-pulse/shared';

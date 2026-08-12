@@ -47,12 +47,6 @@ interface DailyRow {
   cumulativeCommits: number;
 }
 
-interface PivotedRow {
-  date: Date;
-  dateKey: string;
-  [contributor: string]: Date | number | string;
-}
-
 interface ProjectEventMarker {
   id: string;
   date: string;
@@ -87,13 +81,6 @@ const OTHERS_LABEL = 'Other contributors';
 const TOP_N_MAX = 100;
 const TOP_N_OPTIONS = [5, 15, 25, 35];
 const BOT_AUTHOR_KEYWORDS = ['system', 'agent', 'bot', 'ai analysis', 'feishu'];
-const STREAM_WIDTH = 1180;
-const STREAM_HEIGHT = 520;
-const STREAM_MARGIN = { top: 24, right: 24, bottom: 24, left: 48 };
-const BRUSH_HEIGHT = 50;
-const BRUSH_GAP = 16;
-const MAX_CONTRIBUTOR_LABELS = 8;
-const MAX_SPIKE_MARKERS = 5;
 const PROJECT_RIVER_HUES = {
   base: 244,
   spread: 92,
@@ -336,36 +323,6 @@ function aggregateRows(rows: DailyRow[], granularity: Granularity) {
     );
 }
 
-function pivotDailyData(rows: DailyRow[]) {
-  const contributors = Array.from(new Set(rows.map((row) => row.contributor))).sort();
-  const dateSet = new Set(rows.map((row) => row.date));
-  const pivotMap = new Map<string, PivotedRow>();
-
-  rows.forEach((row) => {
-    const pivoted = pivotMap.get(row.date) ?? {
-      date: new Date(`${row.date}T00:00:00Z`),
-      dateKey: row.date,
-    };
-    pivoted[row.contributor] = row.commits;
-    pivotMap.set(row.date, pivoted);
-  });
-
-  const data = Array.from(dateSet)
-    .sort()
-    .map((date) => {
-      const base = pivotMap.get(date) ?? {
-        date: new Date(`${date}T00:00:00Z`),
-        dateKey: date,
-      };
-      contributors.forEach((contributor) => {
-        base[contributor] = Number(base[contributor] ?? 0);
-      });
-      return base;
-    });
-
-  return { contributors, data };
-}
-
 function getContributorColors(rows: DailyRow[]) {
   const meta = new Map<string, { firstCommitDate: string; totalCommits: number }>();
   rows.forEach((row) => {
@@ -567,60 +524,6 @@ function severityClass(severity: EventSeverity) {
 
 function contributorLabel(contributor: string, t: (key: string, params?: Record<string, string>) => string) {
   return contributor === OTHERS_LABEL ? t('projectRiver.otherContributors') : contributor;
-}
-
-function offsetDate(date: Date, granularity: Granularity, direction: -1 | 1) {
-  const next = new Date(date);
-  if (granularity === 'month') {
-    next.setUTCMonth(next.getUTCMonth() + direction);
-  } else if (granularity === 'week') {
-    next.setUTCDate(next.getUTCDate() + direction * 7);
-  } else {
-    next.setUTCDate(next.getUTCDate() + direction);
-  }
-  return next;
-}
-
-function padSparsePivotData(data: PivotedRow[], contributors: string[], granularity: Granularity) {
-  if (data.length !== 1) {
-    return data;
-  }
-
-  const only = data[0];
-  const makeBoundary = (date: Date): PivotedRow => {
-    const boundary: PivotedRow = {
-      date,
-      dateKey: toIsoDate(date),
-    };
-    contributors.forEach((contributor) => {
-      boundary[contributor] = 0;
-    });
-    return boundary;
-  };
-
-  return [
-    makeBoundary(offsetDate(only.date, granularity, -1)),
-    only,
-    makeBoundary(offsetDate(only.date, granularity, 1)),
-  ];
-}
-
-function clamp(value: number, minValue: number, maxValue: number) {
-  return Math.max(minValue, Math.min(maxValue, value));
-}
-
-function getTickData(data: PivotedRow[]) {
-  if (data.length <= 6) {
-    return data;
-  }
-  const step = Math.max(1, Math.ceil(data.length / 6));
-  return data.filter((_, index) => index === 0 || index === data.length - 1 || index % step === 0);
-}
-
-function formatChartDate(dateKey: string, granularity: Granularity) {
-  if (granularity === 'month') return dateKey.slice(0, 7);
-  if (granularity === 'week') return `${dateKey.slice(5).replace('-', '.')}`;
-  return dateKey.slice(5).replace('-', '.');
 }
 
 export function ProjectRiverRepositoryDashboard({
@@ -1109,7 +1012,6 @@ export function ProjectRiverRepositoryDashboard({
                   svgRef={svgRef}
                   colorMap={colorMap}
                   eventMarkers={projectEvents}
-                  granularity={granularity}
                   highlightedContributor={hoveredContributor}
                   onHoverContributor={(payload) => {
                     setStreamTooltip(payload);
@@ -1136,7 +1038,6 @@ export function ProjectRiverRepositoryDashboard({
                   filesTouched={hoveredRow?.filesTouched ?? 0}
                   percentage={streamTooltip?.percentage ?? 0}
                   totalCommits={streamTooltip?.totalCommits ?? 0}
-                  granularity={granularity}
                 />
                 <EventMarkerTooltip
                   visible={Boolean(hoveredEvent && hoveredEventCoords)}

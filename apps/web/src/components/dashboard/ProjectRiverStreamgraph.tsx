@@ -2,7 +2,7 @@
 // D3 internals (scales, area generators, brush, zoom) use polymorphic generics
 // that TypeScript cannot safely infer. Suppressing explicit-any is the established
 // pattern for D3 + TypeScript integration.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { extent, max, min } from 'd3-array';
 import { scaleLinear, scaleUtc } from 'd3-scale';
 import { axisBottom } from 'd3-axis';
@@ -16,13 +16,6 @@ import {
   stackOrderInsideOut,
 } from 'd3-shape';
 import { zoom as d3Zoom, zoomIdentity } from 'd3-zoom';
-import { cn } from '@/lib/utils';
-import type {
-  ProjectRiverDailyRow,
-  ProjectRiverEventMarker,
-} from '@/services/dashboard.service';
-
-type Granularity = 'day' | 'week' | 'month';
 type EventSeverity = 'positive' | 'warning' | 'info';
 
 interface DailyRow {
@@ -64,7 +57,6 @@ interface StreamgraphTooltipState {
 interface ProjectRiverStreamgraphProps {
   colorMap: Map<string, string>;
   eventMarkers: ProjectEventMarker[];
-  granularity: Granularity;
   highlightedContributor: string | null;
   onHoverContributor: (payload: StreamgraphTooltipState | null) => void;
   onHoverEvent: (event: ProjectEventMarker | null, coords: { x: number; y: number } | null) => void;
@@ -157,18 +149,9 @@ function pivotDailyData(rows: DailyRow[]) {
   return { contributors, data };
 }
 
-function toWeekKey(dateStr: string) {
-  const date = new Date(`${dateStr}T00:00:00Z`);
-  const day = date.getUTCDay();
-  const diff = date.getUTCDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), diff));
-  return monday.toISOString().slice(0, 10);
-}
-
 export function ProjectRiverStreamgraph({
   colorMap,
   eventMarkers,
-  granularity,
   highlightedContributor,
   onHoverContributor,
   onHoverEvent,
@@ -182,7 +165,7 @@ export function ProjectRiverStreamgraph({
   const localSvgRef = useRef<SVGSVGElement | null>(null);
   const svgRef = externalSvgRef || localSvgRef;
   const isDark = useIsDarkMode();
-  const colors = getChartColors(isDark);
+  const colors = useMemo(() => getChartColors(isDark), [isDark]);
 
   const [size, setSize] = useState({ width: 0, height: 0 });
 
@@ -200,32 +183,43 @@ export function ProjectRiverStreamgraph({
   }, []);
 
   // Format pivoted data and stacked series
-  const { contributors, data: rawData } = pivotDailyData(rows);
+  const { contributors, data: rawData } = useMemo(() => pivotDailyData(rows), [rows]);
 
-  const series = d3Stack<PivotedRow>()
-    .keys(contributors)
-    .order(stackOrderInsideOut)
-    .offset(stackOffsetWiggle)(rawData);
+  const series = useMemo(
+    () => d3Stack<PivotedRow>()
+      .keys(contributors)
+      .order(stackOrderInsideOut)
+      .offset(stackOffsetWiggle)(rawData),
+    [contributors, rawData],
+  );
 
   // Health spike dates detection
-  const dateTotals = new Map<string, number>();
-  rows.forEach((row) => {
-    dateTotals.set(row.date, (dateTotals.get(row.date) ?? 0) + row.commits);
-  });
-  const spikeDates = Array.from(dateTotals.entries())
-    .filter(([, total]) => total > 0)
-    .sort((left, right) => right[1] - left[1])
-    .slice(0, MAX_SPIKE_MARKERS)
-    .map(([date]) => date);
+  const { dateTotals, spikeDates } = useMemo(() => {
+    const totals = new Map<string, number>();
+    rows.forEach((row) => {
+      totals.set(row.date, (totals.get(row.date) ?? 0) + row.commits);
+    });
+    return {
+      dateTotals: totals,
+      spikeDates: Array.from(totals.entries())
+        .filter(([, total]) => total > 0)
+        .sort((left, right) => right[1] - left[1])
+        .slice(0, MAX_SPIKE_MARKERS)
+        .map(([date]) => date),
+    };
+  }, [rows]);
 
   // Group event markers by date
-  const markersByDate = new Map<string, ProjectEventMarker[]>();
-  eventMarkers.forEach((marker) => {
-    if (marker.selected === false) return;
-    const list = markersByDate.get(marker.date) ?? [];
-    list.push(marker);
-    markersByDate.set(marker.date, list);
-  });
+  const markersByDate = useMemo(() => {
+    const markers = new Map<string, ProjectEventMarker[]>();
+    eventMarkers.forEach((marker) => {
+      if (marker.selected === false) return;
+      const list = markers.get(marker.date) ?? [];
+      list.push(marker);
+      markers.set(marker.date, list);
+    });
+    return markers;
+  }, [eventMarkers]);
 
   // Re-run D3 logic on data/size/mode changes
   useEffect(() => {
@@ -785,10 +779,7 @@ export function ProjectRiverStreamgraph({
 
     // Safari Multitouch Trackpad Gestures
     let gestureStartScale = 1;
-    let isGestureActive = false;
-
     const handleGestureStart = (e: any) => {
-      isGestureActive = true;
       gestureStartScale = e.scale;
     };
 
@@ -809,13 +800,8 @@ export function ProjectRiverStreamgraph({
       svg.call(zoomBehavior.transform, newT);
     };
 
-    const handleGestureEnd = () => {
-      isGestureActive = false;
-    };
-
     element?.addEventListener('gesturestart', handleGestureStart);
     element?.addEventListener('gesturechange', handleGestureChange);
-    element?.addEventListener('gestureend', handleGestureEnd);
 
     // Brush slider config
     let styleBrushControls = () => {};
@@ -895,9 +881,25 @@ export function ProjectRiverStreamgraph({
       element?.removeEventListener('wheel', handleCustomWheel);
       element?.removeEventListener('gesturestart', handleGestureStart);
       element?.removeEventListener('gesturechange', handleGestureChange);
-      element?.removeEventListener('gestureend', handleGestureEnd);
     };
-  }, [rows, size, isDark]);
+  }, [
+    colorMap,
+    colors,
+    dateTotals,
+    highlightedContributor,
+    markersByDate,
+    onHoverContributor,
+    onHoverEvent,
+    onRangeChange,
+    rawData,
+    rows,
+    series,
+    size,
+    spikeDates,
+    svgRef,
+    t,
+    visibleRange,
+  ]);
 
   return (
     <div ref={containerRef} className="w-full h-full min-h-0 relative overflow-hidden bg-background/25">

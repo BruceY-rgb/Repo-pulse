@@ -69,14 +69,6 @@ export const approvalService = {
   },
 
   /**
-   * 获取审批详情
-   */
-  async getById(approvalId: string): Promise<Approval> {
-    const { data } = await apiClient.get<ApiResponse<Approval>>(`/approvals/${approvalId}`);
-    return data.data;
-  },
-
-  /**
    * 审批通过
    */
   async approve(approvalId: string, comment?: string): Promise<Approval> {
@@ -92,22 +84,4 @@ export const approvalService = {
     return data.data;
   },
 
-  /**
-   * 删除审批记录
-   */
-  async deleteApproval(approvalId: string): Promise<{ success: boolean }> {
-    const { data } = await apiClient.delete<ApiResponse<{ success: boolean }>>(`/approvals/${approvalId}`);
-    return data.data;
-  },
-
-  /**
-   * 编辑后审批
-   */
-  async editAndApprove(approvalId: string, editedContent: string, comment?: string): Promise<Approval> {
-    const { data } = await apiClient.post<ApiResponse<Approval>>(`/approvals/${approvalId}/edit`, {
-      editedContent,
-      comment,
-    });
-    return data.data;
-  },
 };

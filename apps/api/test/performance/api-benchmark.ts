@@ -210,23 +210,19 @@ ${results
 describe('API 性能基准测试 (Performance)', () => {
   let app: INestApplication;
   let authCookie: string;
-  let testUserId: string;
   const results: BenchmarkResult[] = [];
 
   beforeAll(async () => {
     // 创建测试用户
     const existing = await prisma.user.findUnique({ where: { email: PERF_USER.email } });
-    if (existing) {
-      testUserId = existing.id;
-    } else {
-      const user = await prisma.user.create({
+    if (!existing) {
+      await prisma.user.create({
         data: {
           email: PERF_USER.email,
           name: PERF_USER.name,
           passwordHash: await bcrypt.hash(PERF_USER.password, 10),
         },
       });
-      testUserId = user.id;
     }
 
     // 启动应用

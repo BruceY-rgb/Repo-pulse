@@ -162,7 +162,7 @@ export class AIProcessor extends WorkerHost {
       },
     });
 
-    if (!event) return;
+    if (!event?.repository?.users) return;
 
     for (const userRepo of event.repository.users) {
       try {

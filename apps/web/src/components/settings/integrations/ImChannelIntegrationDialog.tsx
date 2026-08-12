@@ -716,7 +716,7 @@ export function ImChannelIntegrationDialog({
             ? currentSelectedBot.botId
             : currentSelectedBot.ilinkBotId;
             
-        const updatedBot = providerStatus?.bots?.find((b: any) => {
+        const updatedBot = providerStatus?.bots?.find((b) => {
           if (provider === 'dingtalk') return b.clientId === robotId;
           if (provider === 'wecom') return b.botId === robotId;
           return b.ilinkBotId === robotId;
@@ -783,7 +783,7 @@ export function ImChannelIntegrationDialog({
     return () => {
       cancelled = true;
     };
-  }, [loadRepositories, open]); // Avoid infinite loops
+  }, [loadRepositories, open, refreshStatus]);
 
   const selectedRobotId = useMemo(() => {
     if (!selectedBot) return undefined;
@@ -1052,7 +1052,7 @@ export function ImChannelIntegrationDialog({
           ? botId.trim()
           : wechatBotId.trim();
           
-      const foundBot = providerStatus?.bots?.find((b: any) => {
+      const foundBot = providerStatus?.bots?.find((b) => {
         if (provider === 'dingtalk') return b.clientId === robotId;
         if (provider === 'wecom') return b.botId === robotId;
         return b.ilinkBotId === robotId;

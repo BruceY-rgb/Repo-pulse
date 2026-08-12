@@ -120,7 +120,3 @@ export function getSocketUrl(namespace: string) {
 
   return `${baseUrl}${normalizedNamespace}`;
 }
-
-export function getLoginRoute() {
-  return isDesktopRuntime() && window.location.protocol === 'file:' ? '#/login' : '/login';
-}

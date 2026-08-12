@@ -352,11 +352,8 @@ export class SettingsService {
       updateData.aiProvider = config.aiProvider;
     }
 
-    if (config.aiApiKey !== undefined) {
-      if (config.aiApiKey === '***' || config.aiApiKey === '') {
-      } else {
-        updateData.aiApiKey = config.aiApiKey;
-      }
+    if (config.aiApiKey !== undefined && config.aiApiKey !== '***' && config.aiApiKey !== '') {
+      updateData.aiApiKey = config.aiApiKey;
     }
 
     if (config.aiBaseUrl !== undefined) {

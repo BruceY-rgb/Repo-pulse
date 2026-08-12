@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
 import { Spinner } from '@/components/ui/spinner';
 import { useCurrentUserQuery } from '@/hooks/queries/use-auth-queries';
 import { authService } from '@/services/auth.service';
@@ -131,7 +131,16 @@ export function ProtectedRoute() {
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="w-full max-w-md space-y-3 rounded-2xl border border-border bg-card p-7">
+          <h1 className="text-lg font-semibold text-foreground">请使用 Repo-Pulse 桌面应用</h1>
+          <p className="text-sm text-muted-foreground">
+            当前渲染层仅供 Electron 桌面端使用，未检测到桌面运行环境。
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return <Outlet />;

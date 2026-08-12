@@ -12,6 +12,7 @@
     "allowSyntheticDefaultImports": true,
     "sourceMap": true,
     "incremental": true,
+    "isolatedModules": true,
     "noEmit": false,
     "baseUrl": ".",
     "esModuleInterop": true,

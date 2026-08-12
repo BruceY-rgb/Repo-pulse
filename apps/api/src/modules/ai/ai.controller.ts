@@ -203,7 +203,6 @@ export class AIController {
         where: { id: user.sub },
       });
 
-      const aiProvider = userData?.aiProvider || 'anthropic';
       const aiApiKey = userData?.aiApiKey || process.env.ANTHROPIC_API_KEY || '';
       const aiBaseUrl = userData?.aiBaseUrl || undefined;
       const aiModel = userData?.aiModel || 'claude-sonnet-4-20250514';

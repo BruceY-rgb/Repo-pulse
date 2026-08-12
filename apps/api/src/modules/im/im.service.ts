@@ -418,7 +418,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
         updatedAt: new Date().toISOString(),
       };
 
-      let nextBots = [...currentBots];
+      const nextBots = [...currentBots];
       const existingIndex = currentBots.findIndex(b => b.appId === appId);
       if (existingIndex > -1) {
         nextBots[existingIndex] = { ...nextBots[existingIndex], ...nextFeishu };
@@ -576,7 +576,7 @@ export class ImService implements OnModuleInit, OnModuleDestroy {
       updatedAt: new Date().toISOString(),
     };
 
-    let nextBots = [...currentBots];
+    const nextBots = [...currentBots];
     const existingIndex = currentBots.findIndex(b => b.clientId === clientId);
     if (existingIndex > -1) {
       nextBots[existingIndex] = { ...nextBots[existingIndex], ...nextDingTalk };

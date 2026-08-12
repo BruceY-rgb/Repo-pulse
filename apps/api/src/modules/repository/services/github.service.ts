@@ -593,7 +593,7 @@ export class GithubService {
             currentRefreshToken = newTokens.refreshToken;
             this.logger.log('GitHub token 刷新成功，重试请求');
             continue;
-          } catch (refreshError) {
+          } catch (_refreshError) {
             this.logger.error('GitHub token 刷新失败，用户需要重新授权');
           }
         }
@@ -646,7 +646,7 @@ export class GithubService {
             currentRefreshToken = newTokens.refreshToken;
             this.logger.log('GitHub token 刷新成功，重试请求');
             continue;
-          } catch (refreshError) {
+          } catch (_refreshError) {
             this.logger.error('GitHub token 刷新失败，用户需要重新授权');
           }
         }
@@ -670,7 +670,7 @@ export class GithubService {
    * 此方法保留用于将来支持其他 OAuth 提供商
    */
   async refreshGithubToken(
-    refreshToken: string,
+    _refreshToken: string,
   ): Promise<{ accessToken: string; refreshToken: string }> {
     // GitHub OAuth App 不支持 refresh token 刷新
     // 需要用户重新进行 OAuth 授权

@@ -26,8 +26,12 @@
     "db:studio": "turbo run db:studio --filter=@repo-pulse/database"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
     "turbo": "^2.3.3",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.46.4"
   },
   "engines": {
     "node": ">=20.0.0",

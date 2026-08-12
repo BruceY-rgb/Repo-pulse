@@ -81,7 +81,6 @@ describe('UserController', () => {
 // ── NotificationController ────────────────────────────────────────────────────
 
 import { NotificationController } from '../../src/modules/notification/notification.controller';
-import { NotificationService } from '../../src/modules/notification/notification.service';
 
 describe('NotificationController', () => {
   let controller: NotificationController;
@@ -158,7 +157,6 @@ describe('NotificationController', () => {
 // ── ImController ──────────────────────────────────────────────────────────────
 
 import { ImController } from '../../src/modules/im/im.controller';
-import { ImService } from '../../src/modules/im/im.service';
 
 describe('ImController', () => {
   let controller: ImController;

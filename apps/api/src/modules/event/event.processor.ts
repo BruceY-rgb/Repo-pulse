@@ -126,7 +126,6 @@ export class EventProcessor extends WorkerHost {
         case 'ISSUE_CLOSED':
           return String((payload as { object_attributes?: { id?: number } }).object_attributes?.id);
         case 'ISSUE_COMMENT':
-        case 'PR_REVIEW':
           return String((payload as { object_attributes?: { id?: number } }).object_attributes?.id);
         default:
           return String(Date.now());
@@ -174,7 +173,6 @@ export class EventProcessor extends WorkerHost {
     targetBranch?: string;
     metadata: Record<string, unknown>;
   } {
-    const repo = payload.repository as { full_name: string } | undefined;
     const sender = payload.sender as { login: string; avatar_url: string } | undefined;
 
     switch (eventType) {

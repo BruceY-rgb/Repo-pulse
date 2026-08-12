@@ -1,5 +1,5 @@
 import { apiClient } from './api-client';
-import type { ApiResponse, PaginatedResponse, EventAnalysis } from '@/types/api';
+import type { ApiResponse, EventAnalysis } from '@/types/api';
 import { eventService } from './event.service';
 
 async function fetchEventsById(eventIds: string[]) {
@@ -50,22 +50,6 @@ export const analysisService = {
     return hydrated;
   },
 
-  async getList(params?: {
-    page?: number;
-    pageSize?: number;
-    riskLevel?: string;
-    category?: string;
-    status?: string;
-  }): Promise<PaginatedResponse<EventAnalysis>> {
-    const { data } = await apiClient.get<
-      ApiResponse<PaginatedResponse<EventAnalysis>>
-    >('/ai/analysis/events', { params });
-    return {
-      ...data.data,
-      items: await hydrateMissingEventContext(data.data.items),
-    };
-  },
-
   async triggerAnalysis(
     eventId: string,
     force = false,
@@ -76,10 +60,4 @@ export const analysisService = {
     return data.data;
   },
 
-  async deleteAnalysis(analysisId: string): Promise<{ success: boolean }> {
-    const { data } = await apiClient.delete<
-      ApiResponse<{ success: boolean }>
-    >(`/ai/analysis/${analysisId}`);
-    return data.data;
-  },
 };

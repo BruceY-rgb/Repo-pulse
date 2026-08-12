@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react';
+import { useCallback, useRef, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -33,7 +33,7 @@ export function DraggablePanel({
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0, panelX: 0, panelY: 0 });
 
-  const clampPosition = (posX: number, posY: number) => {
+  const clampPosition = useCallback((posX: number, posY: number) => {
     if (!panelRef.current) return { clampedX: posX, clampedY: posY };
     const rect = panelRef.current.getBoundingClientRect();
     const maxX = Math.max(minX, window.innerWidth - rect.width - 8);
@@ -42,7 +42,7 @@ export function DraggablePanel({
       clampedX: Math.max(minX, Math.min(posX, maxX)),
       clampedY: Math.max(minY, Math.min(posY, maxY)),
     };
-  };
+  }, [minX, minY]);
 
   const getDockEdge = (posX: number, posY: number) => {
     if (!panelRef.current) return null;
@@ -116,7 +116,7 @@ export function DraggablePanel({
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [x, y, isDragging, onChange]);
+  }, [x, y, isDragging, onChange, clampPosition]);
 
   return (
     <div

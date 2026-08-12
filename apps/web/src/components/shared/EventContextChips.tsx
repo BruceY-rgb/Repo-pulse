@@ -10,7 +10,7 @@ interface EventContextChipsProps {
   className?: string;
 }
 
-export function formatEventType(type?: string | null) {
+function formatEventType(type?: string | null) {
   if (!type) {
     return null;
   }
@@ -22,7 +22,7 @@ export function formatEventType(type?: string | null) {
     .join(' ');
 }
 
-export function buildBranchLabels(
+function buildBranchLabels(
   event?: Pick<Event, 'branch' | 'sourceBranch' | 'targetBranch' | 'branches'> | null,
 ) {
   if (!event) {

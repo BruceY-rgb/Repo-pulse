@@ -442,7 +442,7 @@ describe('SyncService', () => {
       mockEventCreate.mockResolvedValue({});
       mockRepoUpdate.mockResolvedValue({});
 
-      const result = await service.syncRepositoryHistory('r1');
+      await service.syncRepositoryHistory('r1');
       expect(mockEventCreate).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ type: 'PR_CLOSED' }) }),
       );

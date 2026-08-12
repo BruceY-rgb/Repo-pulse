@@ -433,7 +433,7 @@ export function FeishuIntegrationDialog({
     return () => {
       cancelled = true;
     };
-  }, [loadRepositories, open]); // Removed refreshStatus to avoid infinite loops
+  }, [loadRepositories, open, refreshStatus]);
 
   useEffect(() => {
     if (!open || activeTab !== 'binding' || !pairingCode?.expiresAt || subscriptionReady || !selectedBot?.appId) return;
@@ -505,7 +505,7 @@ export function FeishuIntegrationDialog({
         appId: appId.trim(),
         appSecret: appSecret.trim(),
         botName: botName.trim() || undefined,
-      } as any);
+      });
 
       setTestResult(null);
       toast.success(t('settings.integrations.feishu.saved'));
@@ -538,7 +538,7 @@ export function FeishuIntegrationDialog({
         appId: appId.trim(),
         appSecret: appSecret.trim(),
         botName: botName.trim() || undefined,
-      } as any);
+      });
       setTestResult(result);
       const nextBotStatus = {
         provider: 'feishu' as const,

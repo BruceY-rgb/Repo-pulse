@@ -5,7 +5,7 @@
  */
 
 import type { AIProvider, AIProviderConfig, ProviderType } from '../interfaces/ai-provider';
-import { PROVIDER_PRESETS, type ProviderPreset } from './presets';
+import { PROVIDER_PRESETS } from './presets';
 import { AnthropicProvider } from './anthropic';
 import { OpenAICompatibleProvider } from './openai-compatible';
 import { GeminiProvider } from './gemini';

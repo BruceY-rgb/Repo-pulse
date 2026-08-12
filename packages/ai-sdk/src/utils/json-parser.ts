@@ -75,7 +75,6 @@ export function parseAndValidateAnalysisOutput(raw: string): AnalysisParseResult
     let errorMsg = 'Unknown schema validation error';
     if (err instanceof ZodError) {
       // zod v4: use .issues instead of .errors
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const issues: Array<{ path: PropertyKey[]; message: string }> = (err as any).issues ?? [];
       if (issues.length > 0) {
         errorMsg = issues
@@ -104,7 +103,6 @@ export function parseAndValidateAnalysisOutput(raw: string): AnalysisParseResult
 export function sanitizeAnalysisOutput(
   raw: ValidatedAnalysisOutput,
 ): ValidatedAnalysisOutput {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result: Record<string, any> = { ...raw };
 
   result.summaryLong = (raw.summaryLong as string).slice(0, 2000);

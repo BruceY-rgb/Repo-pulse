@@ -41,7 +41,7 @@ export class AIEventNormalizer {
    */
   shouldAnalyze(
     event: Event,
-    force = false,
+    _force = false,
   ): { should: boolean; reason?: string } {
     // 事件类型检查（force 不可绕过）
     if (!this.MVP_EVENT_TYPES.includes(event.type as EventType)) {
@@ -107,13 +107,13 @@ export class AIEventNormalizer {
 
     // Bearer / Authorization header token
     sanitized = sanitized.replace(
-      /Bearer\s+[A-Za-z0-9._\-]+/gi,
+      /Bearer\s+[A-Za-z0-9._-]+/gi,
       '[REDACTED:bearer_token]',
     );
 
     // Generic API key / secret / password patterns
     sanitized = sanitized.replace(
-      /(api[_-]?key|secret|password|token)\s*[:=]\s*['"]?[A-Za-z0-9_\-+=\/]{16,}['"]?/gi,
+      /(api[_-]?key|secret|password|token)\s*[:=]\s*['"]?[A-Za-z0-9_+=/-]{16,}['"]?/gi,
       '$1: [REDACTED:credential]',
     );
 
@@ -134,7 +134,7 @@ export class AIEventNormalizer {
 
     // Email addresses
     sanitized = sanitized.replace(
-      /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g,
+      /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,
       '[REDACTED:email]',
     );
 

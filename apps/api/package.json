@@ -94,12 +94,7 @@
       "<rootDir>/test/stability"
     ],
     "transform": {
-      "^.+\\.(t|j)s$": [
-        "ts-jest",
-        {
-          "isolatedModules": true
-        }
-      ]
+      "^.+\\.(t|j)s$": "ts-jest"
     },
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/src/$1",
